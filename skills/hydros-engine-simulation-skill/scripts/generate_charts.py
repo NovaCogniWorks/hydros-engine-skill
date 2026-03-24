@@ -1,0 +1,358 @@
+#!/usr/bin/env python3
+"""
+水力仿真结果图表生成脚本
+
+用法:
+    python generate_charts.py <timeseries_data.json> [output_dir]
+
+生成 6 张分析图表:
+  1. 关键断面水位时序图
+  2. 关键断面流量时序图
+  3. 负流量专项分析图
+  4. 闸门开度时序图
+  5. 分水口流量分析图
+  6. 沿程水位热力图
+"""
+
+import json
+import csv
+import sys
+import os
+from collections import defaultdict, Counter
+
+try:
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import numpy as np
+except ImportError:
+    print("ERROR: matplotlib 和 numpy 未安装，请运行:")
+    print("  pip3 install matplotlib numpy")
+    sys.exit(1)
+
+# 中文字体配置
+plt.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'PingFang SC', 'Heiti TC', 'SimHei']
+plt.rcParams['axes.unicode_minus'] = False
+
+
+def load_data(filepath):
+    """加载并解析时序数据 JSON 或 CSV"""
+    if filepath.endswith('.csv'):
+        records = []
+        with open(filepath, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                records.append({
+                    'data_index': int(row['data_index']),
+                    'metrics_code': row['metrics_code'],
+                    'object_name': row['object_name'],
+                    'object_type': row['object_type'],
+                    'value': float(row['value']),
+                    'object_id': row['object_id']
+                })
+        print(f"从 CSV 加载了 {len(records)} 条记录")
+        return records
+    else:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            raw = json.load(f)
+        records = raw['result']['data']
+        print(f"从 JSON 加载了 {len(records)} 条记录")
+        return records
+
+
+def group_data(records):
+    """按 (object_name, metrics_code, object_type) 分组"""
+    groups = defaultdict(list)
+    for r in records:
+        key = (r['object_name'], r['metrics_code'], r['object_type'])
+        groups[key].append((r['data_index'], r['value']))
+    for k in groups:
+        groups[k].sort(key=lambda x: x[0])
+    return groups
+
+
+def get_stats(records):
+    """生成统计摘要"""
+    metrics = Counter(r['metrics_code'] for r in records)
+    obj_types = Counter(r['object_type'] for r in records)
+    obj_names = Counter(r['object_name'] for r in records)
+    indices = sorted(set(r['data_index'] for r in records))
+
+    neg_flow = [r for r in records if r['metrics_code'] == 'water_flow' and r['value'] < 0]
+    neg_objects = set(r['object_name'] for r in neg_flow)
+
+    wl_vals = [r['value'] for r in records if r['metrics_code'] == 'water_level']
+    wf_vals = [r['value'] for r in records if r['metrics_code'] == 'water_flow']
+
+    return {
+        'total_records': len(records),
+        'total_steps': len(indices),
+        'step_range': (min(indices), max(indices)),
+        'total_objects': len(obj_names),
+        'metrics_distribution': dict(metrics),
+        'object_type_distribution': dict(obj_types),
+        'water_level_range': (min(wl_vals), max(wl_vals)) if wl_vals else None,
+        'water_flow_range': (min(wf_vals), max(wf_vals)) if wf_vals else None,
+        'negative_flow_count': len(neg_flow),
+        'negative_flow_objects': sorted(neg_objects),
+        'min_negative_flow': min(r['value'] for r in neg_flow) if neg_flow else None,
+    }
+
+
+def auto_select_sections(groups, count=5):
+    """自动选取沿程代表性断面（上游到下游均匀分布）"""
+    all_sections = sorted(set(
+        name for (name, metric, otype) in groups
+        if otype == 'CrossSection' and metric == 'water_level' and name.startswith('QD-')
+    ), key=lambda x: int(x.split('-')[1].split('#')[0]))
+
+    if len(all_sections) <= count:
+        return all_sections
+    step = max(1, len(all_sections) // (count - 1))
+    selected = [all_sections[i] for i in range(0, len(all_sections), step)]
+    if all_sections[-1] not in selected:
+        selected.append(all_sections[-1])
+    return selected[:count]
+
+
+def auto_detect_neg_flow_objects(groups):
+    """自动识别出现负流量的断面"""
+    neg_objects = []
+    for (name, metric, otype), data in groups.items():
+        if metric == 'water_flow':
+            vals = [v for _, v in data]
+            if any(v < 0 for v in vals):
+                neg_objects.append(name)
+    return sorted(neg_objects)
+
+
+def auto_detect_gates(groups):
+    """自动识别所有闸门"""
+    return sorted(set(
+        name for (name, metric, otype) in groups
+        if otype == 'Gate' and metric == 'gate_opening'
+    ))
+
+
+def auto_detect_disturbance_nodes(groups):
+    """自动识别分水口/退水闸"""
+    return sorted(set(
+        name for (name, metric, otype) in groups
+        if otype == 'DisturbanceNode' and metric == 'water_flow'
+    ))
+
+
+def chart1_water_level(groups, output_dir, sections=None):
+    """图1: 关键断面水位时序"""
+    if sections is None:
+        sections = auto_select_sections(groups)
+    fig, ax = plt.subplots(figsize=(14, 6))
+    for name in sections:
+        key = (name, 'water_level', 'CrossSection')
+        if key in groups:
+            steps, vals = zip(*groups[key])
+            ax.plot(steps, vals, label=name, linewidth=1.5)
+    ax.set_xlabel('仿真步数', fontsize=12)
+    ax.set_ylabel('水位 (m)', fontsize=12)
+    ax.set_title('关键断面水位时序变化', fontsize=14, fontweight='bold')
+    ax.legend(loc='best', fontsize=9)
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    path = os.path.join(output_dir, 'chart1_water_level.png')
+    plt.savefig(path, dpi=150)
+    plt.close()
+    print(f"图1 已生成: {path}")
+
+
+def chart2_water_flow(groups, output_dir, sections=None):
+    """图2: 关键断面流量时序"""
+    if sections is None:
+        sections = auto_select_sections(groups)
+    fig, ax = plt.subplots(figsize=(14, 6))
+    for name in sections:
+        key = (name, 'water_flow', 'CrossSection')
+        if key in groups:
+            steps, vals = zip(*groups[key])
+            ax.plot(steps, vals, label=name, linewidth=1.5)
+    ax.axhline(y=0, color='red', linestyle='--', alpha=0.5, label='零流量线')
+    ax.set_xlabel('仿真步数', fontsize=12)
+    ax.set_ylabel('流量 (m³/s)', fontsize=12)
+    ax.set_title('关键断面流量时序变化（负值=倒流）', fontsize=14, fontweight='bold')
+    ax.legend(loc='best', fontsize=9)
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    path = os.path.join(output_dir, 'chart2_water_flow.png')
+    plt.savefig(path, dpi=150)
+    plt.close()
+    print(f"图2 已生成: {path}")
+
+
+def chart3_negative_flow(groups, output_dir):
+    """图3: 负流量专项分析"""
+    neg_objects = auto_detect_neg_flow_objects(groups)
+    if not neg_objects:
+        print("图3 跳过: 未检测到负流量")
+        return
+    fig, ax = plt.subplots(figsize=(14, 6))
+    for name in neg_objects[:7]:  # 最多展示7个
+        for otype in ['CrossSection', 'DisturbanceNode', 'Gate']:
+            key = (name, 'water_flow', otype)
+            if key in groups:
+                steps, vals = zip(*groups[key])
+                ax.plot(steps, vals, label=name, linewidth=1.5)
+                break
+    ax.axhline(y=0, color='red', linestyle='--', linewidth=2, alpha=0.7, label='零流量线')
+    ax.set_xlabel('仿真步数', fontsize=12)
+    ax.set_ylabel('流量 (m³/s)', fontsize=12)
+    ax.set_title('下游断面负流量（倒流）专项分析', fontsize=14, fontweight='bold')
+    ax.legend(loc='best', fontsize=9)
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    path = os.path.join(output_dir, 'chart3_negative_flow.png')
+    plt.savefig(path, dpi=150)
+    plt.close()
+    print(f"图3 已生成: {path}")
+
+
+def chart4_gate_opening(groups, output_dir):
+    """图4: 闸门开度时序"""
+    gates = auto_detect_gates(groups)
+    if not gates:
+        print("图4 跳过: 未检测到闸门数据")
+        return
+    n = len(gates)
+    cols = min(n, 2)
+    rows = (n + cols - 1) // cols
+    fig, axes = plt.subplots(rows, cols, figsize=(14, 4 * rows))
+    if n == 1:
+        axes = np.array([axes])
+    axes = axes.flatten()
+    for i, name in enumerate(gates):
+        ax = axes[i]
+        key = (name, 'gate_opening', 'Gate')
+        if key in groups:
+            steps, vals = zip(*groups[key])
+            ax.plot(steps, vals, color='#2196F3', linewidth=2)
+            ax.fill_between(steps, vals, alpha=0.2, color='#2196F3')
+        ax.set_title(name, fontsize=11, fontweight='bold')
+        ax.set_xlabel('仿真步数', fontsize=10)
+        ax.set_ylabel('开度 (m)', fontsize=10)
+        ax.grid(True, alpha=0.3)
+    for j in range(i + 1, len(axes)):
+        axes[j].set_visible(False)
+    plt.suptitle('闸门开度时序变化', fontsize=14, fontweight='bold')
+    plt.tight_layout()
+    path = os.path.join(output_dir, 'chart4_gate_opening.png')
+    plt.savefig(path, dpi=150)
+    plt.close()
+    print(f"图4 已生成: {path}")
+
+
+def chart5_disturbance_flow(groups, output_dir):
+    """图5: 分水口流量分析"""
+    nodes = auto_detect_disturbance_nodes(groups)
+    if not nodes:
+        print("图5 跳过: 未检测到分水口数据")
+        return
+    fig, ax = plt.subplots(figsize=(14, 6))
+    for name in nodes:
+        key = (name, 'water_flow', 'DisturbanceNode')
+        if key in groups:
+            steps, vals = zip(*groups[key])
+            ax.plot(steps, vals, label=name, linewidth=1.5, marker='o', markersize=2)
+    ax.set_xlabel('仿真步数', fontsize=12)
+    ax.set_ylabel('流量 (m³/s)', fontsize=12)
+    ax.set_title('分水口/退水闸流量时序', fontsize=14, fontweight='bold')
+    ax.legend(loc='best', fontsize=9)
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    path = os.path.join(output_dir, 'chart5_disturbance_flow.png')
+    plt.savefig(path, dpi=150)
+    plt.close()
+    print(f"图5 已生成: {path}")
+
+
+def chart6_heatmap(groups, output_dir):
+    """图6: 沿程水位热力图"""
+    all_sections = sorted(
+        [name for (name, metric, otype) in groups
+         if otype == 'CrossSection' and metric == 'water_level' and name.startswith('QD-')
+         and '#001' in name],
+        key=lambda x: int(x.split('-')[1].split('#')[0])
+    )
+    if not all_sections:
+        print("图6 跳过: 未检测到断面水位数据")
+        return
+
+    # 确定步数范围
+    all_steps = set()
+    for name in all_sections:
+        key = (name, 'water_level', 'CrossSection')
+        if key in groups:
+            for s, _ in groups[key]:
+                all_steps.add(s)
+    max_step = max(all_steps)
+
+    matrix = []
+    for name in all_sections:
+        key = (name, 'water_level', 'CrossSection')
+        if key in groups:
+            val_dict = dict(groups[key])
+            row = [val_dict.get(i, np.nan) for i in range(1, max_step + 1)]
+            matrix.append(row)
+
+    fig, ax = plt.subplots(figsize=(14, 6))
+    im = ax.imshow(matrix, aspect='auto', cmap='coolwarm', interpolation='nearest')
+    ax.set_yticks(range(len(all_sections)))
+    ax.set_yticklabels(all_sections, fontsize=9)
+    ax.set_xlabel('仿真步数', fontsize=12)
+    ax.set_title('沿程断面水位热力图', fontsize=14, fontweight='bold')
+    plt.colorbar(im, ax=ax, label='水位 (m)')
+    plt.tight_layout()
+    path = os.path.join(output_dir, 'chart6_heatmap.png')
+    plt.savefig(path, dpi=150)
+    plt.close()
+    print(f"图6 已生成: {path}")
+
+
+def main():
+    if len(sys.argv) < 2:
+        print("用法: python generate_charts.py <timeseries_data.json> [output_dir]")
+        sys.exit(1)
+
+    data_path = sys.argv[1]
+    output_dir = sys.argv[2] if len(sys.argv) > 2 else os.path.dirname(data_path) or '.'
+    os.makedirs(output_dir, exist_ok=True)
+
+    records = load_data(data_path)
+    groups = group_data(records)
+    stats = get_stats(records)
+
+    # 保存统计摘要
+    stats_path = os.path.join(output_dir, 'analysis_stats.json')
+    # 序列化 set/tuple
+    serializable_stats = {k: (list(v) if isinstance(v, (set, tuple)) else v) for k, v in stats.items()}
+    with open(stats_path, 'w', encoding='utf-8') as f:
+        json.dump(serializable_stats, f, ensure_ascii=False, indent=2)
+    print(f"\n统计摘要已保存: {stats_path}")
+    print(f"  总记录: {stats['total_records']}, 步数: {stats['total_steps']}, 对象数: {stats['total_objects']}")
+    print(f"  水位范围: {stats['water_level_range']}")
+    print(f"  流量范围: {stats['water_flow_range']}")
+    print(f"  负流量: {stats['negative_flow_count']} 条, 涉及 {len(stats['negative_flow_objects'])} 个对象")
+
+    # 生成图表
+    sections = auto_select_sections(groups)
+    print(f"\n自动选取代表断面: {sections}\n")
+
+    chart1_water_level(groups, output_dir, sections)
+    chart2_water_flow(groups, output_dir, sections)
+    chart3_negative_flow(groups, output_dir)
+    chart4_gate_opening(groups, output_dir)
+    chart5_disturbance_flow(groups, output_dir)
+    chart6_heatmap(groups, output_dir)
+
+    print(f"\n所有图表已生成到: {output_dir}")
+
+
+if __name__ == '__main__':
+    main()

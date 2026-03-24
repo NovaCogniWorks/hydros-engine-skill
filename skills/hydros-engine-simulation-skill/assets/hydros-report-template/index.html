@@ -1,0 +1,530 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Hydros 仿真分析报告模板</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%231e5f86'/%3E%3Cpath d='M18 38c4-10 8-15 14-15s10 5 14 15' fill='none' stroke='white' stroke-width='5' stroke-linecap='round'/%3E%3Ccircle cx='32' cy='22' r='5' fill='white'/%3E%3C/svg%3E" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              reportBg: "#edf3f6",
+              ink: "#11293b",
+              panel: "#fcfeff",
+              line: "#d7e3ea",
+              primary: "#1e5f86",
+              accent: "#1d8f9b",
+              success: "#1f7a57",
+              warning: "#ba7a1f",
+              danger: "#c23b38",
+            },
+            boxShadow: {
+              sheet: "0 22px 55px rgba(17, 41, 59, 0.09)",
+            },
+          },
+        },
+      };
+    </script>
+    <style>
+      :root {
+        color-scheme: light;
+      }
+
+      html,
+      body {
+        min-height: 100%;
+        overflow-y: auto;
+        overscroll-behavior-y: auto;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      body {
+        font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background:
+          radial-gradient(circle at top left, rgba(29, 143, 155, 0.12), transparent 32%),
+          radial-gradient(circle at top right, rgba(30, 95, 134, 0.14), transparent 30%),
+          #edf3f6;
+      }
+
+      .report-shell {
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(252, 254, 255, 0.98)),
+          #ffffff;
+      }
+    </style>
+  </head>
+  <body class="min-h-screen text-ink">
+    <div class="mx-auto max-w-[1440px] px-4 py-6 lg:px-8 lg:py-8">
+      <main class="report-shell overflow-hidden rounded-[36px] border border-white/80 shadow-sheet">
+        <section class="border-b border-line px-6 py-8 lg:px-10 lg:py-10">
+          <div class="flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between">
+            <div class="max-w-3xl">
+              <p class="text-xs font-semibold uppercase tracking-[0.32em] text-primary/70">Hydros Analysis Report</p>
+              <h1 id="reportTitle" class="mt-3 text-4xl font-semibold tracking-tight lg:text-[3.5rem] lg:leading-[1.02]">水力仿真结果分析报告</h1>
+              <p id="reportIntro" class="mt-4 max-w-2xl text-base leading-8 text-ink/72"></p>
+            </div>
+
+            <div class="grid min-w-[300px] gap-3 sm:grid-cols-2" id="metaCards"></div>
+          </div>
+        </section>
+
+        <section id="headlineCards" class="grid gap-4 border-b border-line bg-slate-50/70 px-6 py-6 lg:grid-cols-4 lg:px-10"></section>
+
+        <section class="grid gap-6 px-6 py-8 lg:grid-cols-[minmax(0,1.3fr)_360px] lg:px-10">
+          <div class="space-y-6">
+            <article class="rounded-[30px] border border-line bg-panel p-5">
+              <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <p class="text-xs font-semibold uppercase tracking-[0.24em] text-primary/70">Section 01</p>
+                  <h2 class="mt-2 text-2xl font-semibold">执行摘要</h2>
+                </div>
+                <span id="summaryBadge" class="inline-flex w-fit rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary"></span>
+              </div>
+              <div class="mt-5 grid gap-4 lg:grid-cols-2">
+                <div class="rounded-[24px] bg-slate-50 px-5 py-5">
+                  <p id="summaryParagraph" class="text-sm leading-7 text-ink/76"></p>
+                </div>
+                <div class="rounded-[24px] bg-slate-50 px-5 py-5">
+                  <ul class="space-y-3 text-sm leading-7 text-ink/76" id="summaryBullets"></ul>
+                </div>
+              </div>
+            </article>
+
+            <article class="rounded-[30px] border border-line bg-panel p-5">
+              <div class="flex items-end justify-between">
+                <div>
+                  <p class="text-xs font-semibold uppercase tracking-[0.24em] text-primary/70">Section 02</p>
+                  <h2 class="mt-2 text-2xl font-semibold">完整曲线</h2>
+                </div>
+                <p class="text-sm text-ink/58">展示全部 water_level、water_flow、gate_opening 序列</p>
+              </div>
+              <div class="mt-5 space-y-5">
+                <div class="rounded-[24px] border border-line bg-white p-4">
+                  <h3 id="levelCardTitle" class="text-base font-semibold">关键断面水位时序</h3>
+                  <p id="levelCardDesc" class="mt-1 text-sm text-ink/62">对比上中游代表断面，观察抬升斜率和同步性。</p>
+                  <div class="mt-2 flex gap-2 items-start">
+                    <select id="levelTypeSelect" class="shrink-0 rounded-lg border border-line px-3 py-1.5 text-xs text-ink/72 focus:outline-primary"></select>
+                    <div id="levelObjectList" class="flex flex-wrap gap-1.5 max-h-[96px] overflow-y-auto"></div>
+                  </div>
+                  <div id="levelChart" class="mt-2 h-[420px]"></div>
+                </div>
+                <div class="rounded-[24px] border border-line bg-white p-4">
+                  <h3 id="flowCardTitle" class="text-base font-semibold">流量时序</h3>
+                  <p id="flowCardDesc" class="mt-1 text-sm text-ink/62">保留 0 参考线，突出连续负流量区段。</p>
+                  <div class="mt-2 flex gap-2 items-start">
+                    <select id="flowTypeSelect" class="shrink-0 rounded-lg border border-line px-3 py-1.5 text-xs text-ink/72 focus:outline-primary"></select>
+                    <div id="flowObjectList" class="flex flex-wrap gap-1.5 max-h-[96px] overflow-y-auto"></div>
+                  </div>
+                  <div id="flowChart" class="mt-2 h-[420px]"></div>
+                </div>
+                <div class="rounded-[24px] border border-line bg-white p-4">
+                  <h3 id="gateCardTitle" class="text-base font-semibold">闸门开度响应</h3>
+                  <p id="gateCardDesc" class="mt-1 text-sm text-ink/62">查看闸门控制策略是否存在滞后或平台期。</p>
+                  <div id="gateChart" class="mt-4 h-[380px]"></div>
+                </div>
+              </div>
+            </article>
+
+            <article class="rounded-[30px] border border-line bg-panel p-5">
+              <div class="flex items-end justify-between">
+                <div>
+                  <p class="text-xs font-semibold uppercase tracking-[0.24em] text-primary/70">Section 03</p>
+                  <h2 class="mt-2 text-2xl font-semibold">异常与建议</h2>
+                </div>
+                <p class="text-sm text-ink/58">按问题严重度排序</p>
+              </div>
+              <div class="mt-5 overflow-hidden rounded-[24px] border border-line">
+                <table class="min-w-full divide-y divide-line text-left text-sm">
+                  <thead class="bg-slate-50 text-xs uppercase tracking-[0.18em] text-ink/56">
+                    <tr>
+                      <th class="px-4 py-3">优先级</th>
+                      <th class="px-4 py-3">对象</th>
+                      <th class="px-4 py-3">指标</th>
+                      <th class="px-4 py-3">现象</th>
+                      <th class="px-4 py-3">建议</th>
+                    </tr>
+                  </thead>
+                  <tbody id="anomalyTable" class="divide-y divide-line bg-white"></tbody>
+                </table>
+              </div>
+            </article>
+          </div>
+
+          <aside class="space-y-6">
+            <article class="rounded-[30px] bg-ink px-5 py-5 text-white">
+              <p class="text-xs font-semibold uppercase tracking-[0.24em] text-white/58">Task Snapshot</p>
+              <dl class="mt-4 space-y-3 text-sm" id="snapshotPanel"></dl>
+            </article>
+
+            <article class="rounded-[30px] border border-line bg-panel p-5">
+              <p class="text-xs font-semibold uppercase tracking-[0.24em] text-primary/70">Section 04</p>
+              <h2 class="mt-2 text-2xl font-semibold">风险等级</h2>
+              <div class="mt-4 space-y-3" id="riskBars"></div>
+            </article>
+
+            <article class="rounded-[30px] border border-line bg-panel p-5">
+              <p class="text-xs font-semibold uppercase tracking-[0.24em] text-primary/70">Section 05</p>
+              <h2 class="mt-2 text-2xl font-semibold">后续动作</h2>
+              <ol class="mt-4 space-y-3 text-sm leading-7 text-ink/76" id="actionList"></ol>
+            </article>
+
+            <article class="rounded-[30px] border border-line bg-panel p-5">
+              <p class="text-xs font-semibold uppercase tracking-[0.24em] text-primary/70">Appendix</p>
+              <h2 class="mt-2 text-2xl font-semibold">样本明细</h2>
+              <div class="mt-4 space-y-3 text-sm" id="miniTable"></div>
+            </article>
+          </aside>
+        </section>
+      </main>
+    </div>
+
+    <script src="./report.data.js"></script>
+    <script>
+      const reportData = window.HYDROS_REPORT_DATA;
+
+      if (!reportData) {
+        throw new Error("HYDROS_REPORT_DATA 未加载，请确认同目录 report.data.js 存在。");
+      }
+
+      function basename(filePath) {
+        return String(filePath || "").split("/").pop() || "";
+      }
+
+      function renderHeader() {
+        document.title = `${reportData.meta.report_title} - Hydros 仿真分析报告`;
+        document.getElementById("reportTitle").textContent = reportData.meta.report_title;
+        document.getElementById("reportIntro").innerHTML =
+          `数据源来自 <code>${basename(reportData.csvPath)}</code>，共 ${reportData.meta.record_count.toLocaleString("zh-CN")} 条记录，覆盖 ` +
+          `${reportData.meta.object_count} 个对象与 ${reportData.meta.metric_count} 类指标。模板默认由外部 payload 驱动，替换 <code>report.data.js</code> 即可接入真实数据。`;
+        document.getElementById("summaryBadge").textContent = `外部数据 payload · ${reportData.meta.record_count.toLocaleString("zh-CN")} 条记录`;
+        document.getElementById("summaryParagraph").textContent = reportData.summaryParagraph;
+      }
+
+      function renderHeadlineCards() {
+        const tones = ["text-primary", "text-danger", "text-success", "text-warning"];
+        document.getElementById("headlineCards").innerHTML = reportData.headlineCards
+          .map(
+            (card, index) => `
+              <article class="rounded-[26px] border border-white bg-panel px-5 py-5 shadow-sm">
+                <p class="text-xs font-semibold uppercase tracking-[0.2em] text-ink/48">${card.eyebrow}</p>
+                <h2 class="mt-3 text-2xl font-semibold ${tones[index] || "text-ink"}">${card.title}</h2>
+                <p class="mt-2 text-sm leading-6 text-ink/70">${card.body}</p>
+              </article>
+            `
+          )
+          .join("");
+      }
+
+      function renderMetaCards() {
+        document.getElementById("metaCards").innerHTML = reportData.metaCards
+          .map(
+            (card) => `
+              <article class="rounded-[24px] border border-line bg-white px-4 py-4">
+                <p class="text-xs font-semibold uppercase tracking-[0.18em] text-ink/48">${card.label}</p>
+                <p class="mt-2 text-2xl font-semibold">${card.value}</p>
+              </article>
+            `
+          )
+          .join("");
+      }
+
+      function renderSummaryBullets() {
+        document.getElementById("summaryBullets").innerHTML = reportData.summaryBullets
+          .map((text) => `<li class="rounded-[18px] bg-white px-4 py-3">${text}</li>`)
+          .join("");
+      }
+
+      function renderSnapshot() {
+        const rows = [
+          ["报告标题", reportData.meta.report_title],
+          ["任务 ID", reportData.meta.biz_scene_instance_id],
+          ["场景 ID", reportData.meta.biz_scenario_id],
+          ["租户", reportData.meta.tenant_id],
+          ["完成时间", reportData.meta.completed_at],
+          ["分析人", reportData.meta.analyst],
+        ];
+
+        document.getElementById("snapshotPanel").innerHTML = rows
+          .map(
+            ([label, value]) => `
+              <div class="flex items-start justify-between gap-4 border-b border-white/10 pb-3 last:border-b-0 last:pb-0">
+                <dt class="text-white/58">${label}</dt>
+                <dd class="text-right font-medium">${value}</dd>
+              </div>
+            `
+          )
+          .join("");
+      }
+
+      function renderRiskBars() {
+        const toneByLabel = {
+          倒流风险: "bg-danger",
+          控制滞后: "bg-warning",
+          总体稳定性: "bg-success",
+        };
+
+        document.getElementById("riskBars").innerHTML = reportData.riskBars
+          .map(
+            (bar) => `
+              <div>
+                <div class="mb-2 flex items-center justify-between text-sm">
+                  <span>${bar.label}</span>
+                  <span class="font-medium">${bar.value}%</span>
+                </div>
+                <div class="h-2.5 rounded-full bg-slate-100">
+                  <div class="${toneByLabel[bar.label] || "bg-primary"} h-2.5 rounded-full" style="width:${bar.value}%"></div>
+                </div>
+              </div>
+            `
+          )
+          .join("");
+      }
+
+      function renderActions() {
+        document.getElementById("actionList").innerHTML = reportData.actions
+          .map((item, index) => `<li class="rounded-[18px] bg-slate-50 px-4 py-3"><span class="mr-2 font-semibold text-primary">${index + 1}.</span>${item}</li>`)
+          .join("");
+      }
+
+      function renderMiniTable() {
+        document.getElementById("miniTable").innerHTML = reportData.miniTable
+          .map(
+            (item) => `
+              <div class="rounded-[18px] border border-line bg-white px-4 py-3">
+                <div class="flex items-center justify-between gap-3">
+                  <span class="font-medium">${item.object_name}</span>
+                  <span class="text-xs text-ink/56">${item.metrics_code}</span>
+                </div>
+                <div class="mt-2 flex items-center justify-between text-sm text-ink/72">
+                  <span>Step ${item.data_index}</span>
+                  <span>${item.value}</span>
+                </div>
+              </div>
+            `
+          )
+          .join("");
+      }
+
+      function renderAnomalyTable() {
+        document.getElementById("anomalyTable").innerHTML = reportData.anomalies
+          .map(
+            (item) => `
+              <tr>
+                <td class="px-4 py-3">
+                  <span class="rounded-full px-2.5 py-1 text-xs font-medium ${
+                    item.priority === "高"
+                      ? "bg-danger/10 text-danger"
+                      : item.priority === "中"
+                        ? "bg-warning/10 text-warning"
+                        : "bg-primary/10 text-primary"
+                  }">${item.priority}</span>
+                </td>
+                <td class="px-4 py-3">${item.object}</td>
+                <td class="px-4 py-3">${item.metric}</td>
+                <td class="px-4 py-3 text-ink/72">${item.finding}</td>
+                <td class="px-4 py-3 text-ink/72">${item.advice}</td>
+              </tr>
+            `
+          )
+          .join("");
+      }
+
+      function colorForIndex(index, offset = 0) {
+        const hue = (index * 47 + offset) % 360;
+        return `hsl(${hue} 58% 42%)`;
+      }
+
+      function buildLineSeries(name, data, index, options = {}) {
+        const color = options.color || colorForIndex(index, options.hueOffset || 0);
+        return {
+          name,
+          type: "line",
+          smooth: false,
+          showSymbol: false,
+          lineStyle: { width: options.lineWidth || 2, color, opacity: 1 },
+          itemStyle: { color, opacity: 1 },
+          // Disable line highlight/blur on hover so axis tooltip does not fade series out.
+          emphasis: { disabled: true },
+          step: options.step || false,
+          data,
+        };
+      }
+
+      function renderCharts() {
+        const levelChart = echarts.init(document.getElementById("levelChart"));
+        const flowChart = echarts.init(document.getElementById("flowChart"));
+        const gateChart = echarts.init(document.getElementById("gateChart"));
+
+        const levelSeries = reportData.charts.levelSeries || [];
+        const flowSeries = reportData.charts.flowSeries || [];
+        const gateSeries = reportData.charts.gateSeries || [];
+
+        document.getElementById("levelCardTitle").textContent = "完整 water_level 曲线";
+        document.getElementById("levelCardDesc").textContent = `共 ${levelSeries.length} 条序列，使用下拉框多选查看。`;
+        document.getElementById("flowCardTitle").textContent = "完整 water_flow 曲线";
+        document.getElementById("flowCardDesc").textContent = `共 ${flowSeries.length} 条序列，使用下拉框多选查看。`;
+        document.getElementById("gateCardTitle").textContent = "完整 gate_opening 曲线";
+        document.getElementById("gateCardDesc").textContent = `共 ${gateSeries.length} 条序列，压缩重复平台段后展示全部闸门变化。`;
+
+        const typeLabels = { CrossSection: '断面', DisturbanceNode: '分水口/退水闸', Gate: '闸门' };
+
+        // Helper: build two-level filter (type dropdown + checkbox list)
+        function buildFilter(seriesArr, typeSelectEl, objectListEl, defaultType) {
+          // Group by objectType
+          const byType = {};
+          seriesArr.forEach((item, index) => {
+            const t = item.objectType || 'Unknown';
+            if (!byType[t]) byType[t] = [];
+            byType[t].push({ name: item.name, index });
+          });
+
+          // Populate type dropdown
+          typeSelectEl.innerHTML = '';
+          Object.entries(byType).forEach(([type, items]) => {
+            const opt = document.createElement("option");
+            opt.value = type;
+            opt.textContent = `${typeLabels[type] || type} (${items.length})`;
+            if (type === defaultType) opt.selected = true;
+            typeSelectEl.appendChild(opt);
+          });
+
+          // Populate checkbox list based on selected type
+          function refreshObjects() {
+            const selectedType = typeSelectEl.value;
+            const items = byType[selectedType] || [];
+            objectListEl.innerHTML = '';
+            items.forEach((item, i) => {
+              const label = document.createElement("label");
+              label.className = "inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-line cursor-pointer hover:bg-ink/5";
+
+              const checkbox = document.createElement("input");
+              checkbox.type = "checkbox";
+              checkbox.value = item.index;
+              checkbox.checked = i < 5;
+              checkbox.addEventListener("change", () => typeSelectEl.dispatchEvent(new Event("filter-changed")));
+
+              const span = document.createElement("span");
+              span.textContent = item.name;
+
+              label.appendChild(checkbox);
+              label.appendChild(span);
+              objectListEl.appendChild(label);
+            });
+          }
+
+          typeSelectEl.addEventListener("change", () => { refreshObjects(); typeSelectEl.dispatchEvent(new Event("filter-changed")); });
+          refreshObjects();
+          return () => Array.from(objectListEl.querySelectorAll('input[type="checkbox"]:checked')).map(cb => parseInt(cb.value));
+        }
+
+        const levelTypeSelect = document.getElementById("levelTypeSelect");
+        const levelObjectList = document.getElementById("levelObjectList");
+        const getSelectedLevel = buildFilter(levelSeries, levelTypeSelect, levelObjectList, 'CrossSection');
+
+        const flowTypeSelect = document.getElementById("flowTypeSelect");
+        const flowObjectList = document.getElementById("flowObjectList");
+        const getSelectedFlow = buildFilter(flowSeries, flowTypeSelect, flowObjectList, 'CrossSection');
+
+        function updateLevelChart() {
+          const selectedIndices = getSelectedLevel();
+          const selectedSeries = selectedIndices.map(i => buildLineSeries(levelSeries[i].name, levelSeries[i].data, i, { hueOffset: 210 }));
+
+          levelChart.setOption({
+            animationDuration: 500,
+            grid: { left: 56, right: 18, top: 32, bottom: 78 },
+            tooltip: { trigger: "axis" },
+            legend: { show: false },
+            dataZoom: [
+              { type: "inside", xAxisIndex: 0 },
+              { type: "slider", xAxisIndex: 0, height: 22, bottom: 22 },
+            ],
+            xAxis: { type: "value", name: "Step", splitLine: { show: false } },
+            yAxis: { type: "value", name: "m", splitLine: { lineStyle: { color: "#d7e3ea" } } },
+            series: selectedSeries,
+          }, true);
+        }
+
+        function updateFlowChart() {
+          const selectedIndices = getSelectedFlow();
+          const selectedSeries = selectedIndices.map(i =>
+            buildLineSeries(flowSeries[i].name, flowSeries[i].data, i, {
+              hueOffset: flowSeries[i].minValue < 0 ? 0 : 150,
+              lineWidth: flowSeries[i].minValue < 0 ? 2.5 : 1.8,
+            })
+          );
+
+          flowChart.setOption({
+            animationDuration: 500,
+            grid: { left: 56, right: 18, top: 32, bottom: 78 },
+            tooltip: { trigger: "axis" },
+            legend: { show: false },
+            dataZoom: [
+              { type: "inside", xAxisIndex: 0 },
+              { type: "slider", xAxisIndex: 0, height: 22, bottom: 22 },
+            ],
+            xAxis: { type: "value", name: "Step", splitLine: { show: false } },
+            yAxis: { type: "value", name: "m³/s", splitLine: { lineStyle: { color: "#d7e3ea" } } },
+            markLine: {
+              symbol: "none",
+              lineStyle: { type: "dashed", color: "#8aa4b8" },
+              data: [{ yAxis: 0 }],
+            },
+            series: selectedSeries,
+          }, true);
+        }
+
+        levelTypeSelect.addEventListener("filter-changed", updateLevelChart);
+        flowTypeSelect.addEventListener("filter-changed", updateFlowChart);
+
+        updateLevelChart();
+        updateFlowChart();
+
+        gateChart.setOption({
+          animationDuration: 500,
+          grid: { left: 56, right: 18, top: 48, bottom: 78 },
+          tooltip: { trigger: "axis" },
+          legend: { top: 0, textStyle: { color: "#486581" } },
+          dataZoom: [
+            { type: "inside", xAxisIndex: 0 },
+            { type: "slider", xAxisIndex: 0, height: 22, bottom: 22 },
+          ],
+          xAxis: {
+            type: "category",
+            data: gateSeries[0] ? gateSeries[0].data.map((item) => item[0]) : [],
+            axisLabel: { color: "#486581", interval: 0, rotate: 45, fontSize: 11 },
+          },
+          yAxis: { type: "value", name: "开度", splitLine: { lineStyle: { color: "#d7e3ea" } } },
+          series: gateSeries.map((item, index) =>
+            buildLineSeries(
+              item.name,
+              item.data.map((point) => point[1]),
+              index,
+              { hueOffset: 30, lineWidth: 2.2, step: "end" }
+            )
+          ),
+        });
+
+        window.addEventListener("resize", () => {
+          levelChart.resize();
+          flowChart.resize();
+          gateChart.resize();
+        });
+      }
+
+      renderHeader();
+      renderHeadlineCards();
+      renderMetaCards();
+      renderSummaryBullets();
+      renderSnapshot();
+      renderRiskBars();
+      renderActions();
+      renderMiniTable();
+      renderAnomalyTable();
+      renderCharts();
+    </script>
+  </body>
+</html>
