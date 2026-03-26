@@ -4,6 +4,7 @@
 
 用法:
     python build_csv_report.py <timeseries_csv> [output_dir]
+        [--total-steps N] [--sim-step-size SECONDS] [--output-step-size SECONDS]
 """
 
 from __future__ import annotations
@@ -15,6 +16,8 @@ import shutil
 import subprocess
 import sys
 import urllib.request
+import argparse
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -29,7 +32,27 @@ ROOT = Path(__file__).resolve().parent.parent
 TEMPLATE_HTML = ROOT / "assets" / "hydros-report-template" / "index.html"
 CHART_SCRIPT = ROOT / "scripts" / "generate_charts.py"
 SCENARIO_URL_TEMPLATE = "http://47.97.1.45:9000/hydros/mdm/scenarios/{scenario_id}.yaml"
-DEFAULT_STEP_RESOLUTION_SECONDS = 120
+
+
+@dataclass
+class RuntimeConfig:
+    total_steps: int | None
+    sim_step_size: int | None
+    output_step_size: int | None
+    sampled_steps: list[int]
+    csv_step_interval: int | None
+    expected_sample_count: int | None
+    axis_mode: str
+    axis_label: str
+    axis_note: str
+    sample_step_note: str
+    has_unreliable_time_axis: bool
+
+
+def format_seconds_text(total_seconds: int | float | None) -> str | None:
+    if total_seconds is None:
+        return None
+    return f"{int(total_seconds)} 秒（{format_duration_text(total_seconds)}）"
 
 
 def run_command(args: list[str]) -> None:
@@ -123,6 +146,7 @@ def fetch_scenario_metadata(scenario_id: str) -> dict[str, Any] | None:
 
     total_steps = extract("total_steps")
     sim_step_size = extract("sim_step_size")
+    output_step_size = extract("output_step_size")
     start_time = extract("biz_start_time")
     return {
         "scenario_yaml_url": url,
@@ -133,8 +157,82 @@ def fetch_scenario_metadata(scenario_id: str) -> dict[str, Any] | None:
         "objects_yaml_url": extract("hydros_objects_modeling_url"),
         "total_steps": int(total_steps) if total_steps and total_steps.isdigit() else None,
         "sim_step_size": int(sim_step_size) if sim_step_size and sim_step_size.isdigit() else None,
+        "output_step_size": int(output_step_size) if output_step_size and output_step_size.isdigit() else None,
         "biz_start_time": start_time,
     }
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="从 Hydros 时序 CSV 生成 HTML + Markdown 分析报告")
+    parser.add_argument("timeseries_csv")
+    parser.add_argument("output_dir", nargs="?")
+    parser.add_argument("--total-steps", type=int, default=None)
+    parser.add_argument("--sim-step-size", type=int, default=None, help="计算步长，单位秒")
+    parser.add_argument("--output-step-size", type=int, default=None, help="输出步长，单位秒")
+    return parser.parse_args(argv)
+
+
+def resolve_runtime_config(
+    unique_steps: list[int], scenario_meta: dict[str, Any] | None, args: argparse.Namespace
+) -> RuntimeConfig:
+    csv_step_interval = sorted({b - a for a, b in zip(unique_steps, unique_steps[1:])})
+    stable_csv_interval = csv_step_interval[0] if len(csv_step_interval) == 1 else None
+    total_steps = args.total_steps if args.total_steps is not None else (scenario_meta or {}).get("total_steps")
+    sim_step_size = args.sim_step_size if args.sim_step_size is not None else (scenario_meta or {}).get("sim_step_size")
+    output_step_size = (
+        args.output_step_size if args.output_step_size is not None else (scenario_meta or {}).get("output_step_size")
+    )
+
+    expected_sample_count = None
+    output_ratio = None
+    if sim_step_size and output_step_size and sim_step_size > 0 and output_step_size > 0:
+        output_ratio = output_step_size / sim_step_size
+        if total_steps is not None:
+            expected_sample_count = math.floor(total_steps / output_ratio) + 1
+
+    has_unreliable_time_axis = False
+    axis_mode = "csv_index"
+    axis_label = "CSV 采样序号"
+    axis_note = "CSV 时间轴字段不足以可靠还原真实计算步，图表横轴按 CSV 采样序号展示。"
+    sample_step_note = f"采样序号 {unique_steps[0]} ~ {unique_steps[-1]}"
+
+    if stable_csv_interval is not None and stable_csv_interval > 1:
+        axis_mode = "calculation_step"
+        axis_label = "计算步"
+        axis_note = "CSV 的 data_index 已表现为稀疏计算步号，图表横轴按计算步展示。"
+        sample_step_note = f"计算步 {unique_steps[0]} ~ {unique_steps[-1]}"
+    elif output_ratio is not None and stable_csv_interval == 1 and expected_sample_count is not None:
+        if abs(expected_sample_count - len(unique_steps)) <= 1:
+            axis_mode = "output_ordinal"
+            axis_label = "输出序号"
+            axis_note = (
+                f"CSV 的 data_index 更像输出序号；时间轴按用户参数 total_steps={total_steps}, "
+                f"sim_step_size={sim_step_size}, output_step_size={output_step_size} 推导。"
+            )
+            sample_step_note = f"输出序号 {unique_steps[0]} ~ {unique_steps[-1]}"
+        else:
+            has_unreliable_time_axis = True
+            axis_mode = "csv_index_unreliable"
+            axis_label = "CSV 采样序号"
+            axis_note = (
+                f"CSV 仅包含 {len(unique_steps)} 个采样点，但按用户参数应约有 {expected_sample_count} 个输出点；"
+                "CSV 时间轴疑似缺失或导出异常，因此图表横轴仅保留 CSV 采样序号。"
+            )
+            sample_step_note = f"CSV 采样序号 {unique_steps[0]} ~ {unique_steps[-1]}（时间轴不可靠）"
+
+    return RuntimeConfig(
+        total_steps=total_steps,
+        sim_step_size=sim_step_size,
+        output_step_size=output_step_size,
+        sampled_steps=unique_steps,
+        csv_step_interval=stable_csv_interval,
+        expected_sample_count=expected_sample_count,
+        axis_mode=axis_mode,
+        axis_label=axis_label,
+        axis_note=axis_note,
+        sample_step_note=sample_step_note,
+        has_unreliable_time_axis=has_unreliable_time_axis,
+    )
 
 
 def detect_placeholder_steps(metric_df: pd.DataFrame) -> list[int]:
@@ -292,10 +390,14 @@ def describe_series_points(group: pd.DataFrame) -> str:
     return f"{first_step} 步为 {first_value}，{last_step} 步为 {last_value}"
 
 
-def build_report_data(df: pd.DataFrame, csv_path: Path, profile_dataset: dict[str, Any] | None = None) -> dict[str, Any]:
+def build_report_data(
+    df: pd.DataFrame,
+    csv_path: Path,
+    runtime_config: RuntimeConfig,
+    profile_dataset: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     unique_steps = sorted(int(step) for step in df["data_index"].unique().tolist())
-    step_intervals = sorted({b - a for a, b in zip(unique_steps, unique_steps[1:])})
-    step_interval = step_intervals[0] if len(step_intervals) == 1 else None
+    step_interval = runtime_config.csv_step_interval
     scenario_id = str(df["biz_scenario_id"].iloc[0])
     scenario_meta = fetch_scenario_metadata(scenario_id)
 
@@ -456,46 +558,92 @@ def build_report_data(df: pd.DataFrame, csv_path: Path, profile_dataset: dict[st
 
     runtime_started_at = pd.to_datetime(df["gmt_create"].min())
     runtime_completed_at = pd.to_datetime(df["gmt_create"].max())
-    scenario_total_steps = scenario_meta["total_steps"] if scenario_meta and scenario_meta.get("total_steps") is not None else unique_steps[-1]
-    step_resolution_seconds = DEFAULT_STEP_RESOLUTION_SECONDS
-    last_calculation_step = unique_steps[-1]
+    scenario_total_steps = runtime_config.total_steps if runtime_config.total_steps is not None else (
+        scenario_meta["total_steps"] if scenario_meta and scenario_meta.get("total_steps") is not None else None
+    )
+    step_resolution_seconds = runtime_config.sim_step_size
+    last_calculation_step = (
+        runtime_config.total_steps
+        if runtime_config.total_steps is not None
+        else unique_steps[-1]
+    )
     simulation_start_dt = parse_datetime_text(scenario_meta["biz_start_time"]) if scenario_meta else None
     simulation_end_dt = (
         simulation_start_dt + timedelta(seconds=last_calculation_step * step_resolution_seconds)
-        if simulation_start_dt
+        if simulation_start_dt and step_resolution_seconds is not None
         else None
     )
-    simulation_duration_seconds = last_calculation_step * step_resolution_seconds
-    output_interval_seconds = step_interval * step_resolution_seconds if step_interval else None
+    simulation_duration_seconds = (
+        last_calculation_step * step_resolution_seconds if step_resolution_seconds is not None else None
+    )
+    output_interval_seconds = runtime_config.output_step_size
+    sampled_duration_seconds = (
+        (len(unique_steps) - 1) * output_interval_seconds
+        if output_interval_seconds is not None and len(unique_steps) > 1
+        else None
+    )
+    duration_gap_seconds = (
+        simulation_duration_seconds - sampled_duration_seconds
+        if simulation_duration_seconds is not None and sampled_duration_seconds is not None
+        else None
+    )
     sim_step_size_text = (
         f"{step_resolution_seconds} 秒/步（{format_duration_text(step_resolution_seconds)}）"
+        if step_resolution_seconds is not None
+        else "未提供，无法可靠推导"
     )
     output_step_text = (
-        f"{step_interval} 步/次（{format_duration_text(output_interval_seconds)}）"
-        if step_interval and output_interval_seconds is not None
-        else (f"{step_interval} 步/次" if step_interval else "采样步不等间隔")
+        f"{output_interval_seconds} 秒/次（{format_duration_text(output_interval_seconds)}）"
+        if output_interval_seconds is not None
+        else (
+            f"CSV 索引间隔 {step_interval}" if step_interval is not None else "无法可靠推导"
+        )
     )
     simulation_duration_text = (
         f"{format_duration_text(simulation_duration_seconds)}（共 {last_calculation_step} 个计算步）"
-        if simulation_duration_seconds is not None
-        else f"{last_calculation_step} 个计算步"
+        if simulation_duration_seconds is not None and step_resolution_seconds is not None
+        else (
+            f"{last_calculation_step} 个计算步"
+            if runtime_config.total_steps is not None
+            else "根据当前 CSV 无法可靠推导"
+        )
     )
+    if runtime_config.expected_sample_count is not None and runtime_config.expected_sample_count != len(unique_steps):
+        anomaly_items.insert(
+            0,
+            {
+                "priority": "高",
+                "object": "CSV 时间轴",
+                "metric": "data_index / step_index / source_time",
+                "finding": (
+                    f"按参数应约有 {runtime_config.expected_sample_count} 个输出点，但 CSV 实际只有 {len(unique_steps)} 个采样点；"
+                    f"期望总时长 {format_seconds_text(simulation_duration_seconds) or '无法推导'}，"
+                    f"按现有采样点最多只能覆盖 {format_seconds_text(sampled_duration_seconds) or '无法推导'}。"
+                ),
+                "advice": "将该 CSV 标记为时间轴不可靠，报告中不要把 data_index 直接解释为真实计算步；建议排查导出逻辑或补齐 step_index。",
+            },
+        )
 
     summary_paragraph = (
         f"该 CSV 共包含 {len(df)} 条记录，覆盖 {df['object_name'].nunique()} 个对象、"
-        f"{df['metrics_code'].nunique()} 类指标，采样步为 {unique_steps[0]}-{unique_steps[-1]}，"
-        f"每 {step_interval} 步输出一次，共 {len(unique_steps)} 个等间隔采样点。"
+        f"{df['metrics_code'].nunique()} 类指标，{runtime_config.sample_step_note}，"
+        f"共 {len(unique_steps)} 个采样点。"
         f"整体未发现负流量和明显水位突跳，主干断面末步水位由 {round_number(qd_last['value'].max())} m "
         f"降至 {round_number(qd_last['value'].min())} m，沿程降幅约 {level_drop} m，表现为稳定下泄。"
         f"当前更值得关注的是个别退水闸零流量，以及 {highlight_flow_name} 的局部流量大幅波动。"
     )
+    if runtime_config.expected_sample_count is not None and runtime_config.expected_sample_count != len(unique_steps):
+        summary_paragraph += (
+            f" 同时，用户参数对应的期望输出点数约为 {runtime_config.expected_sample_count}，"
+            f"而 CSV 实际仅导出 {len(unique_steps)} 个采样点，说明结果文件的时间轴字段存在异常。"
+        )
 
     summary_bullets = [
         (
-            f"采样步序列完整且等间隔，实际采样步为 {'、'.join(str(step) for step in unique_steps[:5])} ... {unique_steps[-1]}；"
+            f"{runtime_config.axis_note} 实际 CSV 采样序号为 {'、'.join(str(step) for step in unique_steps[:5])} ... {unique_steps[-1]}；"
             f"water_level 自动剔除了占位零值步 {'、'.join(str(step) for step in placeholder_level_steps)}。"
             if placeholder_level_steps
-            else f"采样步序列完整且等间隔，实际采样步为 {'、'.join(str(step) for step in unique_steps[:5])} ... {unique_steps[-1]}，未发现真实缺步。"
+            else f"{runtime_config.axis_note} 实际 CSV 采样序号为 {'、'.join(str(step) for step in unique_steps[:5])} ... {unique_steps[-1]}。"
         ),
         (
             f"未检测到负流量，water_flow 图表已剔除占位零值步 {'、'.join(str(step) for step in placeholder_flow_steps)}；"
@@ -512,6 +660,15 @@ def build_report_data(df: pd.DataFrame, csv_path: Path, profile_dataset: dict[st
             else "闸门开度全程稳定，未观察到控制动作。"
         ),
     ]
+    if runtime_config.expected_sample_count is not None and runtime_config.expected_sample_count != len(unique_steps):
+        summary_bullets.insert(
+            1,
+            (
+                f"按参数推导的总时长为 {format_seconds_text(simulation_duration_seconds)}，"
+                f"但按 CSV 当前 {len(unique_steps)} 个采样点和输出步长推导，仅能覆盖 {format_seconds_text(sampled_duration_seconds)}；"
+                f"两者相差 {format_seconds_text(duration_gap_seconds)}。"
+            ),
+        )
 
     longitudinal_profile = build_longitudinal_profile_payload(df, profile_dataset, unique_steps)
     if longitudinal_profile["available"]:
@@ -521,8 +678,12 @@ def build_report_data(df: pd.DataFrame, csv_path: Path, profile_dataset: dict[st
 
     recommendations = [
         "优先确认 FSK2-北易水退水闸在该场景下是否应保持关闭，避免把配置状态误判为异常。",
-        f"复核 {highlight_flow_name} 附近的边界条件、分流关系和闸门联动，解释 840-960 步附近的流量突变。",
-        "若需要更细的过程诊断，建议把输出粒度从每 60 步一次提升到每 10-20 步一次。",
+        f"复核 {highlight_flow_name} 附近的边界条件、分流关系和闸门联动，解释其波动来源。",
+        (
+            f"若需要更细的过程诊断，建议把输出步长从当前 {runtime_config.output_step_size} 秒/次缩短到 600-1200 秒/次。"
+            if runtime_config.output_step_size
+            else "若需要更细的过程诊断，建议缩短输出步长并重新导出结果。"
+        ),
         "若后续要做动态评估，可叠加工况事件注入，观察闸门动作对沿程水位和分水口流量的传递影响。",
     ]
 
@@ -551,7 +712,8 @@ def build_report_data(df: pd.DataFrame, csv_path: Path, profile_dataset: dict[st
             "tenant_id": str(df["tenant_id"].iloc[0]),
             "task_status": "已完成",
             "task_status_raw": "COMPLETED",
-            "total_steps": len(unique_steps),
+            "total_steps": scenario_total_steps if scenario_total_steps is not None else len(unique_steps),
+            "sampled_point_count": len(unique_steps),
             "completed_at": format_datetime_text(runtime_completed_at.to_pydatetime()) or str(df["gmt_create"].max()),
             "runtime_started_at": format_datetime_text(runtime_started_at.to_pydatetime()) or str(df["gmt_create"].min()),
             "scenario_yaml_id": scenario_meta["scenario_yaml_id"] if scenario_meta else f"{scenario_id}.yaml",
@@ -559,8 +721,12 @@ def build_report_data(df: pd.DataFrame, csv_path: Path, profile_dataset: dict[st
             "simulation_start_time": format_datetime_text(simulation_start_dt),
             "simulation_end_time": format_datetime_text(simulation_end_dt),
             "simulation_duration": simulation_duration_text,
+            "sampled_duration": format_seconds_text(sampled_duration_seconds) or "无法推导",
+            "duration_gap": format_seconds_text(duration_gap_seconds) or "无法推导",
             "sim_step_size_text": sim_step_size_text,
             "output_step_text": output_step_text,
+            "time_axis_note": runtime_config.axis_note,
+            "axis_label": runtime_config.axis_label,
             "analyst": "Codex / Hydros Simulation Skill",
             "record_count": int(len(df)),
             "object_count": int(df["object_name"].nunique()),
@@ -575,6 +741,7 @@ def build_report_data(df: pd.DataFrame, csv_path: Path, profile_dataset: dict[st
         "metaCards": [
             {"label": "任务状态", "value": "已完成"},
             {"label": "仿真时长", "value": format_duration_text(simulation_duration_seconds) or f"{last_calculation_step} 个计算步"},
+            {"label": "CSV 覆盖时长", "value": format_duration_text(sampled_duration_seconds) or "无法推导"},
             {"label": "输出步长", "value": output_step_text},
             {"label": "异常条目", "value": str(len(anomaly_items))},
         ],
@@ -595,11 +762,10 @@ def build_report_data(df: pd.DataFrame, csv_path: Path, profile_dataset: dict[st
             },
             {
                 "eyebrow": "数据质量",
-                "title": stability_title,
+                "title": "时间轴异常" if runtime_config.has_unreliable_time_axis else stability_title,
                 "body": (
-                    f"{len(unique_steps)} 个采样点完整覆盖，输出步长恒定为 {step_interval} 个计算步。"
-                    if not completeness_issues
-                    else f"发现 {len(completeness_issues)} 组对象/指标缺步。"
+                    f"{len(unique_steps)} 个采样点已导出。{runtime_config.axis_note}"
+                    if not completeness_issues else f"发现 {len(completeness_issues)} 组对象/指标缺步。"
                 ),
             },
             {
@@ -623,10 +789,13 @@ def build_report_data(df: pd.DataFrame, csv_path: Path, profile_dataset: dict[st
             {"label": "场景 ID", "value": scenario_id},
             {"label": "仿真 YML", "value": scenario_meta["scenario_yaml_id"] if scenario_meta else f"{scenario_id}.yaml"},
             {"label": "开始时间", "value": format_datetime_text(simulation_start_dt) or "场景 YAML 未提供"},
-            {"label": "结束时间", "value": format_datetime_text(simulation_end_dt) or "根据 CSV 无法推导"},
+            {"label": "结束时间", "value": format_datetime_text(simulation_end_dt) or "根据显式参数与场景信息无法推导"},
             {"label": "时间步长", "value": sim_step_size_text},
             {"label": "输出步长", "value": output_step_text},
             {"label": "仿真时长", "value": simulation_duration_text},
+            {"label": "CSV 覆盖时长", "value": format_seconds_text(sampled_duration_seconds) or "无法推导"},
+            {"label": "时长差值", "value": format_seconds_text(duration_gap_seconds) or "无法推导"},
+            {"label": "时间轴口径", "value": runtime_config.axis_note},
             {"label": "结果导出时间", "value": format_datetime_text(runtime_completed_at.to_pydatetime()) or str(df["gmt_create"].max())},
             {"label": "分析人", "value": "Codex / Hydros Simulation Skill"},
         ],
@@ -664,12 +833,19 @@ def build_report_data(df: pd.DataFrame, csv_path: Path, profile_dataset: dict[st
             "step_interval": step_interval,
             "scenario_total_steps": scenario_total_steps,
             "sim_step_size": step_resolution_seconds,
+            "output_step_size": runtime_config.output_step_size,
             "step_resolution_seconds": step_resolution_seconds,
             "last_calculation_step": last_calculation_step,
             "simulation_start_time": format_datetime_text(simulation_start_dt),
             "simulation_end_time": format_datetime_text(simulation_end_dt),
             "simulation_duration": simulation_duration_text,
+            "sampled_duration": format_seconds_text(sampled_duration_seconds),
+            "duration_gap": format_seconds_text(duration_gap_seconds),
             "output_step_text": output_step_text,
+            "axis_mode": runtime_config.axis_mode,
+            "axis_label": runtime_config.axis_label,
+            "axis_note": runtime_config.axis_note,
+            "expected_sample_count": runtime_config.expected_sample_count,
             "metric_counts": metric_counts,
             "object_type_counts": object_type_counts,
             "top_flow_variation": {
@@ -725,10 +901,13 @@ def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
 - 时间步长：`{payload['meta']['sim_step_size_text']}`
 - 输出步长：`{payload['meta']['output_step_text']}`
 - 仿真时长：`{payload['meta']['simulation_duration']}`
+- CSV 覆盖时长：`{payload['meta']['sampled_duration']}`
+- 时长差值：`{payload['meta']['duration_gap']}`
 - 记录数：`{payload['meta']['record_count']}`
 - 对象数：`{payload['meta']['object_count']}`
 - 指标数：`{payload['meta']['metric_count']}`
-- 采样步：`{analysis['step_values'][0]} ~ {analysis['step_values'][-1]}`，共 `{payload['meta']['total_steps']}` 个采样点
+- CSV 采样序号：`{analysis['step_values'][0]} ~ {analysis['step_values'][-1]}`，共 `{payload['meta']['sampled_point_count']}` 个采样点
+- 配置总计算步：`{payload['meta']['total_steps']}`
 
 ## 执行摘要
 
@@ -793,7 +972,8 @@ def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
 
 ## 结论
 
-- 本次 CSV 数据完整，采样规则清晰，不存在真实缺步问题。
+- 本次 CSV 在数值层面可用于结果分析，但时间轴字段不可靠；报告已按显式参数恢复总时长，并把图表横轴降级为 CSV 采样序号。
+- 用户参数与 CSV 导出结果存在时长/采样点不一致，需优先排查 CSV 导出链路，再决定是否可用于严格时间过程分析。
 - 系统整体稳定，无倒流、无明显水位异常波动，适合作为一次稳定工况分析样本。
 - 建议优先复核 `FSK2-北易水退水闸` 的零流量合理性，以及 `{analysis['top_flow_variation']['object_name']}` 的局部波动来源。
 - 若下一步要做动态评估，建议增加事件注入或更细粒度输出。
@@ -816,18 +996,30 @@ def write_html_assets(report_dir: Path, data_dir: Path, payload: dict[str, Any])
 
 
 def main() -> None:
-    if len(sys.argv) < 2:
-        print("用法: python build_csv_report.py <timeseries_csv> [output_dir]")
-        raise SystemExit(1)
+    args = parse_args(sys.argv[1:])
 
-    csv_path = Path(sys.argv[1]).resolve()
-    output_dir = Path(sys.argv[2]).resolve() if len(sys.argv) > 2 else csv_path.parent / f"{csv_path.stem}_report"
+    csv_path = Path(args.timeseries_csv).resolve()
+    output_dir = Path(args.output_dir).resolve() if args.output_dir else csv_path.parent / f"{csv_path.stem}_report"
     output_dir.mkdir(parents=True, exist_ok=True)
     paths = prepare_output_dirs(output_dir)
 
-    run_command([sys.executable, str(CHART_SCRIPT), str(csv_path), str(paths["charts"])])
-
     df = load_dataframe(csv_path)
+    scenario_meta = fetch_scenario_metadata(str(df["biz_scenario_id"].iloc[0]))
+    runtime_config = resolve_runtime_config(
+        sorted(int(step) for step in df["data_index"].unique().tolist()),
+        scenario_meta,
+        args,
+    )
+
+    chart_command = [sys.executable, str(CHART_SCRIPT), str(csv_path), str(paths["charts"])]
+    if runtime_config.total_steps is not None:
+        chart_command.extend(["--total-steps", str(runtime_config.total_steps)])
+    if runtime_config.sim_step_size is not None:
+        chart_command.extend(["--sim-step-size", str(runtime_config.sim_step_size)])
+    if runtime_config.output_step_size is not None:
+        chart_command.extend(["--output-step-size", str(runtime_config.output_step_size)])
+    run_command(chart_command)
+
     profile_dataset = None
     try:
         profile_dataset = build_longitudinal_dataset(csv_path)
@@ -839,7 +1031,7 @@ def main() -> None:
     if charts_stats.exists():
         shutil.move(str(charts_stats), str(paths["data"] / "analysis_stats.json"))
 
-    payload = build_report_data(df, csv_path, profile_dataset)
+    payload = build_report_data(df, csv_path, runtime_config, profile_dataset)
     write_html_assets(paths["report"], paths["data"], payload)
     write_markdown_report(paths["report"], payload)
 

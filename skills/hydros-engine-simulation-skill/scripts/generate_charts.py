@@ -4,6 +4,7 @@
 
 用法:
     python generate_charts.py <timeseries_data.json> [output_dir]
+        [--total-steps N] [--sim-step-size SECONDS] [--output-step-size SECONDS]
 
 生成 6 张分析图表:
   1. 关键断面水位时序图
@@ -18,6 +19,7 @@ import json
 import csv
 import sys
 import os
+import argparse
 from collections import defaultdict, Counter
 
 try:
@@ -33,6 +35,45 @@ except ImportError:
 # 中文字体配置
 plt.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'PingFang SC', 'Heiti TC', 'SimHei']
 plt.rcParams['axes.unicode_minus'] = False
+
+
+def parse_args(argv):
+    parser = argparse.ArgumentParser(description="水力仿真结果图表生成脚本")
+    parser.add_argument("data_path")
+    parser.add_argument("output_dir", nargs="?")
+    parser.add_argument("--total-steps", type=int, default=None)
+    parser.add_argument("--sim-step-size", type=int, default=None, help="计算步长，单位秒")
+    parser.add_argument("--output-step-size", type=int, default=None, help="输出步长，单位秒")
+    return parser.parse_args(argv)
+
+
+def resolve_axis_info(records, total_steps=None, sim_step_size=None, output_step_size=None):
+    indices = sorted(set(r['data_index'] for r in records))
+    intervals = sorted(set(b - a for a, b in zip(indices, indices[1:])))
+    stable_interval = intervals[0] if len(intervals) == 1 else None
+    expected_sample_count = None
+    if total_steps and sim_step_size and output_step_size and sim_step_size > 0:
+        expected_sample_count = int(total_steps // (output_step_size / sim_step_size) + 1)
+
+    label = 'CSV 采样序号'
+    note = 'CSV 时间轴字段不足，图表横轴按 CSV 采样序号展示。'
+    if stable_interval is not None and stable_interval > 1:
+        label = '计算步'
+        note = 'CSV data_index 已表现为计算步号，图表横轴按计算步展示。'
+    elif expected_sample_count is not None and stable_interval == 1:
+        if abs(expected_sample_count - len(indices)) <= 1:
+            label = '输出序号'
+            note = 'CSV data_index 更像输出序号，图表横轴按输出序号展示。'
+        else:
+            note = (
+                f'CSV 仅有 {len(indices)} 个采样点，但按参数应约有 {expected_sample_count} 个输出点；'
+                '图表横轴仅保留 CSV 采样序号。'
+            )
+    return {
+        'label': label,
+        'note': note,
+        'indices': indices,
+    }
 
 
 def load_data(filepath):
@@ -142,7 +183,7 @@ def auto_detect_disturbance_nodes(groups):
     ))
 
 
-def chart1_water_level(groups, output_dir, sections=None):
+def chart1_water_level(groups, output_dir, axis_label, sections=None):
     """图1: 关键断面水位时序"""
     if sections is None:
         sections = auto_select_sections(groups)
@@ -152,7 +193,7 @@ def chart1_water_level(groups, output_dir, sections=None):
         if key in groups:
             steps, vals = zip(*groups[key])
             ax.plot(steps, vals, label=name, linewidth=1.5)
-    ax.set_xlabel('仿真步数', fontsize=12)
+    ax.set_xlabel(axis_label, fontsize=12)
     ax.set_ylabel('水位 (m)', fontsize=12)
     ax.set_title('关键断面水位时序变化', fontsize=14, fontweight='bold')
     ax.legend(loc='best', fontsize=9)
@@ -164,7 +205,7 @@ def chart1_water_level(groups, output_dir, sections=None):
     print(f"图1 已生成: {path}")
 
 
-def chart2_water_flow(groups, output_dir, sections=None):
+def chart2_water_flow(groups, output_dir, axis_label, sections=None):
     """图2: 关键断面流量时序"""
     if sections is None:
         sections = auto_select_sections(groups)
@@ -175,7 +216,7 @@ def chart2_water_flow(groups, output_dir, sections=None):
             steps, vals = zip(*groups[key])
             ax.plot(steps, vals, label=name, linewidth=1.5)
     ax.axhline(y=0, color='red', linestyle='--', alpha=0.5, label='零流量线')
-    ax.set_xlabel('仿真步数', fontsize=12)
+    ax.set_xlabel(axis_label, fontsize=12)
     ax.set_ylabel('流量 (m³/s)', fontsize=12)
     ax.set_title('关键断面流量时序变化（负值=倒流）', fontsize=14, fontweight='bold')
     ax.legend(loc='best', fontsize=9)
@@ -187,7 +228,7 @@ def chart2_water_flow(groups, output_dir, sections=None):
     print(f"图2 已生成: {path}")
 
 
-def chart3_negative_flow(groups, output_dir):
+def chart3_negative_flow(groups, output_dir, axis_label):
     """图3: 负流量专项分析"""
     neg_objects = auto_detect_neg_flow_objects(groups)
     if not neg_objects:
@@ -202,7 +243,7 @@ def chart3_negative_flow(groups, output_dir):
                 ax.plot(steps, vals, label=name, linewidth=1.5)
                 break
     ax.axhline(y=0, color='red', linestyle='--', linewidth=2, alpha=0.7, label='零流量线')
-    ax.set_xlabel('仿真步数', fontsize=12)
+    ax.set_xlabel(axis_label, fontsize=12)
     ax.set_ylabel('流量 (m³/s)', fontsize=12)
     ax.set_title('下游断面负流量（倒流）专项分析', fontsize=14, fontweight='bold')
     ax.legend(loc='best', fontsize=9)
@@ -214,7 +255,7 @@ def chart3_negative_flow(groups, output_dir):
     print(f"图3 已生成: {path}")
 
 
-def chart4_gate_opening(groups, output_dir):
+def chart4_gate_opening(groups, output_dir, axis_label):
     """图4: 闸门开度时序"""
     gates = auto_detect_gates(groups)
     if not gates:
@@ -235,7 +276,7 @@ def chart4_gate_opening(groups, output_dir):
             ax.plot(steps, vals, color='#2196F3', linewidth=2)
             ax.fill_between(steps, vals, alpha=0.2, color='#2196F3')
         ax.set_title(name, fontsize=11, fontweight='bold')
-        ax.set_xlabel('仿真步数', fontsize=10)
+        ax.set_xlabel(axis_label, fontsize=10)
         ax.set_ylabel('开度 (m)', fontsize=10)
         ax.grid(True, alpha=0.3)
     for j in range(i + 1, len(axes)):
@@ -248,7 +289,7 @@ def chart4_gate_opening(groups, output_dir):
     print(f"图4 已生成: {path}")
 
 
-def chart5_disturbance_flow(groups, output_dir):
+def chart5_disturbance_flow(groups, output_dir, axis_label):
     """图5: 分水口流量分析"""
     nodes = auto_detect_disturbance_nodes(groups)
     if not nodes:
@@ -260,7 +301,7 @@ def chart5_disturbance_flow(groups, output_dir):
         if key in groups:
             steps, vals = zip(*groups[key])
             ax.plot(steps, vals, label=name, linewidth=1.5, marker='o', markersize=2)
-    ax.set_xlabel('仿真步数', fontsize=12)
+    ax.set_xlabel(axis_label, fontsize=12)
     ax.set_ylabel('流量 (m³/s)', fontsize=12)
     ax.set_title('分水口/退水闸流量时序', fontsize=14, fontweight='bold')
     ax.legend(loc='best', fontsize=9)
@@ -284,28 +325,57 @@ def chart6_heatmap(groups, output_dir):
         print("图6 跳过: 未检测到断面水位数据")
         return
 
-    # 确定步数范围
-    all_steps = set()
+    sampled_steps = set()
     for name in all_sections:
         key = (name, 'water_level', 'CrossSection')
         if key in groups:
             for s, _ in groups[key]:
-                all_steps.add(s)
-    max_step = max(all_steps)
+                sampled_steps.add(s)
+    sampled_steps = sorted(sampled_steps)
+    if not sampled_steps:
+        print("图6 跳过: 未检测到有效采样步")
+        return
+
+    # 剔除类似 step 0 的占位零值列，避免热力图出现误导性的整列异常颜色。
+    placeholder_steps = []
+    for step in sampled_steps:
+        step_values = []
+        for name in all_sections:
+            key = (name, 'water_level', 'CrossSection')
+            if key not in groups:
+                continue
+            value_dict = dict(groups[key])
+            if step in value_dict:
+                step_values.append(value_dict[step])
+        if step_values:
+            zero_ratio = sum(1 for value in step_values if value == 0) / len(step_values)
+            if zero_ratio >= 0.5:
+                placeholder_steps.append(step)
+
+    plot_steps = [step for step in sampled_steps if step not in placeholder_steps]
+    if not plot_steps:
+        plot_steps = sampled_steps
 
     matrix = []
     for name in all_sections:
         key = (name, 'water_level', 'CrossSection')
         if key in groups:
             val_dict = dict(groups[key])
-            row = [val_dict.get(i, np.nan) for i in range(1, max_step + 1)]
+            row = [val_dict.get(step, np.nan) for step in plot_steps]
             matrix.append(row)
 
-    fig, ax = plt.subplots(figsize=(14, 6))
+    matrix = np.array(matrix, dtype=float)
+
+    fig, ax = plt.subplots(figsize=(14, 6.8))
     im = ax.imshow(matrix, aspect='auto', cmap='coolwarm', interpolation='nearest')
     ax.set_yticks(range(len(all_sections)))
     ax.set_yticklabels(all_sections, fontsize=9)
-    ax.set_xlabel('仿真步数', fontsize=12)
+    tick_count = min(len(plot_steps), 8)
+    tick_positions = np.linspace(0, len(plot_steps) - 1, num=tick_count, dtype=int)
+    tick_positions = np.unique(tick_positions)
+    ax.set_xticks(tick_positions)
+    ax.set_xticklabels([str(plot_steps[index]) for index in tick_positions], fontsize=10)
+    ax.set_xlabel('采样步', fontsize=12)
     ax.set_title('沿程断面水位热力图', fontsize=14, fontweight='bold')
     plt.colorbar(im, ax=ax, label='水位 (m)')
     plt.tight_layout()
@@ -316,17 +386,29 @@ def chart6_heatmap(groups, output_dir):
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("用法: python generate_charts.py <timeseries_data.json> [output_dir]")
-        sys.exit(1)
+    args = parse_args(sys.argv[1:])
 
-    data_path = sys.argv[1]
-    output_dir = sys.argv[2] if len(sys.argv) > 2 else os.path.dirname(data_path) or '.'
+    data_path = args.data_path
+    output_dir = args.output_dir if args.output_dir else os.path.dirname(data_path) or '.'
     os.makedirs(output_dir, exist_ok=True)
 
     records = load_data(data_path)
     groups = group_data(records)
     stats = get_stats(records)
+    axis_info = resolve_axis_info(
+        records,
+        total_steps=args.total_steps,
+        sim_step_size=args.sim_step_size,
+        output_step_size=args.output_step_size,
+    )
+    stats['axis_label'] = axis_info['label']
+    stats['axis_note'] = axis_info['note']
+    if args.total_steps is not None:
+        stats['configured_total_steps'] = args.total_steps
+    if args.sim_step_size is not None:
+        stats['configured_sim_step_size'] = args.sim_step_size
+    if args.output_step_size is not None:
+        stats['configured_output_step_size'] = args.output_step_size
 
     # 保存统计摘要
     stats_path = os.path.join(output_dir, 'analysis_stats.json')
@@ -336,6 +418,7 @@ def main():
         json.dump(serializable_stats, f, ensure_ascii=False, indent=2)
     print(f"\n统计摘要已保存: {stats_path}")
     print(f"  总记录: {stats['total_records']}, 步数: {stats['total_steps']}, 对象数: {stats['total_objects']}")
+    print(f"  横轴口径: {axis_info['note']}")
     print(f"  水位范围: {stats['water_level_range']}")
     print(f"  流量范围: {stats['water_flow_range']}")
     print(f"  负流量: {stats['negative_flow_count']} 条, 涉及 {len(stats['negative_flow_objects'])} 个对象")
@@ -344,11 +427,11 @@ def main():
     sections = auto_select_sections(groups)
     print(f"\n自动选取代表断面: {sections}\n")
 
-    chart1_water_level(groups, output_dir, sections)
-    chart2_water_flow(groups, output_dir, sections)
-    chart3_negative_flow(groups, output_dir)
-    chart4_gate_opening(groups, output_dir)
-    chart5_disturbance_flow(groups, output_dir)
+    chart1_water_level(groups, output_dir, axis_info['label'], sections)
+    chart2_water_flow(groups, output_dir, axis_info['label'], sections)
+    chart3_negative_flow(groups, output_dir, axis_info['label'])
+    chart4_gate_opening(groups, output_dir, axis_info['label'])
+    chart5_disturbance_flow(groups, output_dir, axis_info['label'])
     chart6_heatmap(groups, output_dir)
 
     print(f"\n所有图表已生成到: {output_dir}")

@@ -89,6 +89,17 @@
         </aside>
 
         <section class="space-y-4">
+          <article
+            id="dataQualityBanner"
+            class="hidden rounded-[28px] border border-warning/30 bg-amber-50/90 p-4 shadow-soft"
+          >
+            <div class="flex flex-col gap-2">
+              <p class="text-xs font-semibold uppercase tracking-[0.22em] text-warning">数据质量提示</p>
+              <h2 class="text-lg font-semibold text-ink">CSV 时间轴与仿真参数不一致</h2>
+              <p id="dataQualityMessage" class="text-sm leading-6 text-ink/75"></p>
+            </div>
+          </article>
+
           <div class="grid gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(360px,0.9fr)]">
             <article class="rounded-[28px] border border-white/70 bg-white/80 p-4 shadow-soft backdrop-blur">
               <div class="flex items-center justify-between">
@@ -191,6 +202,16 @@
         biz_scene_instance_id: "SIM-DEMO-20260322",
         biz_scenario_id: "demo-scene",
         total_steps: 3,
+        sampled_point_count: 3,
+        sim_step_size: 60,
+        output_step_size: 3600,
+        expected_sample_count: 4,
+        simulation_duration: "3分钟",
+        sampled_duration: "2小时",
+        duration_gap: "0秒",
+        axis_label: "CSV 采样序号",
+        time_axis_note: "演示数据仅按 CSV 采样序号展示。",
+        csv_issue: "",
         task_status: "COMPLETED",
         default_render_objects: ["QD-5#断面#001", "QD-8#断面#003", "退水闸#01", "南闸#02"],
         events: [
@@ -219,6 +240,8 @@
       const elements = {
         summaryCards: document.getElementById("summaryCards"),
         metaPanel: document.getElementById("metaPanel"),
+        dataQualityBanner: document.getElementById("dataQualityBanner"),
+        dataQualityMessage: document.getElementById("dataQualityMessage"),
         objectTypeFilter: document.getElementById("objectTypeFilter"),
         metricFilter: document.getElementById("metricFilter"),
         objectFilter: document.getElementById("objectFilter"),
@@ -340,8 +363,14 @@
           ["场景 ID", simMeta.biz_scenario_id || "-"],
           ["任务状态", simMeta.task_status || "-"],
           ["总步数", simMeta.total_steps || uniqueValues(filteredData, "data_index").length],
+          ["CSV 采样点", simMeta.sampled_point_count || uniqueValues(filteredData, "data_index").length],
+          ["期望输出点", simMeta.expected_sample_count || "-"],
+          ["仿真总时长", simMeta.simulation_duration || "-"],
+          ["CSV 覆盖时长", simMeta.sampled_duration || "-"],
+          ["时长差值", simMeta.duration_gap || "-"],
           ["对象数", uniqueValues(filteredData, "object_name").length],
           ["指标数", uniqueValues(filteredData, "metrics_code").length],
+          ["时间轴口径", simMeta.time_axis_note || "-"],
         ];
 
         elements.metaPanel.innerHTML = metaRows
@@ -354,6 +383,17 @@
             `
           )
           .join("");
+      }
+
+      function renderDataQualityBanner() {
+        if (!simMeta.csv_issue) {
+          elements.dataQualityBanner.classList.add("hidden");
+          elements.dataQualityMessage.textContent = "";
+          return;
+        }
+
+        elements.dataQualityBanner.classList.remove("hidden");
+        elements.dataQualityMessage.textContent = simMeta.csv_issue;
       }
 
       function renderSummaryCards(filteredData, anomalies) {
@@ -398,7 +438,7 @@
           grid: { left: 52, right: 18, top: 24, bottom: 42 },
           tooltip: { trigger: "axis" },
           legend: { top: 0, textStyle: { color: "#486581" } },
-          xAxis: { type: "value", name: "Step", nameTextStyle: { color: "#486581" } },
+          xAxis: { type: "value", name: simMeta.axis_label || "CSV 采样序号", nameTextStyle: { color: "#486581" } },
           yAxis: { type: "value", splitLine: { lineStyle: { color: "#d9e2ec" } } },
           series,
         });
@@ -513,6 +553,7 @@
         const filteredData = getFilteredData();
         const anomalies = buildAnomalyList(filteredData);
 
+        renderDataQualityBanner();
         renderMetaPanel(filteredData);
         renderSummaryCards(filteredData, anomalies);
         renderOverviewChart(filteredData);
