@@ -29,7 +29,7 @@ description: |
 - 如果需要理解数据结构、聚合口径或指标映射，先读 [references/hydros-data-contract.md](references/hydros-data-contract.md)。
 - 如果需要快速交付一个可直接打开的页面，优先复用模板资产，而不是从零开始。
 - 需要交互式分析工作台时，优先复用 [assets/hydros-dashboard-template/index.html](assets/hydros-dashboard-template/index.html)。
-- 需要 HTML 汇报报告、完整曲线展示或外部 payload 驱动页面时，优先复用 [assets/hydros-report-template/index.html](assets/hydros-report-template/index.html) 和同目录 `report.data.js`。
+- 需要完整版 HTML 报告、完整曲线展示或外部 payload 驱动页面时，优先复用 [assets/hydros-report-template/index.html](assets/hydros-report-template/index.html) 和同目录 `report.data.js`。
 
 ## 资源导航
 
@@ -50,7 +50,7 @@ description: |
 - `assets/hydros-dashboard-template/index.html`
   用于快速起一个单文件交互式分析工作台。
 - `assets/hydros-report-template/index.html`
-  用于快速起一个单页 HTML 汇报报告，适合汇报、截图、归档和真实结果复盘；报告默认支持纵剖面与时序曲线联动、播放、拖拽、暂停和继续，主要图表的 y 轴应根据当前数据范围自适应缩放。纵剖面需要同时展示断面顶高程、底高程和水面线，其中水位阴影只填充到底高程线，底高程阴影才延伸到坐标轴底部；闸站位置优先用稳定的虚线标识，避免播放时出现抖动。
+  用于生成符合模板规范的完整版 HTML 报告，适合汇报、截图、归档和真实结果复盘；报告默认支持纵剖面与时序曲线联动、播放、拖拽、暂停和继续，主要图表的 y 轴应根据当前数据范围自适应缩放。纵剖面需要同时展示断面顶高程、底高程和水面线，其中水位阴影只填充到底高程线，底高程阴影才延伸到坐标轴底部；闸站位置优先用稳定的虚线标识，避免播放时出现抖动。不要用自定义轻量页或单页汇报版替代该模板。
 - `assets/hydros-report-template/report.data.js`
   用于承载报告模板的外部数据 payload，替换后即可接入真实仿真结果。
 - 以上 Python 脚本凡涉及时间轴、总步数、时长或输出频率计算时，都必须优先使用用户显式提供的 `total_steps`、`sim_step_size`、`output_step_size`，其次再用场景 YAML；禁止写死默认步长。
@@ -83,31 +83,48 @@ description: |
 ### 阶段三：创建仿真任务
 
 必须收集：
-- `tenant_id`
 - `biz_scenario_id`
 - `biz_scenario_config_url`
 - `sse_client_id`
 
-参数确认必须在一次交互中完成，不要分多轮询问。把 `tenant_id` 和仿真参数放在同一条消息里一起确认。具体规则：
+可选参数（如需自定义）：
+- `total_steps`（仿真总步数）
+- `output_step_size`（输出步长）
 
-- 首次创建任务时，用一条消息同时展示 `tenant_id`（需用户提供）和场景默认仿真参数（`total_steps`、`sim_step_size`、`output_step_size`），询问用户是否需要调整。
-- 会话中已确认过 `tenant_id` 且未切换场景时，直接复用，只需展示仿真参数供用户确认或调整。
-- 如果用户在同一条消息中已经给出了所有参数（如"用默认参数再跑一次"、"tenant 1111，步数 800"），直接创建任务，不再额外确认。
-- 如果用户只给出场景 ID / 场景名称，而没有明确说“用默认参数启动”“直接运行”或没有显式提供参数值，必须先停在参数确认这一步，不能自动创建任务。
-- 绝对不要把 `tenant_id` 确认和仿真参数确认拆成两轮对话。
+注意：`tenant_id` 已由系统自动分配，无需用户提供。
+
+参数确认规则：
+
+- 首次创建任务时，展示场景默认仿真参数（`total_steps`、`sim_step_size`、`output_step_size`），询问用户是否需要调整。
+- 如果用户在同一条消息中已经给出了所有参数（如”用默认参数启动”、”步数 800”），直接创建任务，不再额外确认。
+- 如果用户只给出场景 ID / 场景名称，而没有明确说”用默认参数启动””直接运行”或没有显式提供参数值，必须先停在参数确认这一步，不能自动创建任务。
+
+#### 获取场景配置参数的降级策略
+
+在向用户确认参数前，需要先获取场景的默认配置。按以下顺序尝试：
+
+1. **WebFetch**: 尝试用 WebFetch 直接获取 `biz_scenario_config_url` 的内容
+2. **Bash + curl**: 如果 WebFetch 失败（网络限制、企业安全策略等），用 `curl -s <url>` 获取
+3. **MCP 水网对象**: 如果 HTTP 请求都失败，尝试调用 `get_waterway_lists` 获取水网配置（可能包含相关参数）
+4. **合理默认值**: 如果以上都失败，使用京石段场景的典型默认值：
+   - `total_steps`: 1200
+   - `sim_step_size`: 120（秒）
+   - `output_step_size`: 7200（秒，即2小时）
+   并明确告知用户这些是推测值，建议确认后再启动。
 
 执行步骤：
 1. 如有必要，先重新确认 SSE 连接有效。
-2. 一次性向用户确认所有参数（`tenant_id` + 仿真参数），格式示例：
-   > 请确认以下参数：
-   > - tenant_id: （请提供）
+2. 尝试获取场景配置参数（按上述降级策略）。
+3. 向用户展示仿真参数供确认，格式示例：
+   > 准备启动场景 [场景名称]，请确认参数：
    > - 总步数: 1200（默认）
    > - 计算步长: 120s（默认）
    > - 输出步长: 7200s（默认）
    >
-   > 需要调整哪些？或直接确认启动。
-   反例：如果用户上一条消息只有 `100001`，这表示“选择场景 100001”，此时仍然必须先发上面的确认消息，不能直接调用 `create_simulation_task`。
-3. 用户确认后，调用 `create_simulation_task`。
+   > 需要调整吗？或直接确认启动。
+
+   反例：如果用户上一条消息只有 `100001`，这表示”选择场景 100001”，此时仍然必须先发上面的确认消息，不能直接调用 `create_simulation_task`。
+4. 用户确认后，调用 `create_simulation_task`。
 4. 保存并展示：
    - `biz_scene_instance_id`
    - `task_status`
@@ -120,8 +137,8 @@ description: |
 
 异常处理：
 - `SSE通道未建立`：重新订阅后重试。
-- `tenant is null` / `NullPointerException`：提示用户提供正确的 `tenant_id`。
-- `valid: false`：提示检查 tenant、user、场景配置是否匹配。
+- `NullPointerException`：可能是场景配置问题，检查场景 ID 和配置 URL 是否正确。
+- `valid: false`：提示检查场景配置是否匹配。
 
 停止语义：
 - “停止仿真”“结束仿真”“终止任务”“取消这个任务”默认执行 `cancel_simulation_task`。
@@ -172,6 +189,7 @@ INIT -> WAITING_AGENTS -> READY -> STEPPING -> COMPLETED
 5. 用 `scripts/analyze_anomalies.py` 生成异常结论。
 6. 需要报告时，默认同时产出 HTML 报告和 Markdown 报告；仅当用户明确要求正式文档时，再补充 Word 报告。
    - HTML 报告和 Markdown 报告是默认必要产物，除非用户明确只要其中一种。
+   - HTML 报告必须对齐 `assets/hydros-report-template/index.html` 的完整版结构；不要产出自定义轻量页、单页汇报版或仅摘要页来替代模板完整版。
    - 如果可获取 `objects.yaml` 中的断面里程与底高程，HTML 报告和 Markdown 报告应默认附带渠道纵剖面图；如果用户明确要单独纵剖面页，再额外输出独立页面。
    - 每次报告输出都要按目录分类：`report/` 存放 HTML 和 Markdown，`charts/` 存放 PNG 图表，`data/` 存放 `report.data.js`、统计摘要和其他中间数据。
    - 图表展示时，不要把 y 轴固定在过大的全局范围；应根据当前图表中的实际数值自动收紧范围，避免水位等小幅波动被压扁。
@@ -182,6 +200,7 @@ INIT -> WAITING_AGENTS -> READY -> STEPPING -> COMPLETED
    - 图表嵌入顺序建议：水位时序图 → 流量时序图 → 闸门开度图 → 分水口流量图 → 热力图，每张图后紧跟 2-3 句分析说明。
 7. 需要 HTML 页面时，读取 HTML 参考并复用模板资产。
 8. 如果用户明确要“报告页”“汇报页”“导出截图”或“完整曲线”，优先选报告模板；如果用户明确要筛选、联动、钻取，优先选工作台模板。
+   - 当选择报告模板时，默认含义是输出符合 `assets/hydros-report-template/index.html` 的完整版 HTML 报告，而不是临时拼接的简化页面。
    - 使用报告模板时，如果既有纵剖面数据也有时序结果，页面应默认提供统一时间轴，让纵剖面、水位、流量、闸门开度按同一步号联动，并支持播放、拖拽、暂停、继续。
    - 报告中的 `Task Snapshot` 要尽量补全任务元信息：开始时间、结束时间、时间步长、输出步长、仿真时长、场景 YAML ID、任务状态等；能从场景 YAML 和 CSV 计算的要直接计算，缺失时再明确标注“无法推导”。
    - 时间口径优先级：用户显式参数 `total_steps` / `sim_step_size` / `output_step_size` > 场景 YAML > CSV 自身可靠字段（如非空的 `step_index`）> 仅展示离散采样序号。禁止写死 `120 秒/步` 之类的默认值。
@@ -207,7 +226,7 @@ INIT -> WAITING_AGENTS -> READY -> STEPPING -> COMPLETED
 | “拉取结果” / “分析数据” | 执行阶段五 |
 | “生成报告” | 执行阶段五，默认输出 HTML 报告和 Markdown 报告 |
 | “做个页面看仿真数据” / “做 HTML 仪表板” | 先执行阶段五拿到数据，再读 references 并复用交互式分析工作台模板 |
-| “出一份 HTML 报告” / “做汇报页” / “看完整曲线” | 先执行阶段五拿到数据，再读 references 并复用 HTML 汇报报告模板 |
+| “出一份 HTML 报告” / “做汇报页” / “看完整曲线” | 先执行阶段五拿到数据，再读 references 并复用符合 `index.html` 的完整版 HTML 报告模板 |
 | “获取拓扑” / “场景拓扑” / “渠道拓扑” | 读取场景配置和 `objects.yaml`，输出 HTML 拓扑可视化页 |
 | “画一个纵剖面” / “做纵剖面页” | 基于断面里程、底高程和水位结果生成渠道纵剖面 HTML |
 | “增加闸站展示” / “展示水流流向” | 在纵剖面页中增强闸站信息和上游到下游流向标识 |
@@ -218,7 +237,7 @@ INIT -> WAITING_AGENTS -> READY -> STEPPING -> COMPLETED
 ## 常见失败原因
 
 - 初始化超时：部分智能体未上线，建议换场景或检查智能体服务。
-- NullPointerException：多半是 `tenant_id` 错误。
+- NullPointerException：可能是场景配置问题或依赖服务异常。
 - 智能体注册失败：场景依赖的服务不可用。
 - 输出为空：提示用户检查 `default_render_objects` 是否为空。
 
@@ -228,7 +247,6 @@ INIT -> WAITING_AGENTS -> READY -> STEPPING -> COMPLETED
 
 ```text
 sse_client_id
-tenant_id
 biz_scenario_id
 biz_scenario_config_url
 biz_scene_instance_id

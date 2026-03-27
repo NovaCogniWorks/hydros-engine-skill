@@ -1,7 +1,7 @@
 window.HYDROS_REPORT_DATA = {
   csvPath: "/path/to/timeseries_data.csv",
   meta: {
-    report_title: "Hydros 仿真结果分析示例",
+    report_title: "Hydros 仿真分析报告",
     biz_scene_instance_id: "SIM-DEMO-001",
     biz_scenario_id: "100001",
     tenant_id: "demo-tenant",

@@ -95,12 +95,13 @@
 - `index.html` 负责排版、样式和图表渲染函数
 - `report.data.js` 负责元数据、摘要文案、异常列表和完整曲线序列
 - 接入真实结果时，优先只替换 `report.data.js`，不要把真实数据硬编码进 HTML
+- 默认输出符合模板的完整版报告页，不要另起自定义轻量页、单页汇报版或仅摘要页。
 
 ## 推荐页面结构
 
 ### 报告页推荐结构
 
-适合单页汇报的顺序：
+适合完整版报告页的顺序：
 
 1. 顶部任务摘要与元信息
 2. 执行摘要与关键结论
@@ -232,7 +233,7 @@ biz_scene_instance_id, biz_scenario_id, total_steps, task_status, default_render
 ## 报告页 prompt 模板
 
 ```text
-创建一个单页 hydros 仿真分析报告 HTML，用于汇报和复盘真实仿真结果。页面应偏报告而不是工作台，适合直接截图、导出 PDF 或归档。
+创建一个 hydros 仿真分析报告 HTML，用于汇报和复盘真实仿真结果。页面应偏报告而不是工作台，适合直接截图、导出 PDF 或归档，并且必须对齐 hydros-report-template/index.html 的完整版结构。
 
 Tech:
 - 单文件 HTML
@@ -270,6 +271,7 @@ Implementation Constraints:
 - HTML 里不要硬编码真实数据
 - 报告文案、异常表和图表都由 payload 驱动
 - 所有模块必须有数据为空时的兜底提示
+- 不要实现自定义轻量页、单页汇报版或摘要页来替代模板完整版
 ```
 
 ## 写 prompt 时最重要的三条
@@ -311,6 +313,7 @@ Implementation Constraints:
 1. 直接复用 [../assets/hydros-report-template/index.html](../assets/hydros-report-template/index.html)
 2. 替换同目录 [../assets/hydros-report-template/report.data.js](../assets/hydros-report-template/report.data.js)
 3. 优先保留完整曲线、滚动图例和 `dataZoom`
+4. 不要缩减成单页轻量汇报版，默认保持模板完整版结构
 
 ## 拓扑页模式补充
 

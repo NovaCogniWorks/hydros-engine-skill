@@ -703,12 +703,16 @@ def build_report_data(
             }
         )
 
+    scenario_name = scenario_meta["scenario_name"] if scenario_meta and scenario_meta.get("scenario_name") else None
+    report_title = f"{scenario_name} 分析报告" if scenario_name else "Hydros 仿真分析报告"
+
     payload = {
         "csvPath": csv_path.name,
         "meta": {
-            "report_title": f"{csv_path.stem} 分析报告",
+            "report_title": report_title,
             "biz_scene_instance_id": str(df["biz_scenario_instance_id"].iloc[0]),
             "biz_scenario_id": scenario_id,
+            "scenario_name": scenario_name or f"场景 {scenario_id}",
             "tenant_id": str(df["tenant_id"].iloc[0]),
             "task_status": "已完成",
             "task_status_raw": "COMPLETED",
@@ -888,6 +892,28 @@ def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
 
 {profile['summary']} 图中同时标出了 `ZM1`、`ZM2` 两个闸站位置，便于把闸门控制动作和沿程水面线一起解释。
 """
+    if "不可靠" in str(payload["meta"].get("time_axis_note", "")):
+        conclusion_axis_line = (
+            "- 本次 CSV 在数值层面可用于结果分析，但时间轴字段不可靠；"
+            "报告已按可用参数恢复时间口径，并把图表横轴降级为 CSV 采样序号。"
+        )
+    else:
+        conclusion_axis_line = (
+            f"- 本次 CSV 的 `data_index` 可按{payload['meta'].get('axis_label', '计算步')}解读，时间轴口径清晰；"
+            f"本次报告覆盖 `{analysis['step_values'][0]} ~ {analysis['step_values'][-1]}`，共 `{payload['meta']['sampled_point_count']}` 个采样点。"
+        )
+
+    duration_gap_text = str(payload["meta"].get("duration_gap", ""))
+    if duration_gap_text.startswith("0 秒"):
+        conclusion_duration_line = (
+            f"- CSV 覆盖时长与当前可推导的仿真总时长一致，时长差值为 `{duration_gap_text}`，"
+            "可用于完整过程复盘。"
+        )
+    else:
+        conclusion_duration_line = (
+            f"- 用户参数推导的总时长与 CSV 覆盖时长存在差异，当前差值为 `{duration_gap_text}`；"
+            "需优先排查 CSV 导出链路，再决定是否可用于严格时间过程分析。"
+        )
     markdown = f"""# {payload['meta']['report_title']}
 
 ## 概况
@@ -972,8 +998,8 @@ def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
 
 ## 结论
 
-- 本次 CSV 在数值层面可用于结果分析，但时间轴字段不可靠；报告已按显式参数恢复总时长，并把图表横轴降级为 CSV 采样序号。
-- 用户参数与 CSV 导出结果存在时长/采样点不一致，需优先排查 CSV 导出链路，再决定是否可用于严格时间过程分析。
+{conclusion_axis_line}
+{conclusion_duration_line}
 - 系统整体稳定，无倒流、无明显水位异常波动，适合作为一次稳定工况分析样本。
 - 建议优先复核 `FSK2-北易水退水闸` 的零流量合理性，以及 `{analysis['top_flow_variation']['object_name']}` 的局部波动来源。
 - 若下一步要做动态评估，建议增加事件注入或更细粒度输出。
