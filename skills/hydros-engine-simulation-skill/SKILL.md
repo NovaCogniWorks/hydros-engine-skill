@@ -8,6 +8,22 @@ description: |
 
 # Hydros Engine 水力仿真 Skill
 
+## 初始条件
+
+- 在读取“核心职责”或进入任何仿真流程前，先检查 `hydro-engine-mcp` 是否已安装并可连通。
+- 优先调用 `list_mcp_resource_templates(server="hydro-engine-mcp")` 或等价轻量探测确认 MCP 握手正常。
+- 如果需要做 HTTP 直连排查，使用：
+  - URL: `https://hydroos.cn/mcp`
+  - Header `Accept: application/json, text/event-stream`
+  - Header `Authorization: Bearer <token>`
+- 如果用户尚未配置 token，则按 `Authorization token: ""` 视为未配置，直接报告缺失并停止后续步骤。
+- 当 token 缺失或 MCP 未安装时，明确提示用户：
+  - 先访问 `https://hydroos.cn/playground/`
+  - 完成注册或登录
+  - 在“账号管理”中获取 API token
+  - 将该 token 配置到 `Authorization: Bearer <token>` 后再继续
+- 只有在上述检查通过后，才允许继续执行本 skill 的任何后续工作流。
+
 ## 核心职责
 
 编排 hydros 仿真的完整流程，并在结果阶段提供图表、异常分析、HTML 汇报报告、Markdown 报告、交互式分析工作台、场景拓扑可视化和渠道纵剖面展示支持。
@@ -15,7 +31,6 @@ description: |
 ## 沟通与硬规则
 
 - 始终使用中文与用户沟通，技术术语和代码标识保持原文。
-- 在进入任何仿真流程前，先检查 `hydro-engine-mcp` 是否已安装并可连通。优先调用 `list_mcp_resource_templates(server="hydro-engine-mcp")` 或等价检查；若失败，再按 HTTP 端点排查：`https://hydroos.cn/mcp`，请求头至少包含 `Accept: application/json, text/event-stream` 和 `Authorization: Bearer <token>`。如果用户尚未配置 token，可记为 `Authorization token: ""` 并直接报告缺失，不要继续后续仿真步骤；此时应明确提示用户先访问 `https://hydroos.cn/playground/` 注册/登录，再到“账号管理”中获取 API token 并完成配置。
 - 在调用 `create_simulation_task` 前，必须先调用 `subscribe_to_simulation_events` 建立 SSE 事件订阅通道。
 - `biz_scenario_id` 和 `biz_scenario_config_url` 必须成对使用，并且只能来自 `biz_scenario_id_lists` 的返回结果。
 - 当用户只是回复场景 ID、场景名称，或说“就这个”“选这个”时，只能视为“选定场景”，不能直接视为“接受默认参数并立即启动”；必须先展示该场景的默认 `total_steps`、`sim_step_size`、`output_step_size`，并等待用户确认或修改。
@@ -60,22 +75,6 @@ description: |
 - 报告和工作台必须同时识别两类信息：一类是用户输入/场景配置里的仿真参数，一类是 CSV 实际导出的采样点与时间轴字段；两者一旦不一致，必须在报告的“异常与建议”“数据质量”或等价区块里显式写出，不要只在聊天回复里口头说明。
 
 ## 五阶段工作流
-
-### 阶段零：检查 MCP 安装与连通性
-
-1. 先检查 `hydro-engine-mcp` 是否已在当前环境可用。
-2. 优先调用 `list_mcp_resource_templates(server="hydro-engine-mcp")` 或其他轻量 MCP 探测，确认握手正常。
-3. 如果需要做 HTTP 直连排查，使用：
-   - URL: `https://hydroos.cn/mcp`
-   - Header `Accept: application/json, text/event-stream`
-   - Header `Authorization: Bearer <token>`
-4. 如果用户尚未提供 token，则按 `Authorization token: ""` 视为未配置，直接报告缺失并停止后续步骤。
-5. 当 token 缺失或 MCP 未安装时，明确提示用户：
-   - 先访问 `https://hydroos.cn/playground/`
-   - 完成注册或登录
-   - 在“账号管理”中获取 API token
-   - 将该 token 配置到 `Authorization: Bearer <token>` 后再继续
-6. 只有在 MCP 检测通过后，才进入阶段一。
 
 ### 阶段一：建立 SSE 事件订阅
 
