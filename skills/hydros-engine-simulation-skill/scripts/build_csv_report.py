@@ -237,12 +237,17 @@ def resolve_runtime_config(
 
 def detect_placeholder_steps(metric_df: pd.DataFrame) -> list[int]:
     placeholder_steps: list[int] = []
-    for step, group in metric_df.groupby("data_index", sort=True):
+    focus_df = metric_df[metric_df["object_type"] == "CrossSection"].copy()
+    if focus_df.empty:
+        focus_df = metric_df
+    for step, group in focus_df.groupby("data_index", sort=True):
         count = len(group)
         if count == 0:
             continue
-        zero_ratio = float((group["value"] == 0).sum()) / count
-        if zero_ratio >= 0.5 and float(group["value"].min()) == 0:
+        zero_mask = group["value"].abs() <= 1e-9
+        zero_ratio = float(zero_mask.sum()) / count
+        non_zero_count = int((~zero_mask).sum())
+        if zero_ratio >= 0.8 and non_zero_count <= max(1, math.floor(count * 0.05)):
             placeholder_steps.append(int(step))
     return placeholder_steps
 
@@ -474,11 +479,16 @@ def build_report_data(
         .sort_values("range", ascending=False)
     )
 
-    highlight_flow_name, highlight_flow_type = flow_range.index[0]
-    highlight_flow_stats = flow_range.iloc[0]
-    highlight_flow_group = flow_display_df[
-        (flow_display_df["object_name"] == highlight_flow_name) & (flow_display_df["object_type"] == highlight_flow_type)
-    ]
+    highlight_flow_name = None
+    highlight_flow_type = None
+    highlight_flow_stats = None
+    highlight_flow_group = pd.DataFrame(columns=flow_display_df.columns)
+    if not flow_range.empty:
+        highlight_flow_name, highlight_flow_type = flow_range.index[0]
+        highlight_flow_stats = flow_range.iloc[0]
+        highlight_flow_group = flow_display_df[
+            (flow_display_df["object_name"] == highlight_flow_name) & (flow_display_df["object_type"] == highlight_flow_type)
+        ]
 
     qd_level_df = level_df[
         (level_df["object_type"] == "CrossSection")
@@ -504,18 +514,19 @@ def build_report_data(
             }
         )
 
-    anomaly_items.append(
-        {
-            "priority": "中",
-            "object": highlight_flow_name,
-            "metric": "water_flow",
-            "finding": (
-                f"流量波动范围最大，最小 {round_number(highlight_flow_stats['min'])}、"
-                f"最大 {round_number(highlight_flow_stats['max'])}，幅度 {round_number(highlight_flow_stats['range'])}。"
-            ),
-            "advice": "复核该断面附近的分流、闸门动作或边界条件切换，确认是否属于预期工况响应。",
-        }
-    )
+    if highlight_flow_name is not None and highlight_flow_stats is not None:
+        anomaly_items.append(
+            {
+                "priority": "中",
+                "object": highlight_flow_name,
+                "metric": "water_flow",
+                "finding": (
+                    f"流量波动范围最大，最小 {round_number(highlight_flow_stats['min'])}、"
+                    f"最大 {round_number(highlight_flow_stats['max'])}，幅度 {round_number(highlight_flow_stats['range'])}。"
+                ),
+                "advice": "复核该断面附近的分流、闸门动作或边界条件切换，确认是否属于预期工况响应。",
+            }
+        )
 
     if dynamic_gate_groups:
         gate_name, gate_group, gate_steps = dynamic_gate_groups[0]
