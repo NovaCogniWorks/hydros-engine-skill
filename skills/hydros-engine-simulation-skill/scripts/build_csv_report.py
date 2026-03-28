@@ -247,7 +247,9 @@ def detect_placeholder_steps(metric_df: pd.DataFrame) -> list[int]:
         zero_mask = group["value"].abs() <= 1e-9
         zero_ratio = float(zero_mask.sum()) / count
         non_zero_count = int((~zero_mask).sum())
-        if zero_ratio >= 0.8 and non_zero_count <= max(1, math.floor(count * 0.05)):
+        # Allow a small number of inlet/anchor sections to carry real values while the
+        # rest of the first exported frame is still effectively an all-zero bootstrap step.
+        if zero_ratio >= 0.8 and non_zero_count <= max(2, math.floor(count * 0.1)):
             placeholder_steps.append(int(step))
     return placeholder_steps
 
@@ -275,11 +277,15 @@ def build_metric_series(df: pd.DataFrame, metric: str, excluded_steps: set[int] 
     return series
 
 
-def build_gate_series(df: pd.DataFrame) -> list[dict[str, Any]]:
+def build_gate_series(df: pd.DataFrame, excluded_steps: set[int] | None = None) -> list[dict[str, Any]]:
     series = []
     gate_df = df[(df["object_type"] == "Gate") & (df["metrics_code"] == "gate_opening")].copy()
+    if excluded_steps:
+        gate_df = gate_df[~gate_df["data_index"].astype(int).isin(excluded_steps)].copy()
     for object_name, group in gate_df.groupby("object_name", sort=False):
         ordered = group.sort_values("data_index")
+        if ordered.empty:
+            continue
         values = list(zip(ordered["data_index"].astype(int), ordered["value"].astype(float)))
         compressed: list[list[Any]] = []
         previous = None
@@ -403,7 +409,7 @@ def build_report_data(
     asset_status: dict[str, Any] | None = None,
     profile_error: str | None = None,
 ) -> dict[str, Any]:
-    unique_steps = sorted(int(step) for step in df["data_index"].unique().tolist())
+    raw_unique_steps = sorted(int(step) for step in df["data_index"].unique().tolist())
     step_interval = runtime_config.csv_step_interval
     scenario_id = str(df["biz_scenario_id"].iloc[0])
     scenario_meta = fetch_scenario_metadata(scenario_id)
@@ -416,17 +422,20 @@ def build_report_data(
     gate_df = df[(df["object_type"] == "Gate") & (df["metrics_code"] == "gate_opening")].copy()
     placeholder_level_steps = detect_placeholder_steps(level_df)
     placeholder_flow_steps = detect_placeholder_steps(flow_df)
+    display_excluded_steps = sorted(set(placeholder_level_steps) | set(placeholder_flow_steps))
+    unique_steps = [step for step in raw_unique_steps if step not in display_excluded_steps] or raw_unique_steps
     level_display_df = level_df[~level_df["data_index"].astype(int).isin(placeholder_level_steps)].copy()
     flow_display_df = flow_df[~flow_df["data_index"].astype(int).isin(placeholder_flow_steps)].copy()
+    gate_display_df = gate_df[~gate_df["data_index"].astype(int).isin(display_excluded_steps)].copy()
     excluded_steps_by_metric = {
         "water_level": set(placeholder_level_steps),
         "water_flow": set(placeholder_flow_steps),
-        "gate_opening": set(),
+        "gate_opening": set(display_excluded_steps),
     }
     expected_steps_by_metric = {
         "water_level": set(int(step) for step in level_display_df["data_index"].unique().tolist()),
         "water_flow": set(int(step) for step in flow_display_df["data_index"].unique().tolist()),
-        "gate_opening": set(int(step) for step in gate_df["data_index"].unique().tolist()),
+        "gate_opening": set(int(step) for step in gate_display_df["data_index"].unique().tolist()),
     }
 
     negative_flow = flow_display_df[flow_display_df["value"] < 0].copy()
@@ -437,7 +446,7 @@ def build_report_data(
     completeness_issues = []
 
     for (object_name, metric, object_type), group in df.groupby(["object_name", "metrics_code", "object_type"], sort=False):
-        expected_steps = expected_steps_by_metric.get(metric, set(unique_steps))
+        expected_steps = expected_steps_by_metric.get(metric, set(raw_unique_steps))
         actual_steps = set(int(step) for step in group["data_index"].tolist()) - excluded_steps_by_metric.get(metric, set())
         if actual_steps != expected_steps:
             completeness_issues.append(
@@ -456,7 +465,7 @@ def build_report_data(
         elif values.nunique() == 1:
             constant_flow_groups.append((object_name, object_type, group))
 
-    for object_name, group in gate_df.groupby("object_name", sort=False):
+    for object_name, group in gate_display_df.groupby("object_name", sort=False):
         ordered = group.sort_values("data_index")
         values = ordered["value"].tolist()
         change_steps = []
@@ -592,8 +601,8 @@ def build_report_data(
     )
     output_interval_seconds = runtime_config.output_step_size
     sampled_duration_seconds = (
-        (len(unique_steps) - 1) * output_interval_seconds
-        if output_interval_seconds is not None and len(unique_steps) > 1
+        (len(raw_unique_steps) - 1) * output_interval_seconds
+        if output_interval_seconds is not None and len(raw_unique_steps) > 1
         else None
     )
     duration_gap_seconds = (
@@ -622,7 +631,9 @@ def build_report_data(
             else "根据当前 CSV 无法可靠推导"
         )
     )
-    if runtime_config.expected_sample_count is not None and runtime_config.expected_sample_count != len(unique_steps):
+    raw_sampled_point_count = len(raw_unique_steps)
+    display_sampled_point_count = len(unique_steps)
+    if runtime_config.expected_sample_count is not None and runtime_config.expected_sample_count != raw_sampled_point_count:
         anomaly_items.insert(
             0,
             {
@@ -630,7 +641,7 @@ def build_report_data(
                 "object": "CSV 时间轴",
                 "metric": "data_index / step_index / source_time",
                 "finding": (
-                    f"按参数应约有 {runtime_config.expected_sample_count} 个输出点，但 CSV 实际只有 {len(unique_steps)} 个采样点；"
+                    f"按参数应约有 {runtime_config.expected_sample_count} 个输出点，但 CSV 实际只有 {raw_sampled_point_count} 个原始采样点；"
                     f"期望总时长 {format_seconds_text(simulation_duration_seconds) or '无法推导'}，"
                     f"按现有采样点最多只能覆盖 {format_seconds_text(sampled_duration_seconds) or '无法推导'}。"
                 ),
@@ -654,23 +665,23 @@ def build_report_data(
 
     summary_paragraph = (
         f"该 CSV 共包含 {len(df)} 条记录，覆盖 {df['object_name'].nunique()} 个对象、"
-        f"{df['metrics_code'].nunique()} 类指标，{runtime_config.sample_step_note}，"
-        f"共 {len(unique_steps)} 个采样点。"
+        f"{df['metrics_code'].nunique()} 类指标，展示步范围 {unique_steps[0]} ~ {unique_steps[-1]}，"
+        f"图表展示共 {display_sampled_point_count} 个采样点。"
         f"整体未发现负流量和明显水位突跳，主干断面末步水位由 {round_number(qd_last['value'].max())} m "
         f"降至 {round_number(qd_last['value'].min())} m，沿程降幅约 {level_drop} m，表现为稳定下泄。"
         f"当前更值得关注的是个别退水闸零流量，以及 {highlight_flow_name} 的局部流量大幅波动。"
     )
-    if runtime_config.expected_sample_count is not None and runtime_config.expected_sample_count != len(unique_steps):
+    if runtime_config.expected_sample_count is not None and runtime_config.expected_sample_count != raw_sampled_point_count:
         summary_paragraph += (
             f" 同时，用户参数对应的期望输出点数约为 {runtime_config.expected_sample_count}，"
-            f"而 CSV 实际仅导出 {len(unique_steps)} 个采样点，说明结果文件的时间轴字段存在异常。"
+            f"而 CSV 实际仅导出 {raw_sampled_point_count} 个原始采样点，说明结果文件的时间轴字段存在异常。"
         )
 
     summary_bullets = [
         (
             f"{runtime_config.axis_note} 实际 CSV 采样序号为 {'、'.join(str(step) for step in unique_steps[:5])} ... {unique_steps[-1]}；"
-            f"water_level 自动剔除了占位零值步 {'、'.join(str(step) for step in placeholder_level_steps)}。"
-            if placeholder_level_steps
+            f"图表默认剔除了启动占位步 {'、'.join(str(step) for step in display_excluded_steps)}。"
+            if display_excluded_steps
             else f"{runtime_config.axis_note} 实际 CSV 采样序号为 {'、'.join(str(step) for step in unique_steps[:5])} ... {unique_steps[-1]}。"
         ),
         (
@@ -693,12 +704,12 @@ def build_report_data(
             0,
             f"报告产物存在缺失：{'、'.join(asset_status['missing'])}；HTML 已显式标注该问题，相关图表分析需按缺失范围降级解读。",
         )
-    if runtime_config.expected_sample_count is not None and runtime_config.expected_sample_count != len(unique_steps):
+    if runtime_config.expected_sample_count is not None and runtime_config.expected_sample_count != raw_sampled_point_count:
         summary_bullets.insert(
             1,
             (
                 f"按参数推导的总时长为 {format_seconds_text(simulation_duration_seconds)}，"
-                f"但按 CSV 当前 {len(unique_steps)} 个采样点和输出步长推导，仅能覆盖 {format_seconds_text(sampled_duration_seconds)}；"
+                f"但按 CSV 当前 {raw_sampled_point_count} 个原始采样点和输出步长推导，仅能覆盖 {format_seconds_text(sampled_duration_seconds)}；"
                 f"两者相差 {format_seconds_text(duration_gap_seconds)}。"
             ),
         )
@@ -783,13 +794,7 @@ def build_report_data(
             "report_asset_complete": asset_status["complete"],
             "missing_report_assets": asset_status["missing"],
         },
-        "metaCards": [
-            {"label": "任务状态", "value": "已完成"},
-            {"label": "仿真时长", "value": format_duration_text(simulation_duration_seconds) or f"{last_calculation_step} 个计算步"},
-            {"label": "CSV 覆盖时长", "value": format_duration_text(sampled_duration_seconds) or "无法推导"},
-            {"label": "输出步长", "value": output_step_text},
-            {"label": "异常条目", "value": str(len(anomaly_items))},
-        ],
+        "metaCards": [],
         "headlineCards": [
             {
                 "eyebrow": "执行结论",
@@ -819,7 +824,7 @@ def build_report_data(
                     )
                     if asset_status["missing"]
                     else (
-                        f"{len(unique_steps)} 个采样点已导出。{runtime_config.axis_note}"
+                        f"{display_sampled_point_count} 个展示采样点已导出。{runtime_config.axis_note}"
                         if not completeness_issues else f"发现 {len(completeness_issues)} 组对象/指标缺步。"
                     )
                 ),
@@ -852,6 +857,7 @@ def build_report_data(
             {"label": "CSV 覆盖时长", "value": format_seconds_text(sampled_duration_seconds) or "无法推导"},
             {"label": "时长差值", "value": format_seconds_text(duration_gap_seconds) or "无法推导"},
             {"label": "时间轴口径", "value": runtime_config.axis_note},
+            {"label": "展示步范围", "value": f"{unique_steps[0]} ~ {unique_steps[-1]}（共 {display_sampled_point_count} 个展示采样点）"},
             {"label": "结果导出时间", "value": format_datetime_text(runtime_completed_at.to_pydatetime()) or str(df["gmt_create"].max())},
             {"label": "报告完整性", "value": "完整" if asset_status["complete"] else f"缺失 {'、'.join(asset_status['missing'])}"},
             {"label": "分析人", "value": "Codex / Hydros Simulation Skill"},
@@ -860,7 +866,7 @@ def build_report_data(
         "charts": {
             "levelSeries": build_metric_series(df, "water_level", set(placeholder_level_steps)),
             "flowSeries": build_metric_series(df, "water_flow", set(placeholder_flow_steps)),
-            "gateSeries": build_gate_series(df),
+            "gateSeries": build_gate_series(df, set(display_excluded_steps)),
         },
         "chartInterpretations": {
             "level": {
@@ -882,11 +888,12 @@ def build_report_data(
                     f"完整 gate_opening 曲线共 {int(gate_df.groupby('object_name').ngroups)} 条，"
                     f"{dynamic_gate_count} 条存在明显开度切换，适合与水位、流量阶段变化联动解释。"
                 ),
-                "placeholder_steps": [],
+                "placeholder_steps": display_excluded_steps,
             },
         },
         "analysisSummary": {
             "step_values": unique_steps,
+            "raw_step_values": raw_unique_steps,
             "step_interval": step_interval,
             "scenario_total_steps": scenario_total_steps,
             "sim_step_size": step_resolution_seconds,
@@ -903,6 +910,8 @@ def build_report_data(
             "axis_label": runtime_config.axis_label,
             "axis_note": runtime_config.axis_note,
             "expected_sample_count": runtime_config.expected_sample_count,
+            "raw_sampled_point_count": raw_sampled_point_count,
+            "display_sampled_point_count": display_sampled_point_count,
             "metric_counts": metric_counts,
             "object_type_counts": object_type_counts,
             "top_flow_variation": {
@@ -922,6 +931,7 @@ def build_report_data(
             "placeholder_steps": {
                 "water_level": placeholder_level_steps,
                 "water_flow": placeholder_flow_steps,
+                "display_excluded_steps": display_excluded_steps,
             },
             "report_assets": asset_status,
             "profile_error": profile_error,

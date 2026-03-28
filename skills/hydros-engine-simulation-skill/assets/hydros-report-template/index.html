@@ -403,14 +403,11 @@
     <div class="mx-auto max-w-[1440px] px-4 py-6 lg:px-8 lg:py-8">
       <main class="report-shell overflow-hidden rounded-[36px] border border-white/80 shadow-sheet">
         <section class="hero-section border-b border-line/80 px-6 py-8 lg:px-10 lg:py-10">
-          <div class="grid gap-8 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-end">
-            <div class="min-w-0 max-w-4xl pr-0 lg:pr-6">
+          <div>
+            <div class="flex min-w-0 w-full flex-col justify-between">
               <p class="inline-flex rounded-full border border-primary/12 bg-white/70 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.34em] text-primary/82 shadow-sm">Hydros Analysis Report</p>
-              <h1 id="reportTitle" class="mt-5 max-w-full break-words text-[2.9rem] font-semibold tracking-[0.01em] text-ink lg:text-[4.4rem] lg:leading-[0.98]">水力仿真结果分析报告</h1>
-              <p id="reportIntro" class="mt-5 max-w-3xl text-base leading-8 text-ink/72 lg:text-[1.02rem]"></p>
+              <h1 id="reportTitle" class="mt-5 max-w-full break-words text-[2.9rem] font-semibold tracking-[0.01em] text-ink [text-align:justify] lg:text-[4.4rem] lg:leading-[0.98]">水力仿真结果分析报告</h1>
             </div>
-
-            <div class="grid w-full gap-3 self-start sm:grid-cols-2 lg:w-[320px] lg:self-end" id="metaCards"></div>
           </div>
         </section>
 
@@ -536,6 +533,7 @@
                 <table class="anomaly-table min-w-full divide-y divide-line text-left text-sm">
                   <thead class="bg-slate-50/90 text-xs uppercase tracking-[0.18em] text-ink/56">
                     <tr>
+                      <th class="px-4 py-3">序号</th>
                       <th class="px-4 py-3">优先级</th>
                       <th class="px-4 py-3">对象</th>
                       <th class="px-4 py-3">指标</th>
@@ -872,9 +870,6 @@
       function renderHeader() {
         document.title = `${reportData.meta.report_title} - Hydros 仿真分析报告`;
         document.getElementById("reportTitle").textContent = reportData.meta.report_title;
-        document.getElementById("reportIntro").innerHTML =
-          `数据源来自 <code>${basename(reportData.csvPath)}</code>，共 ${reportData.meta.record_count.toLocaleString("zh-CN")} 条记录，覆盖 ` +
-          `${reportData.meta.object_count} 个对象与 ${reportData.meta.metric_count} 类指标。模板默认由外部 payload 驱动，支持从同目录或 <code>../data/report.data.js</code> 加载真实数据。`;
         document.getElementById("summaryBadge").textContent = `外部数据 payload · ${reportData.meta.record_count.toLocaleString("zh-CN")} 条记录`;
         document.getElementById("summaryParagraph").textContent = reportData.summaryParagraph;
       }
@@ -895,16 +890,7 @@
       }
 
       function renderMetaCards() {
-        document.getElementById("metaCards").innerHTML = reportData.metaCards
-          .map(
-            (card) => `
-              <article class="metric-card rounded-[24px] px-4 py-4">
-                <p class="text-xs font-semibold uppercase tracking-[0.18em] text-ink/48">${card.label}</p>
-                <p class="mt-3 break-words text-[1.35rem] leading-none font-semibold tracking-tight text-ink lg:text-[1.5rem]">${card.value}</p>
-              </article>
-            `
-          )
-          .join("");
+        return;
       }
 
       function renderSummaryBullets() {
@@ -997,8 +983,9 @@
       function renderAnomalyTable() {
         document.getElementById("anomalyTable").innerHTML = reportData.anomalies
           .map(
-            (item) => `
+            (item, index) => `
               <tr>
+                <td data-label="序号" class="px-4 py-3 font-medium text-ink/58">${index + 1}</td>
                 <td data-label="优先级" class="px-4 py-3">
                   <span class="rounded-full px-2.5 py-1 text-xs font-medium ${
                     item.priority === "高"
@@ -1210,7 +1197,7 @@
                 fontWeight: 600,
               },
               axisLine: { lineStyle: { color: chartTheme.grid } },
-              axisTick: { lineStyle: { color: chartTheme.grid } },
+              axisTick: { inside: true, lineStyle: { color: chartTheme.grid } },
               axisLabel: { color: chartTheme.text, margin: 8 },
               splitLine: { lineStyle: { color: chartTheme.grid, opacity: 0.9 } },
               splitArea: {
@@ -1233,7 +1220,7 @@
                 fontWeight: 600,
               },
               axisLine: { lineStyle: { color: chartTheme.grid } },
-              axisTick: { lineStyle: { color: chartTheme.grid } },
+              axisTick: { inside: true, lineStyle: { color: chartTheme.grid } },
               axisLabel: { color: chartTheme.text, margin: 8 },
               splitLine: { lineStyle: { color: chartTheme.grid, opacity: 0.9 } },
             },
@@ -1505,9 +1492,9 @@
                 fontWeight: 600,
                 padding: [8, 0, 0, 0],
               },
-              axisLine: { lineStyle: { color: chartTheme.grid } },
-              axisTick: { lineStyle: { color: chartTheme.grid } },
-              axisLabel: { margin: 10, color: chartTheme.text },
+              axisLine: { show: true, lineStyle: { color: chartTheme.grid, width: 1.2 } },
+              axisTick: { show: true, inside: true, lineStyle: { color: chartTheme.grid } },
+              axisLabel: { show: true, margin: 10, color: chartTheme.text, hideOverlap: false },
               splitLine: { show: false },
             },
             yAxis: {
@@ -1523,8 +1510,9 @@
                 fontSize: 13,
                 fontWeight: 600,
               },
-              axisLine: { show: false },
-              axisLabel: { color: chartTheme.text },
+              axisLine: { show: true, lineStyle: { color: chartTheme.grid, width: 1.2 } },
+              axisTick: { show: true, inside: true, lineStyle: { color: chartTheme.grid } },
+              axisLabel: { show: true, color: chartTheme.text, hideOverlap: false },
               splitLine: { lineStyle: { color: chartTheme.grid } },
             },
             series: selectedSeries,
@@ -1581,9 +1569,9 @@
                 fontWeight: 600,
                 padding: [8, 0, 0, 0],
               },
-              axisLine: { lineStyle: { color: chartTheme.grid } },
-              axisTick: { lineStyle: { color: chartTheme.grid } },
-              axisLabel: { margin: 10, color: chartTheme.text },
+              axisLine: { show: true, lineStyle: { color: chartTheme.grid, width: 1.2 } },
+              axisTick: { show: true, inside: true, lineStyle: { color: chartTheme.grid } },
+              axisLabel: { show: true, margin: 10, color: chartTheme.text, hideOverlap: false },
               splitLine: { show: false },
             },
             yAxis: {
@@ -1599,8 +1587,9 @@
                 fontSize: 13,
                 fontWeight: 600,
               },
-              axisLine: { show: false },
-              axisLabel: { color: chartTheme.text },
+              axisLine: { show: true, lineStyle: { color: chartTheme.grid, width: 1.2 } },
+              axisTick: { show: true, inside: true, lineStyle: { color: chartTheme.grid } },
+              axisLabel: { show: true, color: chartTheme.text, hideOverlap: false },
               splitLine: { lineStyle: { color: chartTheme.grid } },
             },
             series: selectedSeries,
@@ -1662,9 +1651,9 @@
                 fontWeight: 600,
                 padding: [8, 0, 0, 0],
               },
-              axisLine: { lineStyle: { color: chartTheme.grid } },
-              axisTick: { lineStyle: { color: chartTheme.grid } },
-              axisLabel: { color: chartTheme.text, fontSize: 11, margin: 12 },
+              axisLine: { show: true, lineStyle: { color: chartTheme.grid, width: 1.2 } },
+              axisTick: { show: true, inside: true, lineStyle: { color: chartTheme.grid } },
+              axisLabel: { show: true, color: chartTheme.text, fontSize: 11, margin: 12, hideOverlap: false },
               splitLine: { show: false },
             },
             yAxis: {
@@ -1680,8 +1669,9 @@
                 fontSize: 13,
                 fontWeight: 600,
               },
-              axisLine: { show: false },
-              axisLabel: { color: chartTheme.text },
+              axisLine: { show: true, lineStyle: { color: chartTheme.grid, width: 1.2 } },
+              axisTick: { show: true, inside: true, lineStyle: { color: chartTheme.grid } },
+              axisLabel: { show: true, color: chartTheme.text, hideOverlap: false },
               splitLine: { lineStyle: { color: chartTheme.grid } },
             },
             series: gateChartSeries,
