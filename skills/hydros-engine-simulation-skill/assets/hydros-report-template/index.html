@@ -60,12 +60,24 @@
       }
 
       body {
-        font-family: "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", sans-serif;
+        font-family:
+          "Noto Sans SC",
+          "PingFang SC",
+          "Hiragino Sans GB",
+          "Microsoft YaHei",
+          "SF Pro Text",
+          "Segoe UI",
+          "Helvetica Neue",
+          Arial,
+          sans-serif;
         background:
           radial-gradient(circle at top left, rgba(15, 139, 141, 0.16), transparent 30%),
           radial-gradient(circle at top right, rgba(24, 91, 117, 0.18), transparent 28%),
           linear-gradient(180deg, rgba(232, 240, 242, 0.9), rgba(221, 233, 237, 0.9)),
           var(--report-bg);
+        text-rendering: optimizeLegibility;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
       }
 
       .report-shell {
@@ -113,7 +125,13 @@
       h1,
       h2,
       h3 {
-        font-family: "Cormorant Garamond", "Noto Serif SC", serif;
+        font-family:
+          "Cormorant Garamond",
+          "Noto Serif SC",
+          "Songti SC",
+          "STSong",
+          Georgia,
+          serif;
         letter-spacing: 0.01em;
       }
 
@@ -241,6 +259,17 @@
         background: rgba(223, 244, 243, 0.46);
       }
 
+      .anomaly-table th,
+      .anomaly-table td {
+        vertical-align: top;
+      }
+
+      .metric-pill {
+        display: inline-flex;
+        align-items: center;
+        white-space: nowrap;
+      }
+
       .chart-legend {
         display: flex;
         flex-wrap: wrap;
@@ -260,6 +289,12 @@
         color: rgba(16, 35, 50, 0.78);
       }
 
+      .term-hint {
+        cursor: help;
+        text-decoration: underline dotted rgba(16, 35, 50, 0.28);
+        text-underline-offset: 0.16em;
+      }
+
       .chart-axis-label-muted {
         font-size: 0.8125rem;
         font-weight: 500;
@@ -273,6 +308,93 @@
           animation: none !important;
           transition: none !important;
           scroll-behavior: auto !important;
+        }
+      }
+
+      @media (max-width: 820px) {
+        .report-shell {
+          border-radius: 28px;
+        }
+
+        .section-shell,
+        .section-shell-dark {
+          border-radius: 24px;
+        }
+
+        .table-shell {
+          overflow: visible;
+          background: transparent;
+          border-color: transparent;
+          box-shadow: none;
+        }
+
+        .anomaly-table,
+        .anomaly-table tbody,
+        .anomaly-table tr,
+        .anomaly-table td {
+          display: block;
+          width: 100%;
+        }
+
+        .anomaly-table thead {
+          display: none;
+        }
+
+        .anomaly-table tbody {
+          display: grid;
+          gap: 14px;
+          background: transparent;
+        }
+
+        .anomaly-table tr {
+          border: 1px solid rgba(135, 166, 179, 0.24);
+          border-radius: 22px;
+          background:
+            linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(247, 250, 251, 0.96)),
+            rgba(255, 255, 255, 0.94);
+          box-shadow: 0 14px 28px rgba(16, 35, 50, 0.06);
+          padding: 16px;
+        }
+
+        .anomaly-table td {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 14px;
+          padding: 0;
+          border: 0;
+        }
+
+        .anomaly-table td + td {
+          margin-top: 12px;
+        }
+
+        .anomaly-table td::before {
+          content: attr(data-label);
+          flex: 0 0 4.75rem;
+          min-width: 4.75rem;
+          font-size: 11px;
+          font-weight: 700;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          color: rgba(16, 35, 50, 0.48);
+        }
+
+        .anomaly-table td[data-label="现象"],
+        .anomaly-table td[data-label="建议"] {
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 6px;
+        }
+
+        .anomaly-table td[data-label="现象"]::before,
+        .anomaly-table td[data-label="建议"]::before {
+          flex: none;
+          min-width: 0;
+        }
+
+        .anomaly-table .metric-pill {
+          max-width: 100%;
         }
       }
     </style>
@@ -328,7 +450,7 @@
                       <span id="timelineStatus">已暂停</span>
                       <div class="flex items-center gap-3">
                         <span id="timelineCurrentMeta" class="text-xs text-ink/58">沿程降幅 -</span>
-                        <span id="timelineCurrentStep" class="font-medium text-primary">Step -</span>
+                        <span id="timelineCurrentStep" class="font-medium text-primary term-hint" title="data_index">采样步 -</span>
                       </div>
                     </div>
                     <input id="timelineSlider" type="range" min="0" max="0" value="0" class="h-2 w-full cursor-pointer appearance-none rounded-full bg-primary/18 accent-primary" />
@@ -364,7 +486,13 @@
               <div>
                 <p class="text-xs font-semibold uppercase tracking-[0.24em] text-primary/70">Section 03</p>
                 <h2 class="mt-2 text-2xl font-semibold">完整曲线</h2>
-                <p class="mt-2 text-sm text-ink/58">展示全部 water_level、water_flow、gate_opening 序列</p>
+                <p class="mt-2 text-sm text-ink/58">
+                  展示全部
+                  <span class="term-hint" title="water_level">水位</span>、
+                  <span class="term-hint" title="water_flow">流量</span>、
+                  <span class="term-hint" title="gate_opening">闸门开度</span>
+                  序列
+                </p>
               </div>
               <div class="mt-5 space-y-5">
                 <div class="soft-panel rounded-[24px] p-4">
@@ -397,15 +525,15 @@
             </article>
 
             <article class="section-shell rounded-[30px] p-5">
-              <div class="flex items-end justify-between">
+              <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
                 <div>
                   <p class="text-xs font-semibold uppercase tracking-[0.24em] text-primary/70">Section 04</p>
                   <h2 class="mt-2 text-2xl font-semibold">异常与建议</h2>
                 </div>
                 <p class="text-sm text-ink/58">按问题严重度排序</p>
               </div>
-              <div class="table-shell mt-5 overflow-hidden rounded-[24px] border border-line bg-white/90">
-                <table class="min-w-full divide-y divide-line text-left text-sm">
+              <div class="table-shell mt-5 overflow-x-auto rounded-[24px] border border-line bg-white/90">
+                <table class="anomaly-table min-w-full divide-y divide-line text-left text-sm">
                   <thead class="bg-slate-50/90 text-xs uppercase tracking-[0.18em] text-ink/56">
                     <tr>
                       <th class="px-4 py-3">优先级</th>
@@ -488,7 +616,7 @@
       }
 
       function formatStepLabel(step) {
-        return step == null ? "Step -" : `Step ${step}`;
+        return step == null ? "采样步 -" : `采样步 ${step}`;
       }
 
       function collectNumericValues(items) {
@@ -542,6 +670,44 @@
         panelFill: "rgba(255, 255, 255, 0.92)",
         panelStroke: "rgba(135, 166, 179, 0.32)",
       };
+
+      const termLabels = {
+        water_level: "水位",
+        water_flow: "流量",
+        gate_opening: "闸门开度",
+        data_index: "采样步",
+        step_index: "计算步",
+        source_time: "源时间",
+      };
+      const termKeys = Object.keys(termLabels).sort((a, b) => b.length - a.length);
+
+      function escapeRegExp(value) {
+        return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+      }
+
+      function localizedTermLabel(term) {
+        return termLabels[term] || term;
+      }
+
+      function localizeTermText(text) {
+        let html = escapeHtml(text);
+        termKeys.forEach((term) => {
+          html = html.replace(
+            new RegExp(escapeRegExp(term), "g"),
+            `<span class="term-hint" title="${term}">${localizedTermLabel(term)}</span>`
+          );
+        });
+        return html;
+      }
 
       const chartRegistry = [];
       let chartResizeFrame = null;
@@ -748,7 +914,7 @@
               <li class="soft-panel rounded-[18px] px-4 py-3">
                 <div class="flex items-start gap-3">
                   <span class="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary">${index + 1}</span>
-                  <span class="pt-0.5">${text}</span>
+                  <span class="pt-0.5">${localizeTermText(text)}</span>
                 </div>
               </li>
             `
@@ -770,8 +936,8 @@
           .map(
             (row) => `
               <div class="flex items-start justify-between gap-4 border-b border-white/10 pb-3 last:border-b-0 last:pb-0">
-                <dt class="text-white/58">${row.label}</dt>
-                <dd class="text-right font-medium">${row.value}</dd>
+                <dt class="text-white/58">${localizeTermText(row.label)}</dt>
+                <dd class="text-right font-medium">${localizeTermText(row.value)}</dd>
               </div>
             `
           )
@@ -805,7 +971,7 @@
       function renderActions() {
         const actions = reportData.recommendations || reportData.actions || [];
         document.getElementById("actionList").innerHTML = actions
-          .map((item, index) => `<li class="soft-panel rounded-[18px] px-4 py-3"><span class="mr-2 font-semibold text-primary">${index + 1}.</span>${item}</li>`)
+          .map((item, index) => `<li class="soft-panel rounded-[18px] px-4 py-3"><span class="mr-2 font-semibold text-primary">${index + 1}.</span>${localizeTermText(item)}</li>`)
           .join("");
       }
 
@@ -816,10 +982,10 @@
               <div class="soft-panel rounded-[18px] px-4 py-3">
                 <div class="flex items-center justify-between gap-3">
                   <span class="font-medium">${item.object_name}</span>
-                  <span class="rounded-full border border-line/80 px-2.5 py-1 text-[11px] text-ink/56">${item.metrics_code}</span>
+                  <span class="term-hint rounded-full border border-line/80 px-2.5 py-1 text-[11px] text-ink/56" title="${escapeHtml(item.metrics_code)}">${localizedTermLabel(item.metrics_code)}</span>
                 </div>
                 <div class="mt-2 flex items-center justify-between text-sm text-ink/72">
-                  <span>Step ${item.data_index}</span>
+                  <span class="term-hint" title="data_index">采样步 ${item.data_index}</span>
                   <span>${item.value}</span>
                 </div>
               </div>
@@ -833,7 +999,7 @@
           .map(
             (item) => `
               <tr>
-                <td class="px-4 py-3">
+                <td data-label="优先级" class="px-4 py-3">
                   <span class="rounded-full px-2.5 py-1 text-xs font-medium ${
                     item.priority === "高"
                       ? "bg-danger/10 text-danger"
@@ -842,10 +1008,10 @@
                         : "bg-primary/10 text-primary"
                   }">${item.priority}</span>
                 </td>
-                <td class="px-4 py-3 font-medium text-ink">${item.object}</td>
-                <td class="px-4 py-3"><span class="rounded-full border border-line/70 bg-white/85 px-2.5 py-1 text-xs text-ink/68">${item.metric}</span></td>
-                <td class="px-4 py-3 text-ink/72">${item.finding}</td>
-                <td class="px-4 py-3 text-ink/72">${item.advice}</td>
+                <td data-label="对象" class="px-4 py-3 font-medium text-ink">${item.object}</td>
+                <td data-label="指标" class="px-4 py-3"><span class="metric-pill term-hint rounded-full border border-line/70 bg-white/85 px-2.5 py-1 text-xs text-ink/68" title="${escapeHtml(item.metric)}">${localizedTermLabel(item.metric)}</span></td>
+                <td data-label="现象" class="px-4 py-3 text-ink/72">${localizeTermText(item.finding)}</td>
+                <td data-label="建议" class="px-4 py-3 text-ink/72">${localizeTermText(item.advice)}</td>
               </tr>
             `
           )
@@ -854,10 +1020,32 @@
 
       function renderLongitudinalProfile() {
         const profile = reportData.longitudinalProfile;
-        const section = document.getElementById("longitudinalSection");
         if (!profile || !profile.available) {
-          if (section) {
-            section.style.display = "none";
+          const chartRoot = document.getElementById("longitudinalChart");
+          const summary = document.getElementById("longitudinalSummary");
+          const highlights = document.getElementById("longitudinalHighlights");
+          const missingAssets = reportData.analysisSummary?.report_assets?.missing || [];
+          if (chartRoot) {
+            chartRoot.innerHTML = `
+              <div class="soft-panel flex h-full items-center justify-center rounded-[24px] border border-dashed border-warning/35 bg-warning/5 px-6 text-center text-sm leading-7 text-ink/72">
+                ${localizeTermText(`本次未生成渠道纵剖面图。${profile?.reason || reportData.analysisSummary?.profile_error || "缺少对象高程/里程数据或生成链路失败"}`)}
+              </div>
+            `;
+          }
+          if (summary) {
+            summary.textContent = localizeTermText(
+              profile?.reason
+                ? `纵剖面分析已降级：${profile.reason}`
+                : "纵剖面分析已降级：本次缺少可用于绘制纵剖面的对象高程/里程数据。"
+            );
+          }
+          if (highlights) {
+            highlights.innerHTML = [
+              `缺失图表：${missingAssets.length ? missingAssets.join("、") : "chart7_longitudinal_profile.png"}。`,
+              "HTML 已保留该缺失说明；纵向水面线、闸站位置和沿程水深相关结论需要按缺失范围理解。",
+            ]
+              .map((text) => `<div class="soft-panel rounded-[18px] px-4 py-3">${localizeTermText(text)}</div>`)
+              .join("");
           }
           return;
         }
@@ -1182,12 +1370,18 @@
         const flowSeries = reportData.charts.flowSeries || [];
         const gateSeries = reportData.charts.gateSeries || [];
 
-        document.getElementById("levelCardTitle").textContent = "完整 water_level 曲线";
+        document.getElementById("levelCardTitle").textContent = `完整${localizedTermLabel("water_level")}曲线`;
+        document.getElementById("levelCardTitle").title = "water_level";
         document.getElementById("levelCardDesc").textContent = `共 ${levelSeries.length} 条序列，支持按对象类型筛选后多选查看。`;
-        document.getElementById("flowCardTitle").textContent = "完整 water_flow 曲线";
+        document.getElementById("levelCardDesc").title = "water_level";
+        document.getElementById("flowCardTitle").textContent = `完整${localizedTermLabel("water_flow")}曲线`;
+        document.getElementById("flowCardTitle").title = "water_flow";
         document.getElementById("flowCardDesc").textContent = `共 ${flowSeries.length} 条序列，支持按对象类型筛选后多选查看。`;
-        document.getElementById("gateCardTitle").textContent = "完整 gate_opening 曲线";
+        document.getElementById("flowCardDesc").title = "water_flow";
+        document.getElementById("gateCardTitle").textContent = `完整${localizedTermLabel("gate_opening")}曲线`;
+        document.getElementById("gateCardTitle").title = "gate_opening";
         document.getElementById("gateCardDesc").textContent = `共 ${gateSeries.length} 条序列，压缩重复平台段后展示全部闸门变化。`;
+        document.getElementById("gateCardDesc").title = "gate_opening";
 
         const typeLabels = { CrossSection: '断面', DisturbanceNode: '分水口/退水闸', Gate: '闸门' };
         const chartInterpretations = reportData.chartInterpretations || {};
@@ -1205,7 +1399,7 @@
             : "";
           element.innerHTML = [selectionText, interpretation?.analysis, placeholderText]
             .filter(Boolean)
-            .map((text) => `<p>${text}</p>`)
+            .map((text) => `<p>${localizeTermText(text)}</p>`)
             .join("");
         }
 

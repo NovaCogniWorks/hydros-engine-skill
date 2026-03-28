@@ -395,6 +395,8 @@ def build_report_data(
     csv_path: Path,
     runtime_config: RuntimeConfig,
     profile_dataset: dict[str, Any] | None = None,
+    asset_status: dict[str, Any] | None = None,
+    profile_error: str | None = None,
 ) -> dict[str, Any]:
     unique_steps = sorted(int(step) for step in df["data_index"].unique().tolist())
     step_interval = runtime_config.csv_step_interval
@@ -423,6 +425,7 @@ def build_report_data(
     }
 
     negative_flow = flow_display_df[flow_display_df["value"] < 0].copy()
+    asset_status = asset_status or {"required": [], "missing": [], "complete": True}
     zero_flow_groups = []
     constant_flow_groups = []
     dynamic_gate_groups = []
@@ -623,6 +626,20 @@ def build_report_data(
                 "advice": "将该 CSV 标记为时间轴不可靠，报告中不要把 data_index 直接解释为真实计算步；建议排查导出逻辑或补齐 step_index。",
             },
         )
+    if asset_status["missing"]:
+        anomaly_items.insert(
+            0,
+            {
+                "priority": "中",
+                "object": "报告产物完整性",
+                "metric": "PNG 图表 / 纵剖面",
+                "finding": f"本次正式报告缺少以下图表产物：{'、'.join(asset_status['missing'])}。",
+                "advice": (
+                    "HTML 已保留该缺失说明；解读时应注意缺失图表对应的分析维度不完整，"
+                    "建议补拉 objects.yaml、重跑纵剖面或检查图表生成链路。"
+                ),
+            },
+        )
 
     summary_paragraph = (
         f"该 CSV 共包含 {len(df)} 条记录，覆盖 {df['object_name'].nunique()} 个对象、"
@@ -660,6 +677,11 @@ def build_report_data(
             else "闸门开度全程稳定，未观察到控制动作。"
         ),
     ]
+    if asset_status["missing"]:
+        summary_bullets.insert(
+            0,
+            f"报告产物存在缺失：{'、'.join(asset_status['missing'])}；HTML 已显式标注该问题，相关图表分析需按缺失范围降级解读。",
+        )
     if runtime_config.expected_sample_count is not None and runtime_config.expected_sample_count != len(unique_steps):
         summary_bullets.insert(
             1,
@@ -671,9 +693,15 @@ def build_report_data(
         )
 
     longitudinal_profile = build_longitudinal_profile_payload(df, profile_dataset, unique_steps)
+    if not longitudinal_profile["available"] and profile_error:
+        longitudinal_profile["reason"] = profile_error
     if longitudinal_profile["available"]:
         summary_bullets.append(
             f"纵剖面显示末步水面线沿程平滑下降，已叠加 {longitudinal_profile['meta']['gate_station_count']} 个闸站位置，可直接用于工程复核。"
+        )
+    else:
+        summary_bullets.append(
+            f"纵剖面本次未生成。原因：{profile_error or longitudinal_profile.get('reason') or '缺少对象高程/里程数据或生成链路失败'}。"
         )
 
     recommendations = [
@@ -741,6 +769,8 @@ def build_report_data(
             "water_level_series_count": int(level_df.groupby(["object_name", "object_type"]).ngroups),
             "water_flow_series_count": int(flow_df.groupby(["object_name", "object_type"]).ngroups),
             "gate_series_count": int(gate_df.groupby("object_name").ngroups),
+            "report_asset_complete": asset_status["complete"],
+            "missing_report_assets": asset_status["missing"],
         },
         "metaCards": [
             {"label": "任务状态", "value": "已完成"},
@@ -766,10 +796,21 @@ def build_report_data(
             },
             {
                 "eyebrow": "数据质量",
-                "title": "时间轴异常" if runtime_config.has_unreliable_time_axis else stability_title,
+                "title": (
+                    "报告不完整"
+                    if asset_status["missing"]
+                    else ("时间轴异常" if runtime_config.has_unreliable_time_axis else stability_title)
+                ),
                 "body": (
-                    f"{len(unique_steps)} 个采样点已导出。{runtime_config.axis_note}"
-                    if not completeness_issues else f"发现 {len(completeness_issues)} 组对象/指标缺步。"
+                    (
+                        f"缺失图表：{'、'.join(asset_status['missing'])}。"
+                        f"{(' 纵剖面原因：' + profile_error) if profile_error else ''}"
+                    )
+                    if asset_status["missing"]
+                    else (
+                        f"{len(unique_steps)} 个采样点已导出。{runtime_config.axis_note}"
+                        if not completeness_issues else f"发现 {len(completeness_issues)} 组对象/指标缺步。"
+                    )
                 ),
             },
             {
@@ -801,6 +842,7 @@ def build_report_data(
             {"label": "时长差值", "value": format_seconds_text(duration_gap_seconds) or "无法推导"},
             {"label": "时间轴口径", "value": runtime_config.axis_note},
             {"label": "结果导出时间", "value": format_datetime_text(runtime_completed_at.to_pydatetime()) or str(df["gmt_create"].max())},
+            {"label": "报告完整性", "value": "完整" if asset_status["complete"] else f"缺失 {'、'.join(asset_status['missing'])}"},
             {"label": "分析人", "value": "Codex / Hydros Simulation Skill"},
         ],
         "miniTable": mini_table,
@@ -870,6 +912,8 @@ def build_report_data(
                 "water_level": placeholder_level_steps,
                 "water_flow": placeholder_flow_steps,
             },
+            "report_assets": asset_status,
+            "profile_error": profile_error,
         },
         "longitudinalProfile": longitudinal_profile,
     }
@@ -879,6 +923,8 @@ def build_report_data(
 def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
     analysis = payload["analysisSummary"]
     profile = payload["longitudinalProfile"]
+    asset_status = payload["analysisSummary"].get("report_assets", {})
+    missing_assets = asset_status.get("missing", [])
     anomaly_rows = "\n".join(
         f"| {item['priority']} | {item['object']} | {item['metric']} | {item['finding']} | {item['advice']} |"
         for item in payload["anomalies"]
@@ -892,6 +938,18 @@ def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
 
 {profile['summary']} 图中同时标出了 `ZM1`、`ZM2` 两个闸站位置，便于把闸门控制动作和沿程水面线一起解释。
 """
+    else:
+        profile_markdown = f"""
+### 6. 渠道纵剖面
+
+本次未生成渠道纵剖面图。原因：{profile.get('reason') or payload['analysisSummary'].get('profile_error') or '缺少对象高程/里程数据或生成链路失败'}。
+"""
+    asset_issue_markdown = ""
+    if missing_assets:
+        asset_issue_markdown = (
+            f"- 报告图表产物存在缺失：`{'`、`'.join(missing_assets)}`。\n"
+            "- HTML 页面已显式标注该问题；相关图表维度应按缺失范围降级解读，不应视为“完整图表已全部产出”。"
+        )
     if "不可靠" in str(payload["meta"].get("time_axis_note", "")):
         conclusion_axis_line = (
             "- 本次 CSV 在数值层面可用于结果分析，但时间轴字段不可靠；"
@@ -1000,6 +1058,8 @@ def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
 
 {conclusion_axis_line}
 {conclusion_duration_line}
+- 报告完整性：`{"完整" if not missing_assets else "存在缺失"}`。
+{asset_issue_markdown}
 - 系统整体稳定，无倒流、无明显水位异常波动，适合作为一次稳定工况分析样本。
 - 建议优先复核 `FSK2-北易水退水闸` 的零流量合理性，以及 `{analysis['top_flow_variation']['object_name']}` 的局部波动来源。
 - 若下一步要做动态评估，建议增加事件注入或更细粒度输出。
@@ -1019,6 +1079,25 @@ def write_html_assets(report_dir: Path, data_dir: Path, payload: dict[str, Any])
         json.dumps(payload["analysisSummary"], ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+
+
+def validate_required_report_assets(charts_dir: Path, profile_dataset: Any) -> dict[str, Any]:
+    required_chart_names = [
+        "chart1_water_level.png",
+        "chart2_water_flow.png",
+        "chart4_gate_opening.png",
+        "chart5_disturbance_flow.png",
+        "chart6_heatmap.png",
+        "chart7_longitudinal_profile.png",
+    ]
+    missing = [name for name in required_chart_names if not (charts_dir / name).exists()]
+    if profile_dataset is None and "chart7_longitudinal_profile.png" not in missing:
+        missing.append("chart7_longitudinal_profile.png")
+    return {
+        "required": required_chart_names,
+        "missing": sorted(set(missing)),
+        "complete": not missing,
+    }
 
 
 def main() -> None:
@@ -1047,17 +1126,21 @@ def main() -> None:
     run_command(chart_command)
 
     profile_dataset = None
+    profile_error = None
     try:
         profile_dataset = build_longitudinal_dataset(csv_path)
         save_profile_png(profile_dataset, paths["charts"] / "chart7_longitudinal_profile.png")
     except Exception as exc:
-        print(f"纵剖面跳过: {exc}")
+        profile_error = str(exc)
+        print(f"纵剖面未生成: {profile_error}")
+
+    asset_status = validate_required_report_assets(paths["charts"], profile_dataset)
 
     charts_stats = paths["charts"] / "analysis_stats.json"
     if charts_stats.exists():
         shutil.move(str(charts_stats), str(paths["data"] / "analysis_stats.json"))
 
-    payload = build_report_data(df, csv_path, runtime_config, profile_dataset)
+    payload = build_report_data(df, csv_path, runtime_config, profile_dataset, asset_status, profile_error)
     write_html_assets(paths["report"], paths["data"], payload)
     write_markdown_report(paths["report"], payload)
 

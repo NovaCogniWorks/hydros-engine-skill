@@ -143,17 +143,24 @@ def detect_constant_flow(groups):
 
 
 def detect_data_gaps(groups, expected_steps=None):
-    """检测数据缺失"""
-    if expected_steps is None:
-        all_steps = set()
-        for data in groups.values():
-            all_steps.update(s for s, _ in data)
-        expected_steps = max(all_steps) if all_steps else 100
+    """检测数据缺失。
 
+    默认把 CSV 中实际出现过的全局采样步集合视为期望步集合，
+    这样稀疏输出（如每 30 个计算步输出一次）不会被误判为缺失。
+    """
+    if expected_steps is None:
+        expected = set()
+        for data in groups.values():
+            expected.update(s for s, _ in data)
+    elif isinstance(expected_steps, int):
+        expected = set(range(1, expected_steps + 1))
+    else:
+        expected = set(expected_steps)
+
+    total_expected = len(expected)
     issues = []
     for (name, metric, otype), data in groups.items():
         actual_steps = set(s for s, _ in data)
-        expected = set(range(1, expected_steps + 1))
         missing = expected - actual_steps
         if missing:
             issues.append({
@@ -163,8 +170,8 @@ def detect_data_gaps(groups, expected_steps=None):
                 'metrics_code': metric,
                 'object_type': otype,
                 'missing_steps': len(missing),
-                'total_expected': expected_steps,
-                'description': f"{name}/{metric} 缺少 {len(missing)} 个步的数据（期望 {expected_steps} 步）"
+                'total_expected': total_expected,
+                'description': f"{name}/{metric} 缺少 {len(missing)} 个采样步的数据（期望 {total_expected} 个采样步）"
             })
     return sorted(issues, key=lambda x: -x['missing_steps'])
 

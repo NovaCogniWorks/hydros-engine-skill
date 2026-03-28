@@ -15,6 +15,7 @@ description: |
 ## 沟通与硬规则
 
 - 始终使用中文与用户沟通，技术术语和代码标识保持原文。
+- 在进入任何仿真流程前，先检查 `hydro-engine-mcp` 是否已安装并可连通。优先调用 `list_mcp_resource_templates(server="hydro-engine-mcp")` 或等价检查；若失败，再按 HTTP 端点排查：`https://hydroos.cn/mcp`，请求头至少包含 `Accept: application/json, text/event-stream` 和 `Authorization: Bearer <token>`。如果用户尚未配置 token，可记为 `Authorization token: ""` 并直接报告缺失，不要继续后续仿真步骤；此时应明确提示用户先访问 `https://hydroos.cn/playground/` 注册/登录，再到“账号管理”中获取 API token 并完成配置。
 - 在调用 `create_simulation_task` 前，必须先调用 `subscribe_to_simulation_events` 建立 SSE 事件订阅通道。
 - `biz_scenario_id` 和 `biz_scenario_config_url` 必须成对使用，并且只能来自 `biz_scenario_id_lists` 的返回结果。
 - 当用户只是回复场景 ID、场景名称，或说“就这个”“选这个”时，只能视为“选定场景”，不能直接视为“接受默认参数并立即启动”；必须先展示该场景的默认 `total_steps`、`sim_step_size`、`output_step_size`，并等待用户确认或修改。
@@ -30,6 +31,8 @@ description: |
 - 如果需要快速交付一个可直接打开的页面，优先复用模板资产，而不是从零开始。
 - 需要交互式分析工作台时，优先复用 [assets/hydros-dashboard-template/index.html](assets/hydros-dashboard-template/index.html)。
 - 需要完整版 HTML 报告、完整曲线展示或外部 payload 驱动页面时，优先复用 [assets/hydros-report-template/index.html](assets/hydros-report-template/index.html) 和同目录 `report.data.js`。
+- 当用户明确要“报告”“完整报告”“HTML 报告”“汇报页”时，不要先交付临时分析报告、手写摘要页或简版 HTML 作为最终产物；如果本地 CSV 尚未就位，先完成 `read_mcp_resource -> 落盘 .csv -> build_csv_report.py`，再输出遵循模板的正式报告。
+- HTML 正式报告应尽量包含完整曲线图产物和渠道纵剖面图；若 `chart1_water_level.png`、`chart2_water_flow.png`、`chart4_gate_opening.png`、`chart5_disturbance_flow.png`、`chart6_heatmap.png`、`chart7_longitudinal_profile.png` 中有缺失，仍可交付 HTML，但必须在报告正文里显式写明缺失项、缺失原因和影响范围，不能把缺图问题只留在聊天回复里解释。
 
 ## 资源导航
 
@@ -57,6 +60,22 @@ description: |
 - 报告和工作台必须同时识别两类信息：一类是用户输入/场景配置里的仿真参数，一类是 CSV 实际导出的采样点与时间轴字段；两者一旦不一致，必须在报告的“异常与建议”“数据质量”或等价区块里显式写出，不要只在聊天回复里口头说明。
 
 ## 五阶段工作流
+
+### 阶段零：检查 MCP 安装与连通性
+
+1. 先检查 `hydro-engine-mcp` 是否已在当前环境可用。
+2. 优先调用 `list_mcp_resource_templates(server="hydro-engine-mcp")` 或其他轻量 MCP 探测，确认握手正常。
+3. 如果需要做 HTTP 直连排查，使用：
+   - URL: `https://hydroos.cn/mcp`
+   - Header `Accept: application/json, text/event-stream`
+   - Header `Authorization: Bearer <token>`
+4. 如果用户尚未提供 token，则按 `Authorization token: ""` 视为未配置，直接报告缺失并停止后续步骤。
+5. 当 token 缺失或 MCP 未安装时，明确提示用户：
+   - 先访问 `https://hydroos.cn/playground/`
+   - 完成注册或登录
+   - 在“账号管理”中获取 API token
+   - 将该 token 配置到 `Authorization: Bearer <token>` 后再继续
+6. 只有在 MCP 检测通过后，才进入阶段一。
 
 ### 阶段一：建立 SSE 事件订阅
 
@@ -162,14 +181,16 @@ INIT -> WAITING_AGENTS -> READY -> STEPPING -> COMPLETED
 ```
 
 展示要求：
-- 对 `STEPPING` 状态展示 `current_step / total_steps` 和百分比。
+- 对 `STEPPING` 状态必须展示文本进度条快照、`current_step / total_steps` 和百分比。
+- 文本进度条快照默认使用 10 格宽度，格式固定为 `███░░░░░░ 15.4% | 185/1200`；已完成部分用 `█`，未完成部分用 `░`，百分比保留 1 位小数。
 - 当任务首次进入 `STEPPING` 状态时，在进度输出中附带一句提示，告知用户当前速度和预估剩余时间，并说明可以随时输入"加速"或"4x"来调整倍速（可选：0.25x、0.5x、1x、2x、4x）。这条提示只出现一次，之后不再重复。关键点：不要用阻塞式提问（如 AskUserQuestion）来询问加速，因为那会中断轮询循环，导致监测停止。正确做法是把加速提示作为进度输出的一部分，然后立即继续轮询；如果用户在后续消息中主动要求加速，再调用 `update_task_speed`。
 - 对 `FAILED` 状态优先提取 `failure_exception`。
 - 对 SSE 事件整理为时间线，突出状态切换和关键进度节点。
 - 对 live 任务，默认持续轮询 `get_task_status` 和 `fetch_sse_events`，直到捕获终态；在终态前不要把流程当作完成。
 - 禁止把“继续等待”“继续盯进度”“稍后再查”“是否拉结果”写成三选一或多选一的尾句；正确做法是继续轮询，并在终态后再自然衔接结果获取或报告生成。
 - 如果用户的意图是“跑一个仿真并看结果/出报告/继续等待”，则任务完成后应自动衔接阶段五，无需再次等待用户提醒。
-- 如果运行环境是命令行 PTY，而不是聊天消息流，优先用单行进度条展示，如 `██████░░░░░░ 34% | 408/1200`，通过 `\\r` 原地刷新；若当前环境只能追加消息，则退化为节流后的状态输出，不能假装实现原地覆盖。
+- 如果运行环境是命令行 PTY，而不是聊天消息流，优先用单行文本进度条展示，如 `██████░░░░ 34.0% | 408/1200`，通过 `\r` 原地刷新。
+- 如果当前环境只能追加消息，则每次进度播报也必须使用同样格式的“文本进度条快照”，例如 `███░░░░░░ 15.4% | 185/1200`；不要只发纯数字快照如 `185/1200`，也不要假装实现原地覆盖。
 
 ### 阶段五：获取结果与分析
 
@@ -190,11 +211,13 @@ INIT -> WAITING_AGENTS -> READY -> STEPPING -> COMPLETED
 6. 需要报告时，默认同时产出 HTML 报告和 Markdown 报告；仅当用户明确要求正式文档时，再补充 Word 报告。
    - HTML 报告和 Markdown 报告是默认必要产物，除非用户明确只要其中一种。
    - HTML 报告必须对齐 `assets/hydros-report-template/index.html` 的完整版结构；不要产出自定义轻量页、单页汇报版或仅摘要页来替代模板完整版。
-   - 如果可获取 `objects.yaml` 中的断面里程与底高程，HTML 报告和 Markdown 报告应默认附带渠道纵剖面图；如果用户明确要单独纵剖面页，再额外输出独立页面。
-   - 每次报告输出都要按目录分类：`report/` 存放 HTML 和 Markdown，`charts/` 存放 PNG 图表，`data/` 存放 `report.data.js`、统计摘要和其他中间数据。
+   - 如果用户要的是“报告”而不是“先看结论”，不要先生成一个临时分析报告文件再补正式报告；应直接产出模板化正式报告，必要时在生成过程中通过聊天同步进度即可。
+  - HTML 报告和 Markdown 报告默认都应附带渠道纵剖面图；如果纵剖面数据构建失败、PNG 未生成、或引用文件不存在，仍可继续输出报告，但必须在纵剖面区块、数据质量或异常与建议区块里明确标注“本次未生成纵剖面”、缺失原因以及这会影响哪些分析结论。
+  - 每次报告输出都要按目录分类：`report/` 存放 HTML 和 Markdown，`charts/` 存放 PNG 图表，`data/` 存放 `report.data.js`、统计摘要和其他中间数据。
    - 图表展示时，不要把 y 轴固定在过大的全局范围；应根据当前图表中的实际数值自动收紧范围，避免水位等小幅波动被压扁。
    - 热力图要按真实采样步绘制，不能把 `1..max(data_index)` 的每个整数步都展开成列；否则会把稀疏采样的结果画成一排细线。若首步存在占位零值，也要在热力图中剔除或单独说明。
-   - 完整曲线区块不能只放图；`water_level`、`water_flow`、`gate_opening` 都要配套文字解读，解释波动范围、重点对象、控制动作和建议关注点。
+  - 完整曲线区块不能只放图；`water_level`、`water_flow`、`gate_opening` 都要配套文字解读，解释波动范围、重点对象、控制动作和建议关注点。
+  - 正式 HTML 报告引用到的 PNG 图表应尽量真实存在，至少关注 `chart1_water_level.png`、`chart2_water_flow.png`、`chart4_gate_opening.png`、`chart5_disturbance_flow.png`、`chart6_heatmap.png`、`chart7_longitudinal_profile.png`。若磁盘上存在缺失，报告必须显式列出缺失图表和影响范围，避免把它伪装成无缺陷的完整报告。
    - 对完整曲线中的占位零值要单独识别，尤其是 `water_level`、`water_flow` 的首步占位值；展示和解读时要剔除或明确说明，不能把这类占位值误判为真实异常或真实停流。
    - Markdown 报告必须是图文并茂的，用 `![描述](相对路径)` 嵌入 generate_charts.py 生成的 PNG 图表。每张图表前后都应有对应的文字分析，解释图中的关键发现和趋势，而不是只列数据表格。
    - 图表嵌入顺序建议：水位时序图 → 流量时序图 → 闸门开度图 → 分水口流量图 → 热力图，每张图后紧跟 2-3 句分析说明。
