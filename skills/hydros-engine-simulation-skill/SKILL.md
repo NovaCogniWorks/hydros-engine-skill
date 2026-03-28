@@ -1,55 +1,42 @@
 ---
 name: hydros-simulation
 description: |
-  水力仿真引擎全流程编排工具。通过调用 hydro-engine MCP 服务（tool namespace: hydro_engine_mcp）完成场景查询、仿真任务创建、进度跟踪、时序结果导出与读取、异常分析、图表输出，并在需要时生成交互式分析工作台、HTML 汇报报告、Markdown 报告、拓扑可视化页或渠道纵剖面页。
-  当用户提到以下任何内容时触发此 skill：水力仿真、水力仿真分析、仿真场景、仿真任务、水位分析、流量分析、闸门控制、渠道仿真、京石段、hydros、仿真引擎、创建仿真、运行仿真、仿真结果、时序数据分析、水力报告、仿真进度、场景列表、仿真可视化、交互式分析工作台、HTML 仪表板、HTML 报告、Markdown 报告、结果工作台、拓扑图、拓扑可视化、场景拓扑、渠道拓扑、水网拓扑、纵剖面、纵剖面图、水面线、上游下游流向、闸站展示。
-  即使用户只是模糊地说“跑一下仿真”“看看水位数据”“分析一下结果”“做个页面看仿真数据”“获取场景拓扑”“画一个纵剖面”，也应该触发此 skill。
+  水力仿真引擎全流程编排工具。通过调用 hydro-engine MCP 服务完成场景查询、仿真任务创建、进度跟踪、时序结果导出与读取、异常分析、图表输出，并生成交互式分析工作台、HTML 汇报报告、Markdown 报告、拓扑可视化页或渠道纵剖面页。
+
+  当用户提到水力仿真、场景分析、仿真任务、水位流量分析、渠道仿真、hydros 引擎、仿真结果可视化、拓扑图、纵剖面等相关内容时触发。即使用户只是模糊地说”跑一下仿真””看看数据””分析一下结果””做个分析页面””获取拓扑””画纵剖面”，也应该触发此 skill。
 ---
 
 # Hydros Engine 水力仿真 Skill
 
+## 目录
+- [初始条件](#初始条件)
+- [核心职责](#核心职责)
+- [沟通与硬规则](#沟通与硬规则)
+- [资源导航](#资源导航)
+- [五阶段工作流](#五阶段工作流)
+  - [阶段一：建立 SSE 事件订阅](#阶段一建立-sse-事件订阅)
+  - [阶段二：查询与选择场景](#阶段二查询与选择场景)
+  - [阶段三：创建仿真任务](#阶段三创建仿真任务)
+  - [阶段四：跟踪仿真进度](#阶段四跟踪仿真进度)
+  - [阶段五：获取结果与分析](#阶段五获取结果与分析)
+- [快捷入口](#快捷入口)
+- [常见失败原因](#常见失败原因)
+- [会话状态](#会话状态)
+
 ## 初始条件
 
-- 在读取“核心职责”或进入任何仿真流程前，先检查 `hydro-engine-mcp` 是否已安装并可连通。
-- 优先调用 `list_mcp_resource_templates(server="hydro-engine-mcp")` 或等价轻量探测确认 MCP 握手正常。
-- 连接 `hydroos` MCP 时，优先走已安装好的 `hydro-engine-mcp` 工具链；不要自己临时改用 SSE 客户端库直连 `https://hydroos.cn/mcp` 做初始化探测，这条路径容易卡住或超时。
-- 做 HTTP 直连排查时，只排查 MCP 入口 `https://hydroos.cn/mcp`，不要误打业务网页或猜测式 REST 路径（例如 `https://hydroos.cn/api/scenario/lists`）；这类地址通常返回 HTML，不是可用的 JSON/MCP 响应。
-- 做 HTTP 直连排查时必须带上正确 Header，至少包括：
-  - `Accept: application/json, text/event-stream`
-  - `Authorization: Bearer <token>`
-- 如果缺少上述 `Accept`，`https://hydroos.cn/mcp` 可能返回 `406 Not Acceptable`；不要在这种情况下继续重试同样的错误请求。
-- 如果需要做 HTTP 直连排查，使用：
-  - URL: `https://hydroos.cn/mcp`
-  - Header `Accept: application/json, text/event-stream`
-  - Header `Authorization: Bearer <token>`
-- MCP 连接速查表：
-  - 正确连接方式：
-    - URL: `https://hydroos.cn/mcp`
-    - 协议：`JSON-RPC 2.0 over HTTP POST`
-    - Header：`Authorization: Bearer <token>`
-    - 直连排查时同时补上 `Accept: application/json, text/event-stream`
-    - 不要使用 SSE 客户端库，不要尝试 stream 模式做 MCP 初始化
-  - 标准工作流：
-    1. `initialize`
-    2. `subscribe_to_simulation_events`
-    3. 业务工具调用
-  - 常见错误：
-    - `406`：通常是缺少 `Content-Type` 或必要的请求头；先检查 `Content-Type: application/json`，再检查 `Accept`
-    - `32602`：参数缺失，最常见是漏传 `sse_client_id`
-    - 返回 HTML：URL 错误；应该使用 `/mcp`，不是 `/api/xxx`
-- 如果用户尚未配置 token，则按 `Authorization token: ""` 视为未配置，直接报告缺失并停止后续步骤。
-- 当 token 缺失或 MCP 未安装时，明确提示用户：
-  - 先访问 `https://hydroos.cn/playground/`
-  - 完成注册或登录
-  - 在“账号管理”中获取 API token
-  - 将获取到的 API key / token 发给我，我来帮你完成配置
-  - 将该 token 配置到 `Authorization: Bearer <token>` 后再继续
-- 只有在上述检查通过后，才允许继续执行本 skill 的任何后续工作流。
+在进入任何仿真流程前，先确认以下前置条件：
 
-连接避坑摘要：
-- 错误方式 1：使用 SSE 客户端库直接连 `https://hydroos.cn/mcp` 做初始化探测，容易卡住或超时；正确方式是优先使用已经安装好的 `hydro-engine-mcp` 工具，并先调用 `list_mcp_resource_templates` 做轻量握手检查。
-- 错误方式 2：误用 `https://hydroos.cn/api/scenario/lists` 这类路径，返回的通常是 HTML 页面，不是 JSON/MCP 数据；正确方式是使用 skill 中定义的 MCP 工具，如 `biz_scenario_id_lists`、`get_scenario_events`。
-- 错误方式 3：直连 `https://hydroos.cn/mcp` 时缺少 `Accept: application/json, text/event-stream`，会返回 `406 Not Acceptable`；正确方式是带齐必需 Header 后再排查。
+1. **MCP 服务检查**：调用 `list_mcp_resource_templates(server=”hydro-engine-mcp”)` 确认 MCP 握手正常。这样可以及早发现连接问题，避免在后续流程中遇到意外失败。
+
+2. **Token 配置**：检查用户是否已配置 API token。如果 token 缺失，引导用户：
+   - 访问 `https://hydroos.cn/playground/` 注册或登录
+   - 在”账号管理”中获取 API token
+   - 将 token 提供给我来完成配置
+
+3. **使用正确的工具链**：优先使用已安装的 `hydro-engine-mcp` 工具，避免临时直连 MCP 端点。直连容易遇到超时或 Header 配置问题。
+
+**详细连接排查指南**：如遇连接问题，参考 [references/mcp-connection-guide.md](references/mcp-connection-guide.md)。
 
 ## 核心职责
 
@@ -58,23 +45,23 @@ description: |
 ## 沟通与硬规则
 
 - 始终使用中文与用户沟通，技术术语和代码标识保持原文。
-- 在调用 `create_simulation_task` 前，必须先调用 `subscribe_to_simulation_events` 建立 SSE 事件订阅通道。
-- `biz_scenario_id` 和 `biz_scenario_config_url` 必须成对使用，并且只能来自 `biz_scenario_id_lists` 的返回结果。
-- 当用户已经完成“选场景”动作后，在任何参数确认、默认参数展示或启动动作之前，必须先输出一次基于场景 YAML 和 `hydros_objects_modeling_url` / `objects.yaml` 的简要拓扑总结；这一步是启动前置条件，不允许静默跳过。
-- 当用户已经完成“选场景”动作后，在任何参数确认、默认参数展示或启动动作之前，还必须先调用 `get_scenario_events` 查询该场景支持注入的预置事件，并将事件列表与默认 `total_steps`、`sim_step_size`、`output_step_size` 一起展示给用户选择；这一步同样属于启动前置条件，不允许静默跳过。
-- 当用户只是回复场景 ID、场景名称，或说“就这个”“选这个”时，只能视为“选定场景”，不能直接视为“接受默认参数并立即启动”；必须先展示该场景的默认 `total_steps`、`sim_step_size`、`output_step_size`，并等待用户确认或修改。
-- 只要创建的是 live 仿真任务，就不能在”任务已创建”或”出现首条进度”后停止；必须持续监测到终态（`COMPLETED` 或 `FAILED`）。
-- 如果用户已经明确表达”启动””运行””跑”某个场景或仿真任务，默认含义就是”启动后继续盯任务”；不要再额外追问是否继续等待，除非用户明确要求只启动不跟踪。
-- 只有在已经实际进入轮询循环，并完成至少一轮真实的 `get_task_status` 与 `fetch_sse_events` 调用后，才允许对用户说“正在持续监测中”；如果只是创建了任务、只查了一次状态、或本轮即将停止执行，都不能使用这类表述。
-- 如果用户明确表达“停止仿真”“结束仿真”“终止任务”“废弃这个任务”，默认含义就是执行不可恢复的终止/取消；不要再追问“是暂停还是终止”。只有当用户明确说“暂停”“先停一下”“稍后继续”时，才走暂停语义。
-- 禁止在任务已启动后再用提问或选项的方式征询“要不要继续盯进度”“要不要继续等待”“要不要我后面再查”。这类问题会把本应自动持续执行的流程错误地还给用户决策，属于违规交互。
-- 绝对不能在未经用户明确同意的情况下取消（`cancel_simulation_task`）或终止仿真任务。取消是不可逆操作，任务一旦取消就无法恢复。即使轮询时间较长、加速失败或出现其他非致命问题，也只能继续等待或向用户报告情况，由用户决定是否取消。
-- 如果轮询因为工具异常、会话结束、用户中断或任何其他原因没有继续执行，必须明确说“监测已中断”或“本轮只完成了一次查询”，不能继续宣称“正在持续监测中”。
-- 必须明确区分“skill 的输出约束”和“聊天前端的渲染能力”。skill 不能让聊天界面凭空出现原生进度组件，但无论处于哪种运行环境，都必须把当前进度渲染为统一格式的文本进度条。
+- 先调用 `subscribe_to_simulation_events` 建立 SSE 事件订阅通道，再创建仿真任务。这样可以确保任务创建后的进度事件能被正确接收，避免错过关键状态更新。
+- `biz_scenario_id` 和 `biz_scenario_config_url` 成对使用，且只能来自 `biz_scenario_id_lists` 的返回结果。这样可以保证场景配置的一致性和有效性。
+- 用户选定场景后，在参数确认前先输出场景拓扑总结（基于 `objects.yaml`）。这帮助用户了解场景结构，做出更明智的参数选择。
+- 用户选定场景后，调用 `get_scenario_events` 查询预置事件，与默认参数一起展示。这让用户全面了解场景配置，一次性确认所有关键参数。
+- 用户只回复场景 ID 或”选这个”时，视为”选定场景”而非”立即启动”。先展示默认参数供确认，避免使用错误配置启动任务。
+- 创建 live 仿真任务后，持续监测到终态（`COMPLETED` 或 `FAILED`）。中途停止会导致用户无法及时了解任务结果。
+- 用户说”启动””运行”时，默认包含”持续跟踪”。避免额外追问，保持流程流畅。
+- 只在实际进入轮询循环后才说”正在持续监测中”。确保状态描述与实际行为一致，避免误导用户。
+- 用户说”停止仿真””终止任务”时，默认执行不可恢复的取消操作。只有明确说”暂停”时才走暂停语义。
+- 任务启动后避免用提问方式征询”要不要继续盯进度”。这会打断自动化流程，增加用户负担。
+- 未经用户明确同意不要取消任务。取消是不可逆操作，即使遇到非致命问题也应继续等待或报告情况，由用户决定。
+- 轮询中断时明确说明”监测已中断”。保持状态描述的真实性，避免伪装成持续监测。
+- 必须明确区分”skill 的输出约束”和”聊天前端的渲染能力”。skill 不能让聊天界面凭空出现原生进度组件，但无论处于哪种运行环境，都必须把当前进度渲染为统一格式的文本进度条。
 - 统一进度条格式固定为 `███░░░░░░15.4% | 185/1200`。`█/░` 区宽度固定 10 格，后面紧跟百分比，不加额外空格，再接 ` | current/total`。
-- 在追加消息型聊天环境里，“自动显示进度条”的正确含义是：只要本轮仍在持续轮询，代理就必须主动连续发送文本进度条快照，不需要用户再次提醒；如果本轮被用户中断，则自动刷新链条随之中断，恢复后必须先说明“监测曾中断，现已恢复”。
-- 在调用 `get_timeseries_data` 前，必须先确认任务状态为 `COMPLETED`。
-- `get_timeseries_data` 返回的是 `resource_uri`；如果后续要给本地脚本消费，必须继续调用 `read_mcp_resource(server=\"hydro-engine-mcp\", uri=resource_uri)` 读取 CSV 文本，再落成本地 `.csv` 文件。
+- 在追加消息型聊天环境里，”自动显示进度条”的正确含义是：只要本轮仍在持续轮询，代理就必须主动连续发送文本进度条快照，不需要用户再次提醒；如果本轮被用户中断，则自动刷新链条随之中断，恢复后必须先说明”监测曾中断，现已恢复”。
+- 调用 `get_timeseries_data` 前先确认任务状态为 `COMPLETED`。未完成的任务可能返回不完整的数据。
+- `get_timeseries_data` 返回 `resource_uri`。如果本地脚本需要消费数据，继续调用 `read_mcp_resource` 读取 CSV 文本并落盘。这样脚本可以直接处理本地文件。
 - 如果用户要做交互式分析工作台、HTML 报告或其他 HTML 页面，先读 [references/hydros-html-prompt.md](references/hydros-html-prompt.md)。
 - 如果需要理解数据结构、聚合口径或指标映射，先读 [references/hydros-data-contract.md](references/hydros-data-contract.md)。
 - 如果需要快速交付一个可直接打开的页面，优先复用模板资产，而不是从零开始。
@@ -105,8 +92,8 @@ description: |
   用于生成符合模板规范的完整版 HTML 报告，适合汇报、截图、归档和真实结果复盘；报告默认支持纵剖面与时序曲线联动、播放、拖拽、暂停和继续，主要图表的 y 轴应根据当前数据范围自适应缩放。纵剖面需要同时展示断面顶高程、底高程和水面线，其中水位阴影只填充到底高程线，底高程阴影才延伸到坐标轴底部；闸站位置优先用稳定的虚线标识，避免播放时出现抖动。不要用自定义轻量页或单页汇报版替代该模板。
 - `assets/hydros-report-template/report.data.js`
   用于承载报告模板的外部数据 payload，替换后即可接入真实仿真结果。
-- 以上 Python 脚本凡涉及时间轴、总步数、时长或输出频率计算时，都必须优先使用用户显式提供的 `total_steps`、`sim_step_size`、`output_step_size`，其次再用场景 YAML；禁止写死默认步长。
-- 报告和工作台必须同时识别两类信息：一类是用户输入/场景配置里的仿真参数，一类是 CSV 实际导出的采样点与时间轴字段；两者一旦不一致，必须在报告的“异常与建议”“数据质量”或等价区块里显式写出，不要只在聊天回复里口头说明。
+- 以上 Python 脚本涉及时间轴、总步数、时长或输出频率计算时，优先使用用户显式提供的 `total_steps`、`sim_step_size`、`output_step_size`，其次再用场景 YAML。避免写死默认步长，确保计算准确性。
+- 报告和工作台同时识别两类信息：用户输入的仿真参数和 CSV 实际导出的数据。两者不一致时，在报告的”异常与建议”或”数据质量”区块显式说明，避免用户误解数据质量。
 
 ## 五阶段工作流
 
@@ -295,49 +282,30 @@ INIT -> WAITING_AGENTS -> READY -> STEPPING -> COMPLETED
 
 ### 阶段五：获取结果与分析
 
-1. 确认任务状态为 `COMPLETED`。
-2. 调用 `get_timeseries_data(biz_scene_instance_id)`，或直接读取用户已有的本地结果文件。
-   - 如果返回 `resource_uri`，继续调用 `read_mcp_resource(server="hydro-engine-mcp", uri=resource_uri)` 获取完整 CSV 文本。
-   - 如果后续要调用 `scripts/build_csv_report.py`、`scripts/build_csv_dashboard.py` 或其他本地脚本，先把读取到的 CSV 文本落盘为本地 `.csv` 文件，再把该路径传给脚本。
-   - 如果当前会话里已经明确了 `total_steps`、`sim_step_size`、`output_step_size`，调用这些脚本时要把参数一并传入；不要让脚本再靠写死默认值推导时间轴。
-   - 要显式比较“按用户参数推导的期望总时长 / 期望输出点数”和“CSV 实际可覆盖时长 / 实际采样点数”；如果 CSV 有缺失、时间轴异常或导出点数不足，必须在最终报告里单列说明。
-3. 生成统计摘要：
-   - 总记录数
-   - 采样步数
-   - 对象数
-   - 指标数
-   - 异常点数量
-4. 用 `scripts/generate_charts.py` 生成水位、流量、热力图等图表，保存为 PNG 文件。
-5. 用 `scripts/analyze_anomalies.py` 生成异常结论。
-6. 需要报告时，默认同时产出 HTML 报告和 Markdown 报告；仅当用户明确要求正式文档时，再补充 Word 报告。
-   - HTML 报告和 Markdown 报告是默认必要产物，除非用户明确只要其中一种。
-   - HTML 报告必须对齐 `assets/hydros-report-template/index.html` 的完整版结构；不要产出自定义轻量页、单页汇报版或仅摘要页来替代模板完整版。
-   - 如果用户要的是“报告”而不是“先看结论”，不要先生成一个临时分析报告文件再补正式报告；应直接产出模板化正式报告，必要时在生成过程中通过聊天同步进度即可。
-  - HTML 报告和 Markdown 报告默认都应附带渠道纵剖面图；如果纵剖面数据构建失败、PNG 未生成、或引用文件不存在，仍可继续输出报告，但必须在纵剖面区块、数据质量或异常与建议区块里明确标注“本次未生成纵剖面”、缺失原因以及这会影响哪些分析结论。
-  - 每次报告输出都要按目录分类：`report/` 存放 HTML 和 Markdown，`charts/` 存放 PNG 图表，`data/` 存放 `report.data.js`、统计摘要和其他中间数据。
-   - 图表展示时，不要把 y 轴固定在过大的全局范围；应根据当前图表中的实际数值自动收紧范围，避免水位等小幅波动被压扁。
-   - 热力图要按真实采样步绘制，不能把 `1..max(data_index)` 的每个整数步都展开成列；否则会把稀疏采样的结果画成一排细线。若首步存在占位零值，也要在热力图中剔除或单独说明。
-  - 完整曲线区块不能只放图；`water_level`、`water_flow`、`gate_opening` 都要配套文字解读，解释波动范围、重点对象、控制动作和建议关注点。
-  - 正式 HTML 报告引用到的 PNG 图表应尽量真实存在，至少关注 `chart1_water_level.png`、`chart2_water_flow.png`、`chart4_gate_opening.png`、`chart5_disturbance_flow.png`、`chart6_heatmap.png`、`chart7_longitudinal_profile.png`。若磁盘上存在缺失，报告必须显式列出缺失图表和影响范围，避免把它伪装成无缺陷的完整报告。
-   - 对完整曲线中的占位零值要单独识别，尤其是 `water_level`、`water_flow` 的首步占位值；展示和解读时要剔除或明确说明，不能把这类占位值误判为真实异常或真实停流。
-   - Markdown 报告必须是图文并茂的，用 `![描述](相对路径)` 嵌入 generate_charts.py 生成的 PNG 图表。每张图表前后都应有对应的文字分析，解释图中的关键发现和趋势，而不是只列数据表格。
-   - 图表嵌入顺序建议：水位时序图 → 流量时序图 → 闸门开度图 → 分水口流量图 → 热力图，每张图后紧跟 2-3 句分析说明。
-7. 需要 HTML 页面时，读取 HTML 参考并复用模板资产。
-8. 如果用户明确要“报告页”“汇报页”“导出截图”或“完整曲线”，优先选报告模板；如果用户明确要筛选、联动、钻取，优先选工作台模板。
-   - 当选择报告模板时，默认含义是输出符合 `assets/hydros-report-template/index.html` 的完整版 HTML 报告，而不是临时拼接的简化页面。
-   - 使用报告模板时，如果既有纵剖面数据也有时序结果，页面应默认提供统一时间轴，让纵剖面、水位、流量、闸门开度按同一步号联动，并支持播放、拖拽、暂停、继续。
-   - 报告中的 `Task Snapshot` 要尽量补全任务元信息：开始时间、结束时间、时间步长、输出步长、仿真时长、场景 YAML ID、任务状态等；能从场景 YAML 和 CSV 计算的要直接计算，缺失时再明确标注“无法推导”。
-   - 时间口径优先级：用户显式参数 `total_steps` / `sim_step_size` / `output_step_size` > 场景 YAML > CSV 自身可靠字段（如非空的 `step_index`）> 仅展示离散采样序号。禁止写死 `120 秒/步` 之类的默认值。
-   - 当 `data_index` 看起来只是输出序号、`step_index` 为空、或 `source_time` 出现异常未来时间时，要明确告诉用户“CSV 时间轴不可靠”，不要把它误解释成真实计算步号。
-   - 如果用户参数推导出的总时长与 CSV 能覆盖的总时长不一致，报告中要明确写出两者差值，并把它视为 CSV 导出问题或数据质量问题。
-   - 用户可见的任务状态统一使用中文，例如 `COMPLETED` 展示为“已完成”。
-   - “后续动作”区块统一命名为“后续建议动作”。
-9. 报告模板默认采用 `index.html + report.data.js` 分离模式，避免把真实数据直接硬编码进 HTML。
-10. 如果用户明确要“拓扑图”“场景拓扑”“水网拓扑”或“渠道拓扑”，优先读取场景 YAML 和 `hydros_objects_modeling_url` 指向的 `objects.yaml`，整理 `connections`、对象类型和关键节点关系，生成 HTML 拓扑可视化页。
-11. 如果用户明确要“纵剖面”“纵剖面图”或“水面线”，优先基于 `objects.yaml` 中断面的 `location`、`bottom_elevation` 叠加时序结果中的水位（`water_level`）生成渠道纵剖面 HTML 页面。
-   - 高程字段优先读取显式的 `t_top_elevation` 和 `bottom_elevation`；如果缺失，再根据 `cross_section_geometry.data_points` 的最大值和最小值推导顶高程与底高程。
-   - 纵剖面的 x 轴和 y 轴都应根据当前展示数据的实际数值范围自适应收紧，不要使用过宽的固定范围。
-12. 如果用户要求“增加闸站展示”“展示水流流向”，在纵剖面页中额外展示闸站卡片、闸门组成，以及“上游 -> 下游”的流向标识。
+1. **数据获取**：确认任务状态为 `COMPLETED`，调用 `get_timeseries_data` 获取 `resource_uri`，再调用 `read_mcp_resource` 读取 CSV 文本并落盘。传递用户显式提供的仿真参数给脚本，避免写死默认值。
+
+2. **统计摘要**：生成总记录数、采样步数、对象数、指标数、异常点数量。
+
+3. **图表生成**：用 `scripts/generate_charts.py` 生成水位、流量、热力图等图表。注意 y 轴自适应收紧，热力图按真实采样步绘制，识别并剔除占位零值。
+
+4. **异常分析**：用 `scripts/analyze_anomalies.py` 检测负压、流速异常、水头损失等。
+
+5. **报告生成**：
+   - **默认产出**：HTML 报告 + Markdown 报告（除非用户明确只要其中一种）
+   - **HTML 报告**：对齐 `assets/hydros-report-template/index.html` 完整版结构，包含纵剖面与时序曲线联动
+   - **Markdown 报告**：图文并茂，每张图表配套文字分析
+   - **目录结构**：`report/` 存放报告，`charts/` 存放图表，`data/` 存放数据
+   - **数据验证**：比较期望与实际的时长/点数，不一致时在报告中说明
+
+6. **模板选择**：
+   - 用户要”报告页””汇报页””完整曲线” → 报告模板
+   - 用户要”筛选””联动””钻取” → 工作台模板
+
+7. **拓扑与纵剖面**：
+   - 拓扑图：读取 `objects.yaml`，整理 connections 和对象关系
+   - 纵剖面：基于断面 location、bottom_elevation 和水位生成，支持闸站展示和流向标识
+
+**详细报告生成规范**：参考 [references/report-generation-guide.md](references/report-generation-guide.md)。
 
 ## 快捷入口
 
