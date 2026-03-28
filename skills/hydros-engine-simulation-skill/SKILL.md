@@ -12,17 +12,44 @@ description: |
 
 - 在读取“核心职责”或进入任何仿真流程前，先检查 `hydro-engine-mcp` 是否已安装并可连通。
 - 优先调用 `list_mcp_resource_templates(server="hydro-engine-mcp")` 或等价轻量探测确认 MCP 握手正常。
+- 连接 `hydroos` MCP 时，优先走已安装好的 `hydro-engine-mcp` 工具链；不要自己临时改用 SSE 客户端库直连 `https://hydroos.cn/mcp` 做初始化探测，这条路径容易卡住或超时。
+- 做 HTTP 直连排查时，只排查 MCP 入口 `https://hydroos.cn/mcp`，不要误打业务网页或猜测式 REST 路径（例如 `https://hydroos.cn/api/scenario/lists`）；这类地址通常返回 HTML，不是可用的 JSON/MCP 响应。
+- 做 HTTP 直连排查时必须带上正确 Header，至少包括：
+  - `Accept: application/json, text/event-stream`
+  - `Authorization: Bearer <token>`
+- 如果缺少上述 `Accept`，`https://hydroos.cn/mcp` 可能返回 `406 Not Acceptable`；不要在这种情况下继续重试同样的错误请求。
 - 如果需要做 HTTP 直连排查，使用：
   - URL: `https://hydroos.cn/mcp`
   - Header `Accept: application/json, text/event-stream`
   - Header `Authorization: Bearer <token>`
+- MCP 连接速查表：
+  - 正确连接方式：
+    - URL: `https://hydroos.cn/mcp`
+    - 协议：`JSON-RPC 2.0 over HTTP POST`
+    - Header：`Authorization: Bearer <token>`
+    - 直连排查时同时补上 `Accept: application/json, text/event-stream`
+    - 不要使用 SSE 客户端库，不要尝试 stream 模式做 MCP 初始化
+  - 标准工作流：
+    1. `initialize`
+    2. `subscribe_to_simulation_events`
+    3. 业务工具调用
+  - 常见错误：
+    - `406`：通常是缺少 `Content-Type` 或必要的请求头；先检查 `Content-Type: application/json`，再检查 `Accept`
+    - `32602`：参数缺失，最常见是漏传 `sse_client_id`
+    - 返回 HTML：URL 错误；应该使用 `/mcp`，不是 `/api/xxx`
 - 如果用户尚未配置 token，则按 `Authorization token: ""` 视为未配置，直接报告缺失并停止后续步骤。
 - 当 token 缺失或 MCP 未安装时，明确提示用户：
   - 先访问 `https://hydroos.cn/playground/`
   - 完成注册或登录
   - 在“账号管理”中获取 API token
+  - 将获取到的 API key / token 发给我，我来帮你完成配置
   - 将该 token 配置到 `Authorization: Bearer <token>` 后再继续
 - 只有在上述检查通过后，才允许继续执行本 skill 的任何后续工作流。
+
+连接避坑摘要：
+- 错误方式 1：使用 SSE 客户端库直接连 `https://hydroos.cn/mcp` 做初始化探测，容易卡住或超时；正确方式是优先使用已经安装好的 `hydro-engine-mcp` 工具，并先调用 `list_mcp_resource_templates` 做轻量握手检查。
+- 错误方式 2：误用 `https://hydroos.cn/api/scenario/lists` 这类路径，返回的通常是 HTML 页面，不是 JSON/MCP 数据；正确方式是使用 skill 中定义的 MCP 工具，如 `biz_scenario_id_lists`、`get_scenario_events`。
+- 错误方式 3：直连 `https://hydroos.cn/mcp` 时缺少 `Accept: application/json, text/event-stream`，会返回 `406 Not Acceptable`；正确方式是带齐必需 Header 后再排查。
 
 ## 核心职责
 
@@ -34,12 +61,15 @@ description: |
 - 在调用 `create_simulation_task` 前，必须先调用 `subscribe_to_simulation_events` 建立 SSE 事件订阅通道。
 - `biz_scenario_id` 和 `biz_scenario_config_url` 必须成对使用，并且只能来自 `biz_scenario_id_lists` 的返回结果。
 - 当用户已经完成“选场景”动作后，在任何参数确认、默认参数展示或启动动作之前，必须先输出一次基于场景 YAML 和 `hydros_objects_modeling_url` / `objects.yaml` 的简要拓扑总结；这一步是启动前置条件，不允许静默跳过。
+- 当用户已经完成“选场景”动作后，在任何参数确认、默认参数展示或启动动作之前，还必须先调用 `get_scenario_events` 查询该场景支持注入的预置事件，并将事件列表与默认 `total_steps`、`sim_step_size`、`output_step_size` 一起展示给用户选择；这一步同样属于启动前置条件，不允许静默跳过。
 - 当用户只是回复场景 ID、场景名称，或说“就这个”“选这个”时，只能视为“选定场景”，不能直接视为“接受默认参数并立即启动”；必须先展示该场景的默认 `total_steps`、`sim_step_size`、`output_step_size`，并等待用户确认或修改。
 - 只要创建的是 live 仿真任务，就不能在”任务已创建”或”出现首条进度”后停止；必须持续监测到终态（`COMPLETED` 或 `FAILED`）。
 - 如果用户已经明确表达”启动””运行””跑”某个场景或仿真任务，默认含义就是”启动后继续盯任务”；不要再额外追问是否继续等待，除非用户明确要求只启动不跟踪。
+- 只有在已经实际进入轮询循环，并完成至少一轮真实的 `get_task_status` 与 `fetch_sse_events` 调用后，才允许对用户说“正在持续监测中”；如果只是创建了任务、只查了一次状态、或本轮即将停止执行，都不能使用这类表述。
 - 如果用户明确表达“停止仿真”“结束仿真”“终止任务”“废弃这个任务”，默认含义就是执行不可恢复的终止/取消；不要再追问“是暂停还是终止”。只有当用户明确说“暂停”“先停一下”“稍后继续”时，才走暂停语义。
 - 禁止在任务已启动后再用提问或选项的方式征询“要不要继续盯进度”“要不要继续等待”“要不要我后面再查”。这类问题会把本应自动持续执行的流程错误地还给用户决策，属于违规交互。
 - 绝对不能在未经用户明确同意的情况下取消（`cancel_simulation_task`）或终止仿真任务。取消是不可逆操作，任务一旦取消就无法恢复。即使轮询时间较长、加速失败或出现其他非致命问题，也只能继续等待或向用户报告情况，由用户决定是否取消。
+- 如果轮询因为工具异常、会话结束、用户中断或任何其他原因没有继续执行，必须明确说“监测已中断”或“本轮只完成了一次查询”，不能继续宣称“正在持续监测中”。
 - 在调用 `get_timeseries_data` 前，必须先确认任务状态为 `COMPLETED`。
 - `get_timeseries_data` 返回的是 `resource_uri`；如果后续要给本地脚本消费，必须继续调用 `read_mcp_resource(server=\"hydro-engine-mcp\", uri=resource_uri)` 读取 CSV 文本，再落成本地 `.csv` 文件。
 - 如果用户要做交互式分析工作台、HTML 报告或其他 HTML 页面，先读 [references/hydros-html-prompt.md](references/hydros-html-prompt.md)。
@@ -95,6 +125,7 @@ description: |
 3. 保存每个场景的 `biz_scenario_config_url`，后续创建任务时必须使用。
 4. 给出推荐场景，优先描述中包含“测试”或“SDK”的场景，其次选依赖较少的场景。
 5. 一旦用户明确选定某个场景（例如只回复场景 ID、场景名称，或说“就这个”“选这个”），在进入阶段三前，默认补一段基于场景 YAML 和 `hydros_objects_modeling_url` / `objects.yaml` 的简要拓扑总结。
+6. 在进入阶段三前，调用 `get_scenario_events` 查询该场景支持注入的预置事件，并整理为简要事件清单；后续参数确认时必须和默认仿真参数一起展示给用户选择。
 
 场景拓扑简要总结要求：
 - 至少给出 `waterway_id`、主水网/渠道名称、对象总览（如 `UnifiedCanal`、`CrossSection`、`DisturbanceNode`、`GateStation`、`Gate` 的数量或主要成员）。
@@ -102,6 +133,13 @@ description: |
 - 点出关键控制节点或特殊对象，例如 `ZM1`、`ZM2`、主要分水口、退水闸、入口断面。
 - 这是“简单总结”，默认放在场景确认反馈里即可，不要等用户追问后才补。
 - 如果 `objects.yaml` 暂时不可读，也要明确说明“当前无法读取对象拓扑，只展示场景基本信息”，不要静默跳过。
+
+场景预置事件展示要求：
+- 优先调用 `get_scenario_events`，按场景 ID 查询支持注入的预置事件。
+- 至少展示每个事件的名称/类型、作用对象、触发步或触发时间、是否默认启用。
+- 这部分默认放在参数确认之前，与 `total_steps`、`sim_step_size`、`output_step_size` 同时出现，供用户一起决定是否按默认配置启动。
+- 如果 `get_scenario_events` 返回空列表，要明确写“该场景当前无可注入预置事件”。
+- 如果当前环境暂时无法调用 `get_scenario_events`，要明确写“当前无法读取场景预置事件，仅展示仿真参数”，不要静默跳过。
 
 异常处理：
 - `401 ACCESS_UNAUTHORIZED`：提示用户检查认证。
@@ -123,6 +161,7 @@ description: |
 参数确认规则：
 
 - 首次创建任务时，展示场景默认仿真参数（`total_steps`、`sim_step_size`、`output_step_size`），询问用户是否需要调整。
+- 首次创建任务时，还要同步展示通过 `get_scenario_events` 查询到的预置事件清单，并让用户一并确认“是否按默认事件配置启动”。
 - 如果用户在同一条消息中已经给出了所有参数（如”用默认参数启动”、”步数 800”），直接创建任务，不再额外确认。
 - 如果用户只给出场景 ID / 场景名称，而没有明确说”用默认参数启动””直接运行”或没有显式提供参数值，必须先停在参数确认这一步，不能自动创建任务。
 
@@ -142,27 +181,34 @@ description: |
 执行步骤：
 1. 如有必要，先重新确认 SSE 连接有效。
 2. 先确认阶段二的“场景拓扑简要总结”已经输出；如果还没输出，必须先补这段总结，再继续下面步骤。
-3. 尝试获取场景配置参数（按上述降级策略）。
-4. 向用户展示仿真参数供确认，格式示例：
+3. 先确认阶段二的“场景预置事件清单”已经输出；如果还没输出，必须先补这段清单，再继续下面步骤。
+4. 尝试获取场景配置参数（按上述降级策略）。
+5. 调用 `get_scenario_events` 获取该场景支持注入的预置事件；如果失败，必须在反馈中明确说明。
+6. 向用户展示仿真参数和预置事件供确认，格式示例：
    > 准备启动场景 [场景名称]，请确认参数：
    > - 总步数: 1200（默认）
    > - 计算步长: 120s（默认）
    > - 输出步长: 7200s（默认）
+   > - 预置事件:
+   >   - 事件 A：step=60，默认关闭
+   >   - 事件 B：step=180，默认开启
    >
-   > 需要调整吗？或直接确认启动。
+   > 需要调整参数、修改事件选择，或直接确认启动。
 
    反例：如果用户上一条消息只有 `100001`，这表示”选择场景 100001”，此时仍然必须先发上面的确认消息，不能直接调用 `create_simulation_task`。
    反例：如果用户已经展示了默认参数，但还没有给出 `objects.yaml` 简要拓扑总结，也不能直接调用 `create_simulation_task`。
-5. 用户确认后，调用 `create_simulation_task`。
-6. 保存并展示：
+   反例：如果用户已经展示了默认参数，但还没有给出 `get_scenario_events` 返回的预置事件清单，也不能直接调用 `create_simulation_task`。
+7. 用户确认后，调用 `create_simulation_task`。
+8. 保存并展示：
    - `biz_scene_instance_id`
    - `task_status`
    - `total_steps`
    - `default_render_objects`
    - `valid`
-7. 如果这是 live 任务，创建成功后立即进入阶段四持续监测，直到任务进入 `COMPLETED` 或 `FAILED`，不要在首个进度点就结束本轮处理。
-8. 对”启动 100001””运行这个场景”这类明确启动指令，默认把”持续监测到终态”视为同一轮动作的一部分，不需要再次征询用户。
-9. 创建成功后的第一条反馈应直接包含任务 ID、当前状态、当前进度和“正在持续监测中”的事实；不要把“是否继续盯进度”作为可选后续动作抛给用户。
+9. 如果这是 live 任务，创建成功后立即进入阶段四持续监测，直到任务进入 `COMPLETED` 或 `FAILED`，不要在首个进度点就结束本轮处理。
+10. 对”启动 100001””运行这个场景”这类明确启动指令，默认把”持续监测到终态”视为同一轮动作的一部分，不需要再次征询用户。
+11. 创建成功后的第一条反馈应直接包含任务 ID、当前状态、当前进度和“正在持续监测中”的事实；不要把“是否继续盯进度”作为可选后续动作抛给用户。
+12. 如果要给出“预计剩余时间”或“预计完成时间”，必须基于真实轮询中观测到的步进速度计算，不能用 `total_steps * sim_step_size` 推导成墙钟剩余时间。
 
 异常处理：
 - `SSE通道未建立`：重新订阅后重试。
@@ -183,6 +229,44 @@ description: |
 2. `fetch_sse_events(sse_client_id)`
    用于拿到增量事件流并整理成时间线。
 
+标准监测方法：
+
+1. 创建 live 任务成功后，立刻进入轮询循环。
+2. 每一轮轮询必须至少执行一次 `get_task_status(sse_client_id, biz_scene_instance_id)` 和一次 `fetch_sse_events(sse_client_id)`。
+3. 每一轮都要用这两类结果更新“最新可信状态”：
+   - 优先使用最新的终态（`COMPLETED` / `FAILED`）。
+   - 进度优先取 SSE 事件中的最新 `current_step`；如果 SSE 暂时没有新事件，再回退到 `get_task_status`。
+4. 每一轮结束后，只有在准备继续下一轮轮询时，才可以对用户表述为“正在持续监测中”。
+5. 如果已经停止轮询，或当前回合不会继续执行下一轮，则必须明确表述为“本轮已查询到最新状态”，不能伪装成持续监测。
+6. 推荐轮询间隔为 5 到 10 秒；如果任务步进非常快，可缩短到 2 到 5 秒，但不能只查一次就结束。
+7. “持续监测完成”的判定只有两种：
+   - 捕获到终态 `COMPLETED` 或 `FAILED`
+   - 用户明确要求停止跟踪、取消任务或结束当前流程
+
+剩余时间与完成时间估算规则：
+
+1. 墙钟剩余时间只能基于真实监测样本估算，不能直接使用 `sim_step_size`、`output_step_size` 或“仿真总时长”替代。
+2. 至少拿到 2 个有效监测样本后，才允许开始估算：
+   - 样本至少包含：查询时间、`current_step`、`total_steps`
+   - 有效样本要求：`current_step` 递增，且两次查询之间存在非零时间差
+3. 推荐优先使用最近 2 到 5 个有效样本计算实际步进速度：
+   - `实际速度 = 步数增量 / 墙钟耗时`
+   - `预计剩余时间 = (total_steps - current_step) / 实际速度`
+4. 如果样本过少、步数没有推进、或速度波动过大，必须明确写“当前样本不足，暂不提供可靠 ETA”，不要编造剩余时间。
+5. `sim_step_size` 只用于解释仿真时间轴、仿真覆盖时长和输出时间口径，不用于估算任务还要运行多少分钟。
+6. 只有当 ETA 来自刚刚完成的真实轮询样本时，才允许写“预计 X 分钟内完成”或“预计 HH:MM 完成”。
+
+状态播报规则：
+
+- 当预计剩余时间较短并且当前轮询会继续执行时，直接报告当前进度和基于真实样本计算的 ETA，然后继续监测；不要反问用户“要不要继续等待”。
+- 当预计剩余时间较长时，也不要抛三选一让用户决定；默认继续监测，只向用户报告“当前进度 + 基于真实样本的 ETA + 将继续监测”。
+- 只有当当前环境无法继续维持轮询，或会话确实要结束时，才允许明确说明“本轮无法继续驻留监测”；这时必须说明原因，不能伪装成还在持续监测。
+
+真实性校验要求：
+- 任意一次“正在持续监测中”的回复，都必须能对应到本轮刚刚执行过的真实 MCP 调用结果，而不是沿用上一次的旧状态。
+- 如果回复里出现“最新进度”“当前状态”“正在监测”，必须能同时指出最近一次真实查询得到的 `task_status`、`current_step` 或最新 SSE 事件。
+- 不允许只在创建任务后说一句“我会持续监测”，然后没有后续轮询动作。
+
 状态流转：
 
 ```text
@@ -193,7 +277,7 @@ INIT -> WAITING_AGENTS -> READY -> STEPPING -> COMPLETED
 展示要求：
 - 对 `STEPPING` 状态必须展示文本进度条快照、`current_step / total_steps` 和百分比。
 - 文本进度条快照默认使用 10 格宽度，格式固定为 `███░░░░░░ 15.4% | 185/1200`；已完成部分用 `█`，未完成部分用 `░`，百分比保留 1 位小数。
-- 当任务首次进入 `STEPPING` 状态时，在进度输出中附带一句提示，告知用户当前速度和预估剩余时间，并说明可以随时输入"加速"或"4x"来调整倍速（可选：0.25x、0.5x、1x、2x、4x）。这条提示只出现一次，之后不再重复。关键点：不要用阻塞式提问（如 AskUserQuestion）来询问加速，因为那会中断轮询循环，导致监测停止。正确做法是把加速提示作为进度输出的一部分，然后立即继续轮询；如果用户在后续消息中主动要求加速，再调用 `update_task_speed`。
+- 当任务首次进入 `STEPPING` 状态时，在进度输出中附带一句提示，告知用户当前速度和预估剩余时间；如果此时样本还不足以给出可靠 ETA，就明确写“暂未形成可靠 ETA”。同时说明可以随时输入"加速"或"4x"来调整倍速（可选：0.25x、0.5x、1x、2x、4x）。这条提示只出现一次，之后不再重复。关键点：不要用阻塞式提问（如 AskUserQuestion）来询问加速，因为那会中断轮询循环，导致监测停止。正确做法是把加速提示作为进度输出的一部分，然后立即继续轮询；如果用户在后续消息中主动要求加速，再调用 `update_task_speed`。
 - 对 `FAILED` 状态优先提取 `failure_exception`。
 - 对 SSE 事件整理为时间线，突出状态切换和关键进度节点。
 - 对 live 任务，默认持续轮询 `get_task_status` 和 `fetch_sse_events`，直到捕获终态；在终态前不要把流程当作完成。
