@@ -1,5 +1,5 @@
 ---
-name: hydros-engine-validation-skill
+name: hydros-engine-skill-analyst
 description: |
   水力仿真结果准确性验证工具。将 MCP 仿真引擎输出的 CSV 数据与历史实测 Excel 数据进行对比，
   计算误差统计指标（RMSE、MAE、最大偏差、相关系数等），生成对比曲线图和验证报告。
@@ -8,7 +8,7 @@ description: |
   即使用户只是说"对比一下结果"、"看看仿真准不准"、"和实测数据比一下"，也应触发此 skill。
 ---
 
-# Hydros Engine 仿真结果验证 Skill
+# Hydros Engine Skill Analyst
 
 ## 概述
 
