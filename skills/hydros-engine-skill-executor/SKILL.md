@@ -36,6 +36,14 @@ description: |
 
 3. **使用正确的工具链**：优先使用已安装的 `hydros-engine-executor` 工具，避免临时直连 MCP 端点。直连容易遇到超时或 Header 配置问题。
 
+4. **结果下载默认路径**：凡是用户要求“下载 CSV”“落盘到本地”“保存结果文件”，默认走标准下载链：
+   - 先调用 `get_timeseries_data`
+   - 再读取返回的 `resource_uri`
+   - 优先用 `read_mcp_resource(server="hydros-engine-executor", uri=resource_uri)` 读取完整 CSV 文本
+   - 如需走底层 HTTP，使用 `https://hydroos.cn/mcps/hydros-engine-executor` 执行 `initialize -> resources/read`
+   - 最后一次性写入本地 `.csv`
+   不要把大段 CSV 文本通过终端交互会话、`cat > file`、分块粘贴或聊天输出中转来落盘，这类方式容易被截断，生成坏文件。
+
 **详细连接排查指南**：如遇连接问题，参考 [references/mcp-connection-guide.md](references/mcp-connection-guide.md)。
 
 ## 核心职责
@@ -65,6 +73,8 @@ description: |
 - 在追加消息型聊天环境里，”自动显示进度条”的正确含义是：只要本轮仍在持续轮询，代理就必须主动连续发送文本进度条快照，不需要用户再次提醒；如果本轮被用户中断，则自动刷新链条随之中断，恢复后必须先说明”监测曾中断，现已恢复”。
 - 调用 `get_timeseries_data` 前先确认任务状态为 `COMPLETED`。未完成的任务可能返回不完整的数据。
 - `get_timeseries_data` 返回 `resource_uri`。如果本地脚本需要消费数据，继续调用 `read_mcp_resource` 读取 CSV 文本并落盘。这样脚本可以直接处理本地文件。
+- 当目标是“下载 CSV 到本地”而不是立刻做报告时，也必须走同一条标准链路：`get_timeseries_data -> resource_uri -> read_mcp_resource / resources/read -> 本地一次性写盘`。不要把 CSV 内容通过终端标准输入、交互式 `cat`、消息复制粘贴等方式中转。
+- 如果本地已经存在同名 `.csv`，覆盖前先核对文件大小或行数；如发现明显偏小、行数异常少，优先视为“落盘被截断”，重新按标准链路完整下载，不要在坏文件基础上追加写入。
 - 如果用户要做交互式分析工作台、HTML 报告或其他 HTML 页面，先读 [references/hydros-html-prompt.md](references/hydros-html-prompt.md)。
 - 如果需要理解数据结构、聚合口径或指标映射，先读 [references/hydros-data-contract.md](references/hydros-data-contract.md)。
 - 如果需要快速交付一个可直接打开的页面，优先复用模板资产，而不是从零开始。
@@ -287,7 +297,12 @@ INIT -> WAITING_AGENTS -> READY -> STEPPING -> COMPLETED
 
 ### 阶段五：获取结果与分析
 
-1. **数据获取**：确认任务状态为 `COMPLETED`，调用 `get_timeseries_data` 获取 `resource_uri`，再调用 `read_mcp_resource` 读取 CSV 文本并落盘。传递用户显式提供的仿真参数给脚本，避免写死默认值。
+1. **数据获取**：确认任务状态为 `COMPLETED`，调用 `get_timeseries_data` 获取 `resource_uri`，再按以下顺序落盘：
+   - 优先：`read_mcp_resource(server="hydros-engine-executor", uri=resource_uri)`
+   - 备选：对 `https://hydroos.cn/mcps/hydros-engine-executor` 执行 `initialize -> resources/read`
+   - 将返回的完整 CSV 文本一次性写入本地 `.csv`
+   - 写完后立刻校验文件大小、行数，必要时补充总记录数核对
+   传递用户显式提供的仿真参数给脚本，避免写死默认值。
 
 2. **统计摘要**：生成总记录数、采样步数、对象数、指标数、异常点数量。
 
