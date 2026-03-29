@@ -6,7 +6,7 @@
 
 ### 正确连接方式
 
-- **URL**: `https://hydroos.cn/mcp`
+- **URL**: `https://hydroos.cn/mcps/hydros-engine-executor`
 - **协议**: `JSON-RPC 2.0 over HTTP POST`
 - **必需 Header**:
   - `Authorization: Bearer <token>`
@@ -27,7 +27,7 @@
 当需要排查连接问题时，使用以下配置：
 
 ```bash
-curl -X POST https://hydroos.cn/mcp \
+curl -X POST https://hydroos.cn/mcps/hydros-engine-executor \
   -H "Accept: application/json, text/event-stream" \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
@@ -35,7 +35,7 @@ curl -X POST https://hydroos.cn/mcp \
 ```
 
 **注意事项**：
-- 只排查 MCP 入口 `https://hydroos.cn/mcp`
+- 只排查 MCP 入口 `https://hydroos.cn/mcps/hydros-engine-executor`
 - 不要误打业务网页或猜测式 REST 路径（如 `https://hydroos.cn/api/scenario/lists`）
 - 这类业务地址通常返回 HTML，不是可用的 JSON/MCP 响应
 
@@ -52,7 +52,7 @@ curl -X POST https://hydroos.cn/mcp \
 
 ### 错误方式 1：使用 SSE 客户端库直连
 
-**问题**：使用 SSE 客户端库直接连 `https://hydroos.cn/mcp` 做初始化探测，容易卡住或超时。
+**问题**：使用 SSE 客户端库直接连 `https://hydroos.cn/mcps/hydros-engine-executor` 做初始化探测，容易卡住或超时。
 
 **原因**：MCP 初始化使用 JSON-RPC 2.0 over HTTP POST，不是 SSE stream。
 
@@ -68,7 +68,7 @@ curl -X POST https://hydroos.cn/mcp \
 
 ### 错误方式 3：缺少必需 Header
 
-**问题**：直连 `https://hydroos.cn/mcp` 时缺少 `Accept: application/json, text/event-stream`，返回 `406 Not Acceptable`。
+**问题**：直连 `https://hydroos.cn/mcps/hydros-engine-executor` 时缺少 `Accept: application/json, text/event-stream`，返回 `406 Not Acceptable`。
 
 **原因**：服务端需要明确的 Accept header 来确定响应格式。
 
