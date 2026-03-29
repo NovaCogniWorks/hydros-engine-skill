@@ -3,7 +3,7 @@
 在以下场景读取本文件：
 
 - 需要把原始时序数据转成图表、摘要卡片或异常表。
-- 需要生成 HTML 仪表板、Markdown 报告或 Word 报告。
+- 需要生成 HTML 报告、Markdown 报告或 Word 报告。
 - 需要解释 `object_type`、`metrics_code`、`data_index` 的含义。
 
 ## 原始记录结构
@@ -126,32 +126,6 @@ object_name + metrics_code
 
 - 数据缺失
   规则：对象在部分 `data_index` 缺少记录
-
-## HTML 仪表板推荐区块
-
-### 顶部摘要
-
-- 场景 ID
-- 任务 ID
-- 当前状态
-- 总步数
-- 对象数
-- 指标数
-
-### 筛选器
-
-- `object_type`
-- `metrics_code`
-- `object_name`
-- 是否仅看异常对象
-
-### 主内容
-
-- 全局时序图
-- 对象对比图
-- 异常检测表
-- SSE/状态时间线
-- 原始数据表
 
 ## 展示语言建议
 

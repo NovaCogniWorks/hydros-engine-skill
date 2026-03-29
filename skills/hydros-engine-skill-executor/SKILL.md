@@ -1,7 +1,7 @@
 ---
 name: hydros-simulation
 description: |
-  水力仿真引擎全流程编排工具。通过调用 hydros-engine-executor MCP 服务完成场景查询、仿真任务创建、进度跟踪、时序结果导出与读取、异常分析、图表输出，并生成交互式分析工作台、HTML 汇报报告、Markdown 报告、拓扑可视化页或渠道纵剖面页。
+  水力仿真引擎全流程编排工具。通过调用 hydros-engine-executor MCP 服务完成场景查询、仿真任务创建、进度跟踪、时序结果导出与读取、异常分析、图表输出，并生成 HTML 汇报报告、Markdown 报告、拓扑可视化页或渠道纵剖面页。
 
   当用户提到水力仿真、场景分析、仿真任务、水位流量分析、渠道仿真、hydros 引擎、仿真结果可视化、拓扑图、纵剖面等相关内容时触发。即使用户只是模糊地说”跑一下仿真””看看数据””分析一下结果””做个分析页面””获取拓扑””画纵剖面”，也应该触发此 skill。
 ---
@@ -48,7 +48,7 @@ description: |
 
 ## 核心职责
 
-编排 hydros 仿真的完整流程，并在结果阶段提供图表、异常分析、HTML 汇报报告、Markdown 报告、交互式分析工作台、场景拓扑可视化和渠道纵剖面展示支持。
+编排 hydros 仿真的完整流程，并在结果阶段提供图表、异常分析、HTML 汇报报告、Markdown 报告、场景拓扑可视化和渠道纵剖面展示支持。
 
 ## 沟通与硬规则
 
@@ -75,10 +75,9 @@ description: |
 - `get_timeseries_data` 返回 `resource_uri`。如果本地脚本需要消费数据，继续调用 `read_mcp_resource` 读取 CSV 文本并落盘。这样脚本可以直接处理本地文件。
 - 当目标是“下载 CSV 到本地”而不是立刻做报告时，也必须走同一条标准链路：`get_timeseries_data -> resource_uri -> read_mcp_resource / resources/read -> 本地一次性写盘`。不要把 CSV 内容通过终端标准输入、交互式 `cat`、消息复制粘贴等方式中转。
 - 如果本地已经存在同名 `.csv`，覆盖前先核对文件大小或行数；如发现明显偏小、行数异常少，优先视为“落盘被截断”，重新按标准链路完整下载，不要在坏文件基础上追加写入。
-- 如果用户要做交互式分析工作台、HTML 报告或其他 HTML 页面，先读 [references/hydros-html-prompt.md](references/hydros-html-prompt.md)。
+- 如果用户要做 HTML 报告或其他 HTML 页面，先读 [references/hydros-html-prompt.md](references/hydros-html-prompt.md)。
 - 如果需要理解数据结构、聚合口径或指标映射，先读 [references/hydros-data-contract.md](references/hydros-data-contract.md)。
 - 如果需要快速交付一个可直接打开的页面，优先复用模板资产，而不是从零开始。
-- 需要交互式分析工作台时，优先复用 [assets/hydros-dashboard-template/index.html](assets/hydros-dashboard-template/index.html)。
 - 需要完整版 HTML 报告、完整曲线展示或外部 payload 驱动页面时，优先复用 [assets/hydros-report-template/index.html](assets/hydros-report-template/index.html) 和同目录 `report.data.js`。
 - 当用户明确要“报告”“完整报告”“HTML 报告”“汇报页”时，不要先交付临时分析报告、手写摘要页或简版 HTML 作为最终产物；如果本地 CSV 尚未就位，先完成 `read_mcp_resource -> 落盘 .csv -> build_csv_report.py`，再输出遵循模板的正式报告。
 - HTML 正式报告应尽量包含完整曲线图产物和渠道纵剖面图；若 `chart1_water_level.png`、`chart2_water_flow.png`、`chart4_gate_opening.png`、`chart5_disturbance_flow.png`、`chart6_heatmap.png`、`chart7_longitudinal_profile.png` 中有缺失，仍可交付 HTML，但必须在报告正文里显式写明缺失项、缺失原因和影响范围，不能把缺图问题只留在聊天回复里解释。
@@ -93,22 +92,18 @@ description: |
   用于演示轮询模式和流式模式的进度条实现。支持四种演示模式：`--mode polling`（轮询模式）、`--mode streamable`（流式模式）、`--mode sse`（SSE 流式模式）、`--mode comparison`（对比演示）。可用于理解两种进度条实现方式的区别。
 - `scripts/build_csv_report.py`
   用于把本地 CSV 结果快速整理成 HTML 报告和 Markdown 报告；若可获取断面里程与底高程，还会默认附带渠道纵剖面图。输出目录默认按 `report/`、`charts/`、`data/` 分类。
-- `scripts/build_csv_dashboard.py`
-  用于把本地 CSV 结果快速整理成交互式分析工作台。
 - `scripts/build_longitudinal_profile.py`
   用于根据 `objects.yaml` 断面信息和时序结果生成渠道纵剖面 HTML 页面，并可叠加闸站信息和上游到下游流向标识。高程字段优先读取显式的 `t_top_elevation` 和 `bottom_elevation`；若缺失，再根据 `cross_section_geometry.data_points` 的最大值和最小值推导。
 - `references/hydros-data-contract.md`
   用于理解时序记录结构、推荐聚合口径、异常信号定义。
 - `references/hydros-html-prompt.md`
   用于生成 HTML 页面提示词规范、报告页规格、拓扑页/纵剖面页规格或页面实现约束。
-- `assets/hydros-dashboard-template/index.html`
-  用于快速起一个单文件交互式分析工作台。
 - `assets/hydros-report-template/index.html`
   用于生成符合模板规范的完整版 HTML 报告，适合汇报、截图、归档和真实结果复盘；报告默认支持纵剖面与时序曲线联动、播放、拖拽、暂停和继续，主要图表的 y 轴应根据当前数据范围自适应缩放。纵剖面需要同时展示断面顶高程、底高程和水面线，其中水位阴影只填充到底高程线，底高程阴影才延伸到坐标轴底部；闸站位置优先用稳定的虚线标识，避免播放时出现抖动。不要用自定义轻量页或单页汇报版替代该模板。
 - `assets/hydros-report-template/report.data.js`
   用于承载报告模板的外部数据 payload，替换后即可接入真实仿真结果。
 - 以上 Python 脚本涉及时间轴、总步数、时长或输出频率计算时，优先使用用户显式提供的 `total_steps`、`sim_step_size`、`output_step_size`，其次再用场景 YAML。避免写死默认步长，确保计算准确性。
-- 报告和工作台同时识别两类信息：用户输入的仿真参数和 CSV 实际导出的数据。两者不一致时，在报告的”异常与建议”或”数据质量”区块显式说明，避免用户误解数据质量。
+- 报告应同时识别两类信息：用户输入的仿真参数和 CSV 实际导出的数据。两者不一致时，在报告的”异常与建议”或”数据质量”区块显式说明，避免用户误解数据质量。
 
 ## 五阶段工作流
 
@@ -319,7 +314,7 @@ INIT -> WAITING_AGENTS -> READY -> STEPPING -> COMPLETED
 
 6. **模板选择**：
    - 用户要”报告页””汇报页””完整曲线” → 报告模板
-   - 用户要”筛选””联动””钻取” → 工作台模板
+   - 用户要”拓扑页””纵剖面页”或其他专题 HTML 页 → 对应专题页面模板或实现
 
 7. **拓扑与纵剖面**：
    - 拓扑图：读取 `objects.yaml`，整理 connections 和对象关系
@@ -338,7 +333,7 @@ INIT -> WAITING_AGENTS -> READY -> STEPPING -> COMPLETED
 | “查看进度” / “任务状态” | 执行阶段四 |
 | “拉取结果” / “分析数据” | 执行阶段五 |
 | “生成报告” | 执行阶段五，默认输出 HTML 报告和 Markdown 报告 |
-| “做个页面看仿真数据” / “做 HTML 仪表板” | 先执行阶段五拿到数据，再读 references 并复用交互式分析工作台模板 |
+| “做个页面看仿真数据” / “做 HTML 页面” | 先执行阶段五拿到数据，再读 references 并生成报告页或专题 HTML 页面 |
 | “出一份 HTML 报告” / “做汇报页” / “看完整曲线” | 先执行阶段五拿到数据，再读 references 并复用符合 `index.html` 的完整版 HTML 报告模板 |
 | “获取拓扑” / “场景拓扑” / “渠道拓扑” | 读取场景配置和 `objects.yaml`，输出 HTML 拓扑可视化页 |
 | “画一个纵剖面” / “做纵剖面页” | 基于断面里程、底高程和水位结果生成渠道纵剖面 HTML |

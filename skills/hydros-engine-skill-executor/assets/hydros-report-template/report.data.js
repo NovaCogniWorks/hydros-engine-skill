@@ -83,7 +83,7 @@ window.HYDROS_REPORT_DATA = {
     "替换 report.data.js 中的 meta、摘要、异常和图表序列。",
     "接入真实数据时，优先保持图表字段结构稳定，不要改模板函数签名。",
     "如果序列很多，继续使用可滚动图例和 dataZoom，而不是删减曲线。",
-    "如需筛选和联动，改用 hydros-dashboard-template，而不是在报告页硬塞工作台交互。",
+    "如需扩展页面能力，优先在报告模板基础上做专题区块，而不是混入重型交互。",
   ],
   riskBars: [
     { label: "倒流风险", value: 38 },

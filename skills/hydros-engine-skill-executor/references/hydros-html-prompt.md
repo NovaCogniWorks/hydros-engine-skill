@@ -3,10 +3,10 @@
 在以下场景读取本文件：
 
 - 用户要“做个页面看仿真数据”
-- 用户要 HTML 仪表板、分析工作台、结果面板、可视化页面
+- 用户要 HTML 页面、结果面板、可视化页面
 - 用户要拓扑图、场景拓扑、渠道拓扑、waterway 拓扑
 - 用户要纵剖面、纵剖面图、水面线图
-- 需要把仿真结果包装成更友好的交互式界面
+- 需要把仿真结果包装成更友好的页面
 
 ## 这类前端 prompt 的稳定规律
 
@@ -29,11 +29,11 @@
 
 ## Hydros 场景下的推荐视觉方向
 
-目标不是“酷炫官网”，而是“友好但专业的工程分析台”。
+目标不是“酷炫官网”，而是“友好但专业的工程分析页面”。
 
 建议：
 
-- 风格：calm industrial / clean data dashboard
+- 风格：calm industrial / clean engineering page
 - 主色：蓝灰、中性色、少量青色或琥珀色强调
 - 背景：浅色或深色都可以，但保持低噪音
 - 字体：Inter / system-ui
@@ -71,15 +71,7 @@
 - Tailwind CSS
 - ECharts / Recharts
 
-## 两种页面模式
-
-### 工作台模式
-
-适用于需要筛选、联动、对象钻取和长时间交互分析的场景。
-
-优先复用：
-
-- [../assets/hydros-dashboard-template/index.html](../assets/hydros-dashboard-template/index.html)
+## 页面模式
 
 ### 报告页模式
 
@@ -172,68 +164,10 @@ INIT -> WAITING_AGENTS -> READY -> STEPPING -> COMPLETED/FAILED
 
 支持搜索、分页或折叠。
 
-## 推荐 prompt 模板
-
-```text
-创建一个单页 hydros 水力仿真分析 HTML 工作台，用于分析仿真任务输出数据。界面需要友好、专业、可读，优先服务工程分析而不是营销展示。
-
-Tech:
-- 单文件 HTML
-- Tailwind CSS CDN
-- ECharts
-- 不依赖构建工具
-- 接收一个 timeseriesData 数组和一个 simMeta 对象作为输入
-
-1. Data Contract
-timeseriesData 的每条记录包含:
-object_name, object_type, metrics_code, data_index, value, tenant_id, waterway_id
-simMeta 包含:
-biz_scene_instance_id, biz_scenario_id, total_steps, task_status, default_render_objects
-
-2. Design System
-- 视觉风格: calm industrial, clean data dashboard
-- 不要视频背景，不要营销 hero
-- 使用 HSL CSS variables 定义 semantic tokens:
-  --background, --foreground, --card, --muted, --border, --primary, --success, --warning, --danger
-- 圆角 16px，卡片有轻微阴影，hover 克制
-- 字体: Inter / system-ui
-
-3. Layout
-- 顶部: 仿真任务概览栏
-- 左侧: 筛选面板
-- 主区:
-  A. 摘要卡片
-  B. 主时序图
-  C. 对象对比图
-  D. 异常检测表
-  E. SSE/状态时间线
-  F. 原始数据表
-
-4. Visualization Rules
-- water_level: 蓝色系平滑折线
-- water_flow: 青色折线，0 线明显
-- 负流量区域和点使用 danger 色高亮
-- gate/opening 类指标使用阶梯图或柱状图
-- tooltip 显示 object_name、metrics_code、step、value
-
-5. Interaction Rules
-- 默认先展示全局概览
-- 点击对象时，主图、摘要卡、异常表联动
-- 支持切换“按对象看”与“按指标看”
-- 支持只看异常对象
-- 支持导出当前筛选结果为 CSV
-
-6. Implementation Constraints
-- 所有图表必须由真实数据聚合生成
-- 所有颜色来自 semantic tokens
-- 所有模块必须有空状态、加载状态、无异常状态
-- 代码拆成小函数: aggregateMetrics, buildAnomalyList, buildSeries, renderSummaryCards
-```
-
 ## 报告页 prompt 模板
 
 ```text
-创建一个 hydros 仿真分析报告 HTML，用于汇报和复盘真实仿真结果。页面应偏报告而不是工作台，适合直接截图、导出 PDF 或归档，并且必须对齐 hydros-report-template/index.html 的完整版结构。
+创建一个 hydros 仿真分析报告 HTML，用于汇报和复盘真实仿真结果。页面应偏报告，适合直接截图、导出 PDF 或归档，并且必须对齐 hydros-report-template/index.html 的完整版结构。
 
 Tech:
 - 单文件 HTML
@@ -290,12 +224,6 @@ Implementation Constraints:
 
 ### 第二优先级
 
-- 联动筛选
-- 状态时间线
-- 原始数据表
-
-### 第三优先级
-
 - 导出
 - 主题切换
 - 细致动画
@@ -303,12 +231,6 @@ Implementation Constraints:
 ## 快速交付建议
 
 如果用户只要一个能打开就看的页面：
-
-1. 直接复用 [../assets/hydros-dashboard-template/index.html](../assets/hydros-dashboard-template/index.html)
-2. 把真实数据挂到 `window.HYDROS_TIMESERIES_DATA` 和 `window.HYDROS_SIM_META`
-3. 再做少量样式和字段定制
-
-如果用户要“可汇报的结果页”：
 
 1. 直接复用 [../assets/hydros-report-template/index.html](../assets/hydros-report-template/index.html)
 2. 替换同目录 [../assets/hydros-report-template/report.data.js](../assets/hydros-report-template/report.data.js)
