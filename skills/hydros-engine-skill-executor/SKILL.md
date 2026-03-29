@@ -1,5 +1,5 @@
 ---
-name: hydros-simulation
+name: hydros-engine-skill-executor
 description: |
   水力仿真引擎全流程编排工具。通过调用 hydros-engine-executor MCP 服务完成场景查询、仿真任务创建、进度跟踪、时序结果导出与读取、异常分析、图表输出，并生成 HTML 汇报报告、Markdown 报告、拓扑可视化页或渠道纵剖面页。
 
