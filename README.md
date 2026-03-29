@@ -1,6 +1,6 @@
 # hydros-engine-skill
 
-基于 hydros-engine-mcp 服务的 Claude Code Skill，编排 MCP 工具调用，引导用户完成水力仿真场景查询、任务运行、进度跟踪和结果分析的完整流程。
+基于 hydros-engine-executor MCP 服务的 Claude Code Skill，编排 MCP 工具调用，引导用户完成水力仿真场景查询、任务运行、进度跟踪和结果分析的完整流程。
 
 ## 定位
 
@@ -17,11 +17,15 @@
 │           │ 调用 MCP 工具                          │
 │           ▼                                       │
 │  ┌─────────────────────┐                          │
-│  │ hydros-engine-mcp   │  ◄── 外部提供的 MCP 服务  │
-│  │  • list_scenarios    │                          │
-│  │  • create_simulation │                          │
-│  │  • subscribe_progress│                          │
-│  │  • query_timeseries  │                          │
+│  │ hydros-engine-      │  ◄── 外部提供的 MCP 服务  │
+│  │ executor            │                          │
+│  │  • biz_scenario_id_ │                          │
+│  │    lists            │                          │
+│  │  • create_simulation│                          │
+│  │    _task            │                          │
+│  │  • fetch_sse_events │                          │
+│  │  • get_timeseries_  │                          │
+│  │    data             │                          │
 │  └────────┬────────────┘                          │
 └───────────┼──────────────────────────────────────┘
             │ SSE / HTTP
@@ -31,14 +35,14 @@
      └──────────────┘
 ```
 
-**hydros-engine-mcp**（外部服务）提供 4 个 MCP 工具：
+**hydros-engine-executor**（外部服务）提供一组面向水力仿真的 MCP 工具，常用的包括：
 
 | MCP 工具 | 功能 |
 |----------|------|
-| `list_scenarios` | 获取场景清单 |
-| `create_simulation` | 创建仿真任务 |
-| `subscribe_progress` | 建立 SSE 连接，推送仿真进度/完成/失败 |
-| `query_timeseries` | 查询水网对象时序数据 |
+| `biz_scenario_id_lists` | 获取场景清单及配置 URL |
+| `create_simulation_task` | 创建仿真任务 |
+| `fetch_sse_events` / `get_task_status` | 跟踪仿真进度与任务状态 |
+| `get_timeseries_data` | 查询并导出水网对象时序数据 |
 
 **hydros-engine-skill**（本项目）是一个 Claude Code Skill，职责是：
 - 编排上述 MCP 工具的调用顺序和逻辑
@@ -190,13 +194,13 @@ Skill：查询关键节点和管道 → 全面异常检测
 
 ## Skill 配置
 
-本 Skill 依赖外部 MCP 服务 `hydros-engine-mcp`，需在 Claude Code 的 MCP 配置中添加该服务连接。
+本 Skill 依赖外部 MCP 服务 `hydros-engine-executor`，需在 Claude Code 的 MCP 配置中添加该服务连接。
 
 ```json
 {
   "mcpServers": {
-    "hydros-engine": {
-      "url": "<hydros-engine-mcp 服务地址>"
+    "hydros-engine-executor": {
+      "url": "https://hydroos.cn/mcps/hydros-engine-executor"
     }
   }
 }
