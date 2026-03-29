@@ -1,7 +1,7 @@
 ---
 name: hydros-simulation
 description: |
-  水力仿真引擎全流程编排工具。通过调用 hydro-engine MCP 服务完成场景查询、仿真任务创建、进度跟踪、时序结果导出与读取、异常分析、图表输出，并生成交互式分析工作台、HTML 汇报报告、Markdown 报告、拓扑可视化页或渠道纵剖面页。
+  水力仿真引擎全流程编排工具。通过调用 hydros-engine-executor MCP 服务完成场景查询、仿真任务创建、进度跟踪、时序结果导出与读取、异常分析、图表输出，并生成交互式分析工作台、HTML 汇报报告、Markdown 报告、拓扑可视化页或渠道纵剖面页。
 
   当用户提到水力仿真、场景分析、仿真任务、水位流量分析、渠道仿真、hydros 引擎、仿真结果可视化、拓扑图、纵剖面等相关内容时触发。即使用户只是模糊地说”跑一下仿真””看看数据””分析一下结果””做个分析页面””获取拓扑””画纵剖面”，也应该触发此 skill。
 ---
@@ -27,14 +27,14 @@ description: |
 
 在进入任何仿真流程前，先确认以下前置条件：
 
-1. **MCP 服务检查**：调用 `list_mcp_resource_templates(server=”hydro-engine-mcp”)` 确认 MCP 握手正常。这样可以及早发现连接问题，避免在后续流程中遇到意外失败。
+1. **MCP 服务检查**：调用 `list_mcp_resource_templates(server="hydros-engine-executor")` 确认 MCP 握手正常。这样可以及早发现连接问题，避免在后续流程中遇到意外失败。
 
 2. **Token 配置**：检查用户是否已配置 API token。如果 token 缺失，引导用户：
    - 访问 `https://hydroos.cn/playground/` 注册或登录
    - 在”账号管理”中获取 API token
    - 将 token 提供给我来完成配置
 
-3. **使用正确的工具链**：优先使用已安装的 `hydro-engine-mcp` 工具，避免临时直连 MCP 端点。直连容易遇到超时或 Header 配置问题。
+3. **使用正确的工具链**：优先使用已安装的 `hydros-engine-executor` 工具，避免临时直连 MCP 端点。直连容易遇到超时或 Header 配置问题。
 
 **详细连接排查指南**：如遇连接问题，参考 [references/mcp-connection-guide.md](references/mcp-connection-guide.md)。
 
@@ -110,7 +110,7 @@ description: |
 4. 向用户解释：`sse_client_id` 绑定 SSE 事件订阅通道，后续创建任务、跟踪进度都依赖它。
 
 异常处理：
-- 连接失败时，提示用户检查 `hydro-engine` MCP 服务。
+- 连接失败时，提示用户检查 `hydros-engine-executor` MCP 服务。
 - 如果后续报 “SSE通道未建立”，用同一个 `sse_client_id` 重新订阅。
 
 ### 阶段二：查询与选择场景

@@ -56,7 +56,7 @@ curl -X POST https://hydroos.cn/mcp \
 
 **原因**：MCP 初始化使用 JSON-RPC 2.0 over HTTP POST，不是 SSE stream。
 
-**正确方式**：优先使用已安装的 `hydro-engine-mcp` 工具，并先调用 `list_mcp_resource_templates` 做轻量握手检查。
+**正确方式**：优先使用已安装的 `hydros-engine-executor` 工具，并先调用 `list_mcp_resource_templates` 做轻量握手检查。
 
 ### 错误方式 2：误用业务 API 路径
 
@@ -92,7 +92,7 @@ curl -X POST https://hydroos.cn/mcp \
 
 ## 推荐连接流程
 
-1. **检查 MCP 安装**：确认 `hydro-engine-mcp` 已安装并可连通
-2. **轻量探测**：调用 `list_mcp_resource_templates(server="hydro-engine-mcp")` 确认握手正常
-3. **使用工具链**：优先走已安装的 `hydro-engine-mcp` 工具链，避免临时直连
+1. **检查 MCP 安装**：确认 `hydros-engine-executor` 已安装并可连通
+2. **轻量探测**：调用 `list_mcp_resource_templates(server="hydros-engine-executor")` 确认握手正常
+3. **使用工具链**：优先走已安装的 `hydros-engine-executor` 工具链，避免临时直连
 4. **仅在排查时直连**：只在需要排查问题时才使用 HTTP 直连，且必须带齐必需 Header
