@@ -59,6 +59,9 @@ description: |
 - 轮询中断时明确说明”监测已中断”。保持状态描述的真实性，避免伪装成持续监测。
 - 必须明确区分”skill 的输出约束”和”聊天前端的渲染能力”。skill 不能让聊天界面凭空出现原生进度组件，但无论处于哪种运行环境，都必须把当前进度渲染为统一格式的文本进度条。
 - 统一进度条格式固定为 `███░░░░░░15.4% | 185/1200`。`█/░` 区宽度固定 10 格，后面紧跟百分比，不加额外空格，再接 ` | current/total`。
+- **进度条展现模式**：
+  - **轮询模式（当前实现）**：每 5-10 秒查询一次进度，跳跃式更新。适合长时间运行的任务，网络开销小，实现简单。
+  - **流式模式（可选）**：利用 Claude 的流式输出特性，在轮询循环中每次查询后立即输出进度条。通过缩短轮询间隔（2-5 秒）和连续输出，让进度更新更流畅。参考 `scripts/streamable_progress_demo.py` 查看两种模式的对比演示。
 - 在追加消息型聊天环境里，”自动显示进度条”的正确含义是：只要本轮仍在持续轮询，代理就必须主动连续发送文本进度条快照，不需要用户再次提醒；如果本轮被用户中断，则自动刷新链条随之中断，恢复后必须先说明”监测曾中断，现已恢复”。
 - 调用 `get_timeseries_data` 前先确认任务状态为 `COMPLETED`。未完成的任务可能返回不完整的数据。
 - `get_timeseries_data` 返回 `resource_uri`。如果本地脚本需要消费数据，继续调用 `read_mcp_resource` 读取 CSV 文本并落盘。这样脚本可以直接处理本地文件。
@@ -76,6 +79,8 @@ description: |
   用于生成 matplotlib 图表。
 - `scripts/analyze_anomalies.py`
   用于异常检测和问题汇总。
+- `scripts/streamable_progress_demo.py`
+  用于演示轮询模式和流式模式的进度条实现。支持四种演示模式：`--mode polling`（轮询模式）、`--mode streamable`（流式模式）、`--mode sse`（SSE 流式模式）、`--mode comparison`（对比演示）。可用于理解两种进度条实现方式的区别。
 - `scripts/build_csv_report.py`
   用于把本地 CSV 结果快速整理成 HTML 报告和 Markdown 报告；若可获取断面里程与底高程，还会默认附带渠道纵剖面图。输出目录默认按 `report/`、`charts/`、`data/` 分类。
 - `scripts/build_csv_dashboard.py`
