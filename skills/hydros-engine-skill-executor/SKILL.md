@@ -27,7 +27,11 @@ description: |
 
 在进入任何仿真流程前，先确认以下前置条件：
 
-1. **MCP 服务检查**：调用 `list_mcp_resource_templates(server="hydros-engine-executor")` 确认 MCP 握手正常。这样可以及早发现连接问题，避免在后续流程中遇到意外失败。
+1. **MCP 服务检查**：检查 `hydros-engine-executor` MCP 服务是否可用。不同 AI 助手的 MCP 配置文件位置：
+   - Claude Code: `.claude.json` 或 `~/.claude.json`
+   - Codex: `~/.codex/config.toml`
+   - Copaw: `workspaces/agent.json`
+   这样可以及早发现连接问题，避免在后续流程中遇到意外失败。
 
 2. **Token 配置**：检查用户是否已配置 API token。如果 token 缺失，引导用户：
    - 访问 `https://hydroos.cn/playground/` 注册或登录
