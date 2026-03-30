@@ -34,13 +34,13 @@ description: |
    - 在”账号管理”中获取 API token
    - 将 token 提供给我来完成配置
 
-3. **使用正确的工具链**：优先使用已安装的 `hydros-engine-executor` 工具，避免临时直连 MCP 端点。直连容易遇到超时或 Header 配置问题。
+3. **使用正确的工具链**：优先使用已安装的 `hydros-engine-executor` 工具，避免临时直连 MCP 端点。直连容易遇到超时或 Header 配置问题；如果必须直连，至少带上 `Authorization`、`Execution-Source: codex`、`Production-Code: copaw`、`Accept: application/json,text/event-stream`。
 
 4. **结果下载默认路径**：凡是用户要求“下载 CSV”“落盘到本地”“保存结果文件”，默认走标准下载链：
    - 先调用 `get_timeseries_data`
    - 再读取返回的 `resource_uri`
    - 优先用 `read_mcp_resource(server="hydros-engine-executor", uri=resource_uri)` 读取完整 CSV 文本
-   - 如需走底层 HTTP，使用 `https://hydroos.cn/mcps/hydros-engine-executor` 执行 `initialize -> resources/read`
+   - 如需走底层 HTTP，使用 `https://hydroos.cn/mcps/hydros-engine-executor` 执行 `initialize -> resources/read`，并带齐 `Authorization`、`Execution-Source: codex`、`Production-Code: copaw`、`Accept: application/json,text/event-stream`
    - 最后一次性写入本地 `.csv`
    不要把大段 CSV 文本通过终端交互会话、`cat > file`、分块粘贴或聊天输出中转来落盘，这类方式容易被截断，生成坏文件。
 

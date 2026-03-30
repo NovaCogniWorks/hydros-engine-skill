@@ -11,8 +11,13 @@
 - **必需 Header**:
   - `Authorization: Bearer <token>`
   - `Content-Type: application/json`
-- **直连排查时额外 Header**:
-  - `Accept: application/json, text/event-stream`
+  - `Execution-Source: codex`
+  - `Production-Code: copaw`
+  - `Accept: application/json,text/event-stream`
+
+说明：
+- `hydros-engine-executor` 是标准 MCP 服务名，不要误写成 `hydro-engine-mcp`
+- 配置里的 URL 不要带尾部空格
 
 ### 标准工作流
 
@@ -28,8 +33,10 @@
 
 ```bash
 curl -X POST https://hydroos.cn/mcps/hydros-engine-executor \
-  -H "Accept: application/json, text/event-stream" \
   -H "Authorization: Bearer <token>" \
+  -H "Execution-Source: codex" \
+  -H "Production-Code: copaw" \
+  -H "Accept: application/json,text/event-stream" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"initialize","params":{},"id":1}'
 ```
@@ -43,7 +50,8 @@ curl -X POST https://hydroos.cn/mcps/hydros-engine-executor \
 
 | 错误码/现象 | 原因 | 解决方案 |
 |------------|------|---------|
-| `406 Not Acceptable` | 缺少 `Content-Type` 或 `Accept` header | 确保请求包含 `Content-Type: application/json` 和 `Accept: application/json, text/event-stream` |
+| `406 Not Acceptable` | 缺少 `Content-Type` 或 `Accept` header | 确保请求包含 `Content-Type: application/json` 和 `Accept: application/json,text/event-stream` |
+| `401 Unauthorized` | Token 或业务 Header 缺失 | 检查 `Authorization`、`Execution-Source`、`Production-Code` 是否完整且值正确 |
 | `32602` | 参数缺失 | 检查是否漏传 `sse_client_id` 等必需参数 |
 | 返回 HTML | URL 错误 | 使用 `/mcp` 端点，不是 `/api/xxx` |
 | 连接超时 | 使用了不兼容的客户端库 | 避免使用 SSE 客户端库做初始化，使用标准 HTTP POST |
@@ -68,11 +76,11 @@ curl -X POST https://hydroos.cn/mcps/hydros-engine-executor \
 
 ### 错误方式 3：缺少必需 Header
 
-**问题**：直连 `https://hydroos.cn/mcps/hydros-engine-executor` 时缺少 `Accept: application/json, text/event-stream`，返回 `406 Not Acceptable`。
+**问题**：直连 `https://hydroos.cn/mcps/hydros-engine-executor` 时缺少 `Accept: application/json,text/event-stream`，返回 `406 Not Acceptable`。
 
 **原因**：服务端需要明确的 Accept header 来确定响应格式。
 
-**正确方式**：带齐必需 Header 后再排查。
+**正确方式**：带齐 `Authorization`、`Execution-Source`、`Production-Code`、`Content-Type`、`Accept` 后再排查。
 
 ## Token 配置
 
@@ -82,6 +90,7 @@ curl -X POST https://hydroos.cn/mcps/hydros-engine-executor \
 2. 完成注册或登录
 3. 在"账号管理"中获取 API token
 4. 将 token 配置到 `Authorization: Bearer <token>`
+5. 同时保留业务 Header：`Execution-Source: codex`、`Production-Code: copaw`
 
 ### Token 验证
 
