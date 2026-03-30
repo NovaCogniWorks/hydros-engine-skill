@@ -55,7 +55,7 @@ description: |
 - 始终使用中文与用户沟通，技术术语和代码标识保持原文。
 - 先调用 `subscribe_to_simulation_events` 建立 SSE 事件订阅通道，再创建仿真任务。这样可以确保任务创建后的进度事件能被正确接收，避免错过关键状态更新。
 - `biz_scenario_id` 和 `biz_scenario_config_url` 成对使用，且只能来自 `biz_scenario_id_lists` 的返回结果。这样可以保证场景配置的一致性和有效性。
-- 用户选定场景后，在参数确认前先输出场景拓扑总结（基于 `objects.yaml`）。这帮助用户了解场景结构，做出更明智的参数选择。
+- 用户选定场景后，在参数确认前先拉取并缓存一份 `objects.yaml`，再基于这份本地文件输出场景拓扑总结。这样后续生成纵剖面图时可以直接复用，避免重复拉取和口径漂移。
 - 用户选定场景后，调用 `get_scenario_events` 查询预置事件，与默认参数一起展示。这让用户全面了解场景配置，一次性确认所有关键参数。
 - 用户只回复场景 ID 或”选这个”时，视为”选定场景”而非”立即启动”。先展示默认参数供确认，避免使用错误配置启动任务。
 - 创建 live 仿真任务后，持续监测到终态（`COMPLETED` 或 `FAILED`）。中途停止会导致用户无法及时了解任务结果。
@@ -89,11 +89,11 @@ description: |
 - `scripts/analyze_anomalies.py`
   用于异常检测和问题汇总。
 - `scripts/streamable_progress_demo.py`
-  用于演示轮询模式和流式模式的进度条实现。支持四种演示模式：`--mode polling`（轮询模式）、`--mode streamable`（流式模式）、`--mode sse`（SSE 流式模式）、`--mode comparison`（对比演示）。可用于理解两种进度条实现方式的区别。
+  用于演示轮询模式和流式模式的进度条实现。支持三种演示模式：`--mode polling`（轮询模式）、`--mode streamable`（流式模式）、`--mode comparison`（对比演示）。可用于理解两种进度条实现方式的区别。
 - `scripts/build_csv_report.py`
-  用于把本地 CSV 结果快速整理成 HTML 报告和 Markdown 报告；若可获取断面里程与底高程，还会默认附带渠道纵剖面图。输出目录默认按 `report/`、`charts/`、`data/` 分类。
+  用于把本地 CSV 结果快速整理成 HTML 报告和 Markdown 报告；若可获取断面里程与底高程，还会默认附带渠道纵剖面图。输出目录默认按 `report/`、`charts/`、`data/` 分类。脚本会自动兼容 `objects.yaml` 等远程 URL 中的中文路径并优先复用本地缓存。
 - `scripts/build_longitudinal_profile.py`
-  用于根据 `objects.yaml` 断面信息和时序结果生成渠道纵剖面 HTML 页面，并可叠加闸站信息和上游到下游流向标识。高程字段优先读取显式的 `t_top_elevation` 和 `bottom_elevation`；若缺失，再根据 `cross_section_geometry.data_points` 的最大值和最小值推导。
+  用于根据 `objects.yaml` 断面信息和时序结果生成渠道纵剖面 HTML 页面，并可叠加闸站信息和上游到下游流向标识。高程字段优先读取显式的 `t_top_elevation` 和 `bottom_elevation`；若缺失，再根据 `cross_section_geometry.data_points` 的最大值和最小值推导。脚本会自动兼容中文路径 URL。
 - `references/hydros-data-contract.md`
   用于理解时序记录结构、推荐聚合口径、异常信号定义。
 - `references/hydros-html-prompt.md`
@@ -124,7 +124,7 @@ description: |
 2. 将场景整理为 markdown 表格，至少包含：序号、场景 ID、场景名称、核心能力。
 3. 保存每个场景的 `biz_scenario_config_url`，后续创建任务时必须使用。
 4. 给出推荐场景，优先描述中包含“测试”或“SDK”的场景，其次选依赖较少的场景。
-5. 一旦用户明确选定某个场景（例如只回复场景 ID、场景名称，或说“就这个”“选这个”），在进入阶段三前，默认补一段基于场景 YAML 和 `hydros_objects_modeling_url` / `objects.yaml` 的简要拓扑总结。
+5. 一旦用户明确选定某个场景（例如只回复场景 ID、场景名称，或说“就这个”“选这个”），在进入阶段三前，先基于场景 YAML 里的 `hydros_objects_modeling_url` 拉取并缓存 `objects.yaml`，再默认补一段简要拓扑总结。
 6. 在进入阶段三前，调用 `get_scenario_events` 查询该场景支持注入的预置事件，并整理为简要事件清单；后续参数确认时必须和默认仿真参数一起展示给用户选择。
 
 场景拓扑简要总结要求：
@@ -133,6 +133,7 @@ description: |
 - 点出关键控制节点或特殊对象，例如 `ZM1`、`ZM2`、主要分水口、退水闸、入口断面。
 - 这是“简单总结”，默认放在场景确认反馈里即可，不要等用户追问后才补。
 - 如果 `objects.yaml` 暂时不可读，也要明确说明“当前无法读取对象拓扑，只展示场景基本信息”，不要静默跳过。
+- 已成功拉取的 `objects.yaml` 默认视为本轮会话资产，后续生成纵剖面、拓扑页或正式报告时优先复用这份本地文件，不要再次重复拉取。
 
 场景预置事件展示要求：
 - 优先调用 `get_scenario_events`，按场景 ID 查询支持注入的预置事件。
@@ -223,20 +224,15 @@ description: |
 
 ### 阶段四：跟踪仿真进度
 
-可组合使用两种方式：
-
-1. `get_task_status(sse_client_id, biz_scene_instance_id)`
-   用于拿到任务当前状态和总步数。
-2. `fetch_sse_events(sse_client_id)`
-   用于拿到增量事件流并整理成时间线。
+使用 `get_task_status(sse_client_id, biz_scene_instance_id)` 轮询任务状态和当前步数。
 
 标准监测方法：
 
 1. 创建 live 任务成功后，立刻进入轮询循环。
-2. 每一轮轮询必须至少执行一次 `get_task_status(sse_client_id, biz_scene_instance_id)` 和一次 `fetch_sse_events(sse_client_id)`。
-3. 每一轮都要用这两类结果更新“最新可信状态”：
+2. 每一轮轮询必须至少执行一次 `get_task_status(sse_client_id, biz_scene_instance_id)`。
+3. 每一轮都要用最新一次 `get_task_status` 的结果更新“最新可信状态”：
    - 优先使用最新的终态（`COMPLETED` / `FAILED`）。
-   - 进度优先取 SSE 事件中的最新 `current_step`；如果 SSE 暂时没有新事件，再回退到 `get_task_status`。
+   - 进度、状态和异常信息都以 `get_task_status` 返回结果为准。
 4. 每一轮结束后，只有在准备继续下一轮轮询时，才可以对用户表述为“正在持续监测中”。
 5. 如果已经停止轮询，或当前回合不会继续执行下一轮，则必须明确表述为“本轮已查询到最新状态”，不能伪装成持续监测。
 6. 推荐轮询间隔为 5 到 10 秒；如果任务步进非常快，可缩短到 2 到 5 秒，但不能只查一次就结束。
@@ -265,7 +261,7 @@ description: |
 
 真实性校验要求：
 - 任意一次“正在持续监测中”的回复，都必须能对应到本轮刚刚执行过的真实 MCP 调用结果，而不是沿用上一次的旧状态。
-- 如果回复里出现“最新进度”“当前状态”“正在监测”，必须能同时指出最近一次真实查询得到的 `task_status`、`current_step` 或最新 SSE 事件。
+- 如果回复里出现“最新进度”“当前状态”“正在监测”，必须能同时指出最近一次真实查询得到的 `task_status`、`current_step` 或 `failure_exception`。
 - 不允许只在创建任务后说一句“我会持续监测”，然后没有后续轮询动作。
 
 状态流转：
@@ -282,8 +278,7 @@ INIT -> WAITING_AGENTS -> READY -> STEPPING -> COMPLETED
 - 在追加消息型聊天环境中，每一条进度播报都应把最新文本进度条放在回复第一行，后面再补状态、ETA 或说明；不要把进度条埋在长段解释后面。
 - 当任务首次进入 `STEPPING` 状态时，在进度输出中附带一句提示，告知用户当前速度和预估剩余时间；如果此时样本还不足以给出可靠 ETA，就明确写“暂未形成可靠 ETA”。同时说明可以随时输入"加速"或"4x"来调整倍速（可选：0.25x、0.5x、1x、2x、4x）。这条提示只出现一次，之后不再重复。关键点：不要用阻塞式提问（如 AskUserQuestion）来询问加速，因为那会中断轮询循环，导致监测停止。正确做法是把加速提示作为进度输出的一部分，然后立即继续轮询；如果用户在后续消息中主动要求加速，再调用 `update_task_speed`。
 - 对 `FAILED` 状态优先提取 `failure_exception`。
-- 对 SSE 事件整理为时间线，突出状态切换和关键进度节点。
-- 对 live 任务，默认持续轮询 `get_task_status` 和 `fetch_sse_events`，直到捕获终态；在终态前不要把流程当作完成。
+- 对 live 任务，默认持续轮询 `get_task_status`，直到捕获终态；在终态前不要把流程当作完成。
 - 禁止把“继续等待”“继续盯进度”“稍后再查”“是否拉结果”写成三选一或多选一的尾句；正确做法是继续轮询，并在终态后再自然衔接结果获取或报告生成。
 - 如果用户的意图是“跑一个仿真并看结果/出报告/继续等待”，则任务完成后应自动衔接阶段五，无需再次等待用户提醒。
 - 如果运行环境是命令行 PTY，而不是聊天消息流，优先用单行文本进度条展示，如 `██████░░░░34.0% | 408/1200`，通过 `\r` 原地刷新；但对用户可见的进度文本格式仍必须与聊天环境保持一致。

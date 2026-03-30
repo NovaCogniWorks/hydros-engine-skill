@@ -12,6 +12,7 @@ import urllib.request
 from pathlib import Path
 
 import pandas as pd
+from lib.url_utils import normalize_remote_url
 
 try:
     import matplotlib
@@ -28,9 +29,18 @@ if plt is not None:
     plt.rcParams["axes.unicode_minus"] = False
 
 
-def fetch_objects_yaml() -> str:
-    with urllib.request.urlopen(OBJECTS_URL, timeout=20) as response:
+def fetch_objects_yaml(objects_url: str = OBJECTS_URL) -> str:
+    with urllib.request.urlopen(normalize_remote_url(objects_url), timeout=20) as response:
         return response.read().decode("utf-8")
+
+
+def load_objects_yaml(
+    objects_yaml_path: Path | None = None,
+    objects_yaml_url: str | None = None,
+) -> str:
+    if objects_yaml_path is not None:
+        return objects_yaml_path.read_text(encoding="utf-8")
+    return fetch_objects_yaml(objects_yaml_url or OBJECTS_URL)
 
 
 def gate_sort_key(name: str) -> tuple[str, int, str]:
@@ -80,8 +90,12 @@ def parse_cross_sections(text: str) -> list[dict]:
     return sections
 
 
-def build_dataset(csv_path: Path) -> dict:
-    yaml_text = fetch_objects_yaml()
+def build_dataset(
+    csv_path: Path,
+    objects_yaml_path: Path | None = None,
+    objects_yaml_url: str | None = None,
+) -> dict:
+    yaml_text = load_objects_yaml(objects_yaml_path=objects_yaml_path, objects_yaml_url=objects_yaml_url)
     sections = parse_cross_sections(yaml_text)
 
     df = pd.read_csv(csv_path)
@@ -758,13 +772,14 @@ def build_html(dataset: dict) -> str:
 
 def main() -> None:
     if len(sys.argv) < 2:
-      print("用法: python build_longitudinal_profile.py <timeseries_csv> [output_html]")
+      print("用法: python build_longitudinal_profile.py <timeseries_csv> [output_html] [objects_yaml]")
       raise SystemExit(1)
 
     csv_path = Path(sys.argv[1]).resolve()
     output_html = Path(sys.argv[2]).resolve() if len(sys.argv) > 2 else csv_path.parent / "waterway50_longitudinal_profile.html"
+    objects_yaml_path = Path(sys.argv[3]).resolve() if len(sys.argv) > 3 else None
 
-    dataset = build_dataset(csv_path)
+    dataset = build_dataset(csv_path, objects_yaml_path=objects_yaml_path)
     output_html.write_text(build_html(dataset), encoding="utf-8")
     print(f"纵剖面页面: {output_html}")
 

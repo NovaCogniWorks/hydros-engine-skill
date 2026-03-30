@@ -4,7 +4,7 @@
 
 演示两种进度条实现方式：
 1. Polling（轮询）模式 - 当前 hydros-engine-skill 使用的方式
-2. Streamable（流式）模式 - 服务端主动推送的方式
+2. Streamable（流式）模式 - 更高频的连续输出方式
 
 使用方法：
     python streamable_progress_demo.py --mode polling
@@ -14,7 +14,6 @@
 import sys
 import time
 import argparse
-from typing import Iterator
 
 
 def format_progress_bar(current: int, total: int, width: int = 10) -> str:
@@ -63,7 +62,7 @@ def polling_mode_demo(total_steps: int = 1200, poll_interval: float = 5.0):
     print()
 
     while current_step < total_steps:
-        # 模拟轮询：调用 get_task_status 和 fetch_sse_events
+        # 模拟轮询：调用 get_task_status
         print(f"[轮询] 查询任务状态...")
 
         # 模拟在轮询间隔内，仿真继续推进
@@ -136,80 +135,6 @@ def streamable_mode_demo(total_steps: int = 1200, update_interval: float = 0.5):
     print("✓ 任务完成")
     print()
 
-
-def streamable_sse_generator(total_steps: int = 1200) -> Iterator[dict]:
-    """
-    SSE 事件生成器
-
-    模拟服务端通过 SSE 推送进度事件
-
-    Args:
-        total_steps: 总步数
-
-    Yields:
-        进度事件字典
-    """
-    steps_per_second = 12
-    update_interval = 0.5
-    steps_per_update = max(1, int(steps_per_second * update_interval))
-
-    current_step = 0
-    while current_step < total_steps:
-        current_step = min(current_step + steps_per_update, total_steps)
-
-        yield {
-            "event": "progress",
-            "data": {
-                "current_step": current_step,
-                "total_steps": total_steps,
-                "status": "STEPPING" if current_step < total_steps else "COMPLETED",
-                "percentage": (current_step / total_steps) * 100
-            }
-        }
-
-        if current_step < total_steps:
-            time.sleep(update_interval)
-
-
-def sse_client_demo(total_steps: int = 1200):
-    """
-    SSE 客户端演示
-
-    模拟客户端接收 SSE 事件流并更新进度条
-
-    Args:
-        total_steps: 总步数
-    """
-    print("=" * 60)
-    print("SSE 流式模式演示")
-    print("=" * 60)
-    print(f"总步数: {total_steps}")
-    print()
-    print("连接到 SSE 事件流...")
-    print()
-
-    for event in streamable_sse_generator(total_steps):
-        data = event["data"]
-        current = data["current_step"]
-        total = data["total_steps"]
-        status = data["status"]
-
-        progress_bar = format_progress_bar(current, total)
-
-        # 使用 \r 实现原地刷新
-        if sys.stdout.isatty():
-            print(f"\r进度: {progress_bar} [{status}]", end="", flush=True)
-        else:
-            print(f"进度: {progress_bar} [{status}]")
-
-    if sys.stdout.isatty():
-        print()
-
-    print()
-    print("✓ 任务完成")
-    print()
-
-
 def comparison_demo():
     """
     对比演示
@@ -250,14 +175,13 @@ def main():
 示例：
   %(prog)s --mode polling       # 演示轮询模式
   %(prog)s --mode streamable    # 演示流式模式
-  %(prog)s --mode sse            # 演示 SSE 流式模式
   %(prog)s --mode comparison    # 对比演示
         """
     )
 
     parser.add_argument(
         "--mode",
-        choices=["polling", "streamable", "sse", "comparison"],
+        choices=["polling", "streamable", "comparison"],
         default="comparison",
         help="演示模式（默认：comparison）"
     )
@@ -275,8 +199,6 @@ def main():
         polling_mode_demo(total_steps=args.steps)
     elif args.mode == "streamable":
         streamable_mode_demo(total_steps=args.steps)
-    elif args.mode == "sse":
-        sse_client_demo(total_steps=args.steps)
     elif args.mode == "comparison":
         comparison_demo()
 

@@ -30,6 +30,10 @@
 # 落盘为本地 .csv 文件
 ```
 
+**建模文件兼容**：
+- 如果场景 YAML 或 `objects.yaml` 的远程地址包含中文路径，脚本层应先做 URL 编码规范化，再发起请求。
+- 一旦已缓存本地 `objects.yaml`，后续报告和纵剖面优先复用本地文件，不要重复拉取同一资源。
+
 **参数传递**：
 - 优先使用用户显式提供的 `total_steps`、`sim_step_size`、`output_step_size`
 - 其次使用场景 YAML 配置
@@ -168,6 +172,10 @@ data/
 **高程字段优先级**：
 1. 显式的 `t_top_elevation` 和 `bottom_elevation`
 2. 根据 `cross_section_geometry.data_points` 推导
+
+**objects.yaml 获取要求**：
+- 优先使用阶段二已缓存的本地 `objects.yaml`
+- 如果需要远程回源，先对 URL 做编码规范化，兼容中文路径
 
 ### 页面要求
 

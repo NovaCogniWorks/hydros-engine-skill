@@ -26,6 +26,7 @@ import pandas as pd
 
 from build_longitudinal_profile import build_dataset as build_longitudinal_dataset
 from build_longitudinal_profile import save_profile_png
+from lib.url_utils import normalize_remote_url
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -135,7 +136,7 @@ def parse_datetime_text(value: str | None) -> datetime | None:
 def fetch_scenario_metadata(scenario_id: str) -> dict[str, Any] | None:
     url = SCENARIO_URL_TEMPLATE.format(scenario_id=scenario_id)
     try:
-        with urllib.request.urlopen(url, timeout=20) as response:
+        with urllib.request.urlopen(normalize_remote_url(url), timeout=20) as response:
             text = response.read().decode("utf-8")
     except Exception:
         return None
@@ -160,6 +161,17 @@ def fetch_scenario_metadata(scenario_id: str) -> dict[str, Any] | None:
         "output_step_size": int(output_step_size) if output_step_size and output_step_size.isdigit() else None,
         "biz_start_time": start_time,
     }
+
+
+def cache_objects_yaml(data_dir: Path, scenario_meta: dict[str, Any] | None) -> Path | None:
+    objects_yaml_url = (scenario_meta or {}).get("objects_yaml_url")
+    if not objects_yaml_url:
+        return None
+
+    target_path = data_dir / "objects.yaml"
+    with urllib.request.urlopen(normalize_remote_url(objects_yaml_url), timeout=20) as response:
+        target_path.write_text(response.read().decode("utf-8"), encoding="utf-8")
+    return target_path
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -1093,9 +1105,15 @@ def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
 
 
 def write_html_assets(report_dir: Path, data_dir: Path, payload: dict[str, Any]) -> None:
-    report_js = "window.HYDROS_REPORT_DATA = " + json.dumps(payload, ensure_ascii=False, indent=2) + ";\n"
+    payload_json = json.dumps(payload, ensure_ascii=False, indent=2).replace("</", "<\\/")
+    report_js = "window.HYDROS_REPORT_DATA = " + payload_json + ";\n"
     (data_dir / "report.data.js").write_text(report_js, encoding="utf-8")
-    shutil.copyfile(TEMPLATE_HTML, report_dir / "simulation_report.html")
+    template_html = TEMPLATE_HTML.read_text(encoding="utf-8")
+    inline_data_tag = f"    <script>\n{report_js}    </script>\n\n"
+    if "async function loadReportData()" not in template_html:
+        raise RuntimeError("未找到 HTML 报告模板的数据加载入口")
+    report_html = template_html.replace("    <script>\n      async function loadReportData()", inline_data_tag + "    <script>\n      async function loadReportData()", 1)
+    (report_dir / "simulation_report.html").write_text(report_html, encoding="utf-8")
     (data_dir / "analysis_summary.json").write_text(
         json.dumps(payload["analysisSummary"], ensure_ascii=False, indent=2),
         encoding="utf-8",
@@ -1146,10 +1164,20 @@ def main() -> None:
         chart_command.extend(["--output-step-size", str(runtime_config.output_step_size)])
     run_command(chart_command)
 
+    objects_yaml_path = None
+    try:
+        objects_yaml_path = cache_objects_yaml(paths["data"], scenario_meta)
+    except Exception as exc:
+        print(f"objects.yaml 预取失败: {exc}")
+
     profile_dataset = None
     profile_error = None
     try:
-        profile_dataset = build_longitudinal_dataset(csv_path)
+        profile_dataset = build_longitudinal_dataset(
+            csv_path,
+            objects_yaml_path=objects_yaml_path,
+            objects_yaml_url=(scenario_meta or {}).get("objects_yaml_url"),
+        )
         save_profile_png(profile_dataset, paths["charts"] / "chart7_longitudinal_profile.png")
     except Exception as exc:
         profile_error = str(exc)

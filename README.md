@@ -23,7 +23,7 @@
 │  │    lists            │                          │
 │  │  • create_simulation│                          │
 │  │    _task            │                          │
-│  │  • fetch_sse_events │                          │
+│  │  • get_task_status  │                          │
 │  │  • get_timeseries_  │                          │
 │  │    data             │                          │
 │  └────────┬────────────┘                          │
@@ -40,8 +40,10 @@
 | MCP 工具 | 功能 |
 |----------|------|
 | `biz_scenario_id_lists` | 获取场景清单及配置 URL |
+| `subscribe_to_simulation_events` | 建立仿真订阅通道 |
 | `create_simulation_task` | 创建仿真任务 |
-| `fetch_sse_events` / `get_task_status` | 跟踪仿真进度与任务状态 |
+| `get_task_status` | 跟踪仿真进度、状态和异常信息 |
+| `update_task_speed` | 调整仿真运行倍速 |
 | `get_timeseries_data` | 查询并导出水网对象时序数据 |
 
 **hydros-engine-skill**（本项目）是一个 Claude Code Skill，职责是：
@@ -58,19 +60,19 @@
 **触发：** 用户询问可用仿真场景、模型列表等
 
 **Skill 行为：**
-1. 调用 MCP 工具 `list_scenarios` 获取场景清单
-2. 格式化展示场景信息（名称、状态、管网规模等）
-3. 引导用户选择目标场景，进入仿真流程
+1. 调用 MCP 工具 `biz_scenario_id_lists` 获取场景清单和配置地址
+2. 读取场景配置，补充默认参数、预置事件和简要拓扑信息
+3. 引导用户选择目标场景，并确认是否按默认参数启动
 
 **示例对话：**
 ```
 用户：有哪些可用的仿真场景？
-Skill：调用 list_scenarios → 返回格式化列表
-      "当前有 3 个可用场景：
-       1. 城市供水管网稳态分析 (120节点/150管道) - 就绪
-       2. 工业园区管网瞬态分析 (80节点/95管道) - 就绪
-       3. 应急调度方案验证 (200节点/260管道) - 运行中
-       请选择要运行的场景编号。"
+Skill：调用 biz_scenario_id_lists → 返回格式化列表
+      "当前可用场景包括：
+       1. 京石段-感知演示场景
+       2. 京石段-天气预报/用水计划/故障等综合场景
+       3. 京石段-SDK-测试
+       请选择要运行的场景，或直接告诉我场景 ID。"
 ```
 
 ---
@@ -80,32 +82,20 @@ Skill：调用 list_scenarios → 返回格式化列表
 **触发：** 用户选择场景并要求运行仿真
 
 **Skill 行为：**
-1. 根据用户选择，调用 `create_simulation` 创建仿真任务
-2. 获取 `task_id` 后，自动调用 `subscribe_progress` 建立 SSE 连接
-3. 实时接收 SSE 消息，过滤处理后向用户推送：
-   - **进度消息** → 展示进度百分比和当前计算步骤
-   - **完成消息** → 通知用户仿真完成，引导进入结果分析
-   - **失败消息** → 展示错误原因，提供排查建议
-4. 过滤掉 heartbeat 等无关消息，避免信息噪音
-
-**SSE 消息处理策略：**
-
-| 收到的 SSE 事件 | Skill 处理方式 |
-|----------------|---------------|
-| `heartbeat` | 静默忽略 |
-| `progress` | 向用户展示进度（节流：变化 ≥5% 时才更新） |
-| `warning` | 记录，仿真结束后汇总展示 |
-| `completed` | 通知用户完成，提示可查询结果 |
-| `failed` | 展示错误信息，给出可能的排查方向 |
+1. 根据用户选择，先调用 `subscribe_to_simulation_events` 建立订阅通道
+2. 再调用 `create_simulation_task` 创建仿真任务
+3. 创建成功后持续调用 `get_task_status` 轮询进度和状态
+4. 自动向用户播报文本进度条、当前步数、状态和异常信息
+5. 如有需要，可调用 `update_task_speed` 调整运行倍速
 
 **示例对话：**
 ```
 用户：运行场景 1 的延时仿真，24小时
-Skill：调用 create_simulation → 调用 subscribe_progress
-      "仿真任务已提交 (task_abc123)，正在计算中..."
-      "▓▓▓▓▓▓░░░░ 60% - 正在计算 14:00 时刻水力平衡"
-      "▓▓▓▓▓▓▓▓▓▓ 100% - 仿真完成！共 24 个时间步，收敛正常。
-       是否要查看某个节点或管道的结果数据？"
+Skill：调用 subscribe_to_simulation_events → create_simulation_task
+      "仿真任务已提交 (TASK_xxx)，正在持续监测中..."
+      "████░░░░░░40.0% | 240/600"
+      "██████████100.0% | 600/600
+       仿真完成，开始读取结果并生成报告。"
 ```
 
 ---
@@ -115,36 +105,24 @@ Skill：调用 create_simulation → 调用 subscribe_progress
 **触发：** 仿真完成后，用户要求查看结果或分析数据
 
 **Skill 行为：**
-1. 调用 `query_timeseries` 获取指定水网对象的时序数据
+1. 调用 `get_timeseries_data` 获取结果文件地址，再读取完整 CSV
 2. **生成可视化图表：**
-   - 时序曲线图（压力/流量/水头随时间变化）
-   - 多对象对比图（多个节点的压力对比）
-   - 统计概览图（min/max/mean 范围带）
+   - 水位、流量、闸门开度时序曲线
+   - 热力图、纵剖面图、场景拓扑图
+   - 统计概览图和异常摘要图
 3. **数据准确性分析：**
-   - 负压检测：节点压力 < 0 → 供水不足风险
-   - 流速异常：管道流速 > 3 m/s 或 < 0.3 m/s → 管径不合理
-   - 水头损失异常：单位长度水头损失超出经验范围
-   - 需水量平衡校核：总供水量 vs 总需水量偏差
-   - 泵效率检查：水泵运行点是否在高效区
-4. **生成分析结论：** 汇总异常、给出优化建议
+   - 水位、流量、闸门开度异常检测
+   - 沿程水头损失和关键断面变化分析
+   - 关键事件、故障影响和运行风险提示
+4. **生成分析结论：** 汇总异常、给出调度和汇报建议
 
 **示例对话：**
 ```
-用户：查看节点 J1 的压力变化
-Skill：调用 query_timeseries(object_id="J1", parameters=["pressure"])
-      → 生成压力时序曲线图
-      "节点 J1 压力时序分析：
-       • 范围：28.9 ~ 32.5 m，均值 30.65 m
-       • 最低压力出现在 t=3h（高峰时段），28.9 m
-       ⚠️ 未发现负压，但 t=3h 压力接近下限，建议关注"
-
-用户：对比 J1、J2、J3 的压力
-Skill：分别查询 → 生成多节点对比图
-      → 分析各节点压力差异和关联性
-
 用户：整体分析一下这次仿真结果
-Skill：查询关键节点和管道 → 全面异常检测
-      → 生成综合分析报告（图表 + 数据 + 建议）
+Skill：调用 get_timeseries_data → 读取 CSV → 生成图表和分析报告
+      "本次仿真共输出 N 条记录，覆盖 600 步。
+       已生成水位、流量、闸门、热力图和纵剖面图，
+       并汇总出异常点、关键发现和建议。"
 ```
 
 ---
@@ -154,28 +132,29 @@ Skill：查询关键节点和管道 → 全面异常检测
 ```
 用户意图识别
   │
-  ├─ "查看场景" ──────► 调用 list_scenarios → 格式化展示
+  ├─ "查看场景" ──────► 调用 biz_scenario_id_lists
+  │                        │
+  │                        ▼
+  │                   读取场景配置 / 预置事件 / 拓扑摘要
   │
-  ├─ "运行仿真" ──────► 调用 create_simulation
+  ├─ "运行仿真" ──────► 调用 subscribe_to_simulation_events
   │                         │
   │                         ▼
-  │                    调用 subscribe_progress（SSE）
+  │                    调用 create_simulation_task
   │                         │
-  │                    ┌────┴────┐
-  │                    │ 过滤推送 │
-  │                    └────┬────┘
-  │                         │ completed
   │                         ▼
-  │                    "仿真完成，是否分析结果？"
+  │                    调用 get_task_status 持续轮询
+  │                         ▼
+  │                    仿真完成后自动进入结果阶段
   │
-  └─ "查看/分析结果" ──► 调用 query_timeseries
+  └─ "查看/分析结果" ──► 调用 get_timeseries_data
                             │
                        ┌────┴─────────────┐
                        │                   │
                        ▼                   ▼
-                  生成图表            数据准确性分析
-                  （时序曲线、         （负压/流速/
-                   对比图等）          水头损失检测）
+                  生成图表            数据异常分析
+                  （水位/流量/         （水位/流量/
+                   热力图/纵剖面）      水头损失等）
                        │                   │
                        └────────┬──────────┘
                                 ▼
@@ -210,12 +189,15 @@ Skill：查询关键节点和管道 → 全面异常检测
 
 ```
 hydros-engine-skill/
-├── README.md                # 项目说明
-├── skill.md                 # Skill 定义（Prompt + 流程编排逻辑）
-├── examples/                # 示例对话和预期行为
-│   ├── scenario_query.md
-│   ├── simulation_run.md
-│   └── result_analysis.md
-└── evals/                   # Skill 评测用例
-    └── basic_flow.md
+├── README.md
+└── skills/
+    ├── hydros-engine-skill-executor/
+    │   ├── SKILL.md
+    │   ├── assets/
+    │   ├── references/
+    │   └── scripts/
+    └── hydros-engine-skill-analyst/
+        ├── SKILL.md
+        ├── references/
+        └── scripts/
 ```

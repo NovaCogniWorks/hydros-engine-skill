@@ -248,6 +248,11 @@ Implementation Constraints:
 - `connections`
 - 闸站、闸门、断面等对象定义
 
+实现建议：
+
+- 如果远程场景 YAML 或 `objects.yaml` 地址包含中文路径，先做 URL 编码规范化，再发起请求
+- 如果本轮流程已经缓存过本地 `objects.yaml`，优先复用本地文件，不要重复拉取
+
 推荐页面结构：
 
 1. 顶部工程摘要与 waterway 元信息
@@ -274,6 +279,11 @@ Implementation Constraints:
 - `objects.yaml` 中断面的 `bottom_elevation`
 - 仿真结果中的 `water_level`
 - 可选的闸站位置、闸门组成和关键断面标签
+
+实现建议：
+
+- 如果 `objects.yaml` 远程地址包含中文路径，先做 URL 编码规范化，再发起请求
+- 如果本轮流程已经缓存过本地 `objects.yaml`，优先复用本地文件，不要重复拉取
 
 推荐页面结构：
 
