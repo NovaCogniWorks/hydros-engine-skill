@@ -386,7 +386,7 @@ def build_longitudinal_profile_payload(
         },
         "summary": (
             f"纵剖面显示末步水面线从 {start_point['name']} 的 {start_point['water_level']} m "
-            f"下降到 {end_point['name']} 的 {end_point['water_level']} m，沿程降幅 "
+            f"下降到 {end_point['name']} 的 {end_point['water_level']} m，沿程水头损失 "
             f"{round_number(start_point['water_level'] - end_point['water_level'], 3)} m。"
         ),
     }
@@ -668,7 +668,7 @@ def build_report_data(
         f"{df['metrics_code'].nunique()} 类指标，展示步范围 {unique_steps[0]} ~ {unique_steps[-1]}，"
         f"图表展示共 {display_sampled_point_count} 个采样点。"
         f"整体未发现负流量和明显水位突跳，主干断面末步水位由 {round_number(qd_last['value'].max())} m "
-        f"降至 {round_number(qd_last['value'].min())} m，沿程降幅约 {level_drop} m，表现为稳定下泄。"
+        f"降至 {round_number(qd_last['value'].min())} m，沿程水头损失约 {level_drop} m，表现为稳定下泄。"
         f"当前更值得关注的是个别退水闸零流量，以及 {highlight_flow_name} 的局部流量大幅波动。"
     )
     if runtime_config.expected_sample_count is not None and runtime_config.expected_sample_count != raw_sampled_point_count:
@@ -690,7 +690,7 @@ def build_report_data(
             if placeholder_flow_steps
             else f"未检测到负流量，flow 最小值为 {round_number(flow_display_df['value'].min())} m³/s，渠道主流方向保持一致。"
         ),
-        f"主干断面末步水位沿程降幅约 {level_drop} m，符合上游高、下游低的基本水力梯度。",
+        f"主干断面末步沿程水头损失约 {level_drop} m，符合上游高、下游低的基本水力梯度。",
         f"{highlight_flow_name} 的流量范围最大，达到 {round_number(highlight_flow_stats['range'])} m³/s，需要结合工况解释其波动来源。",
         (
             f"{len(dynamic_gate_groups)} 个闸门序列存在开度调整，"

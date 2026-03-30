@@ -441,7 +441,7 @@ def build_html(dataset: dict) -> str:
         <div class="meta">
           <div class="card"><small>总里程</small><strong>__DISTANCE_KM__ km</strong></div>
           <div class="card"><small>匹配水位断面</small><strong>__MATCHED_COUNT__</strong></div>
-          <div class="card"><small>沿程水位降幅</small><strong>__WATER_DROP__ m</strong></div>
+          <div class="card"><small>沿程水头损失</small><strong>__WATER_DROP__ m</strong></div>
           <div class="card"><small>最低底高程</small><strong>__MIN_BED__ m</strong></div>
           <div class="card"><small>闸站数量</small><strong>__GATE_STATION_COUNT__</strong></div>
           <div class="card"><small>水流流向</small><strong style="font-size: 18px;">__FLOW_DIRECTION__</strong></div>

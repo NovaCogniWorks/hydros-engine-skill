@@ -446,7 +446,7 @@
                     <div class="mb-2 flex items-center justify-between gap-3 text-sm text-ink/62">
                       <span id="timelineStatus">已暂停</span>
                       <div class="flex items-center gap-3">
-                        <span id="timelineCurrentMeta" class="text-xs text-ink/58">沿程降幅 -</span>
+                        <span id="timelineCurrentMeta" class="text-xs text-ink/58">沿程水头损失 -</span>
                         <span id="timelineCurrentStep" class="font-medium text-primary term-hint" title="data_index">采样步 -</span>
                       </div>
                     </div>
@@ -814,7 +814,7 @@
         }
         const currentMeta = document.getElementById("timelineCurrentMeta");
         if (currentMeta && !currentMeta.textContent.trim()) {
-          currentMeta.textContent = "沿程降幅 -";
+          currentMeta.textContent = "沿程水头损失 -";
         }
         if (statusLabel) {
           statusLabel.textContent = interactionState.playing ? "播放中" : "已暂停";
@@ -1099,7 +1099,7 @@
           const endPoint = points[points.length - 1];
           const deepest = points.reduce((best, item) => (item.depth > best.depth ? item : best), points[0]);
           const shallowest = points.reduce((best, item) => (item.depth < best.depth ? item : best), points[0]);
-          const waterDrop = (startPoint.water_level - endPoint.water_level).toFixed(2);
+          const headLoss = (startPoint.water_level - endPoint.water_level).toFixed(2);
           const currentYBounds = computeAxisBounds([
             points.map((item) => item.top_elevation),
             points.map((item) => item.bottom_elevation),
@@ -1130,11 +1130,11 @@
 
           document.getElementById("longitudinalSummary").textContent =
             `当前浏览 ${formatStepLabel(step)}，水面线从 ${startPoint.name} 的 ${startPoint.water_level} m 下降到 ` +
-            `${endPoint.name} 的 ${endPoint.water_level} m，沿程降幅 ${waterDrop} m。`;
-          document.getElementById("timelineCurrentMeta").textContent = `沿程降幅 ${waterDrop} m`;
+            `${endPoint.name} 的 ${endPoint.water_level} m，沿程水头损失 ${headLoss} m。`;
+          document.getElementById("timelineCurrentMeta").textContent = `沿程水头损失 ${headLoss} m`;
 
           document.getElementById("longitudinalHighlights").innerHTML = [
-            `主干渠当前步水位降幅约 ${waterDrop} m，整体保持稳定下泄。`,
+            `主干渠当前步沿程水头损失约 ${headLoss} m，整体保持稳定下泄。`,
             `共匹配 ${points.length} 个断面，线路总长约 ${profile.meta.distance_km} km。`,
             `已叠加 ${profile.meta.gate_station_count} 个闸站位置，流向为 ${profile.meta.flow_direction}。`,
             `最大水深断面为 ${deepest.name}，最小水深断面为 ${shallowest.name}。`,
