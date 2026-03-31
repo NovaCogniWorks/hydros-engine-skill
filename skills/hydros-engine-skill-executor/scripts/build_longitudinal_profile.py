@@ -50,6 +50,66 @@ def gate_sort_key(name: str) -> tuple[str, int, str]:
     return (station, gate_number, name)
 
 
+def parse_object_locations(text: str) -> dict[str, float]:
+    locations = {}
+    blocks = re.split(r'\n -\n  id:\s*\d+', '\n' + text)
+    for block in blocks:
+        if not block.strip():
+            continue
+        name_match = re.search(r'\n  name:\s*(.+?)\n', block)
+        if not name_match:
+            continue
+        name = name_match.group(1).strip()
+        location_match = re.search(r'\n    location:\s*([-\d.]+)', block)
+        if location_match:
+            locations[name] = float(location_match.group(1))
+    return locations
+
+
+def parse_gate_stations(text: str) -> list[dict]:
+    stations = []
+    blocks = re.split(r'\n -\n  id:\s*\d+', '\n' + text)
+    for block in blocks:
+        if not block.strip():
+            continue
+        type_match = re.search(r'\n  type:\s*(.+?)\n', block)
+        if not type_match or type_match.group(1).strip() != 'GateStation':
+            continue
+        
+        name_match = re.search(r'\n  name:\s*(.+?)\n', block)
+        if not name_match:
+            continue
+        name = name_match.group(1).strip()
+        short_name = name.split('-')[0] if '-' in name else name
+
+        location_match = re.search(r'\n    location:\s*([-\d.]+)', block)
+        location = float(location_match.group(1)) if location_match else 0.0
+        
+        inlet_section = ""
+        cross_section_children_match = re.search(r'\n  cross_section_children:(.*?)(?=\n  [a-z_]+:|$)', block, re.S)
+        if cross_section_children_match:
+            child_blocks = cross_section_children_match.group(1)
+            first_child_name_match = re.search(r'\n    name:\s*(.+?)\n', child_blocks)
+            if first_child_name_match:
+                inlet_section = first_child_name_match.group(1).strip()
+                
+        gates = []
+        device_children_match = re.search(r'\n  device_children:(.*?)(?=\n  [a-z_]+:|$)', block, re.S)
+        if device_children_match:
+            child_blocks = device_children_match.group(1)
+            gates = [gn.strip() for gn in re.findall(r'\n    name:\s*(.+?)\n', child_blocks)]
+        
+        stations.append({
+            "name": name,
+            "short_name": short_name,
+            "location": round(location / 1000, 3),
+            "inlet_section": inlet_section,
+            "gates": gates,
+            "role": f"{name}控制点"
+        })
+    return stations
+
+
 def parse_cross_sections(text: str) -> list[dict]:
     sections = []
     block_pattern = re.compile(
@@ -130,44 +190,36 @@ def build_dataset(
     start = matched[0]
     end = matched[-1]
 
-    gate_markers = [
-        {
-            "name": "ZM1-入口断面",
-            "short_name": "ZM1",
-            "location": next(item["location"] for item in profile_points if item["name"] == "ZM1-入口断面"),
-        },
-        {
-            "name": "ZM2-入口断面",
-            "short_name": "ZM2",
-            "location": next(item["location"] for item in profile_points if item["name"] == "ZM2-入口断面"),
-        },
-    ]
-    default_gate_names = {
-        "ZM1": ["ZM1-节制闸#1", "ZM1-节制闸#2"],
-        "ZM2": ["ZM2-节制闸#1", "ZM2-节制闸#2"],
-    }
-    gate_names_by_station: dict[str, list[str]] = {}
-    for gate_name in sorted(gate_df["object_name"].dropna().unique().tolist(), key=gate_sort_key):
-        gate_names_by_station.setdefault(gate_name.split("-", 1)[0], []).append(gate_name)
-
-    gate_stations = [
-        {
-            "short_name": "ZM1",
-            "name": "ZM1-北易水倒虹吸出口节制闸",
-            "location": gate_markers[0]["location"],
-            "inlet_section": "ZM1-入口断面",
-            "gates": gate_names_by_station.get("ZM1", default_gate_names["ZM1"]),
-            "role": "北易水倒虹吸出口控制点",
-        },
-        {
-            "short_name": "ZM2",
-            "name": "ZM2-坟庄河倒虹吸出口节制闸",
-            "location": gate_markers[1]["location"],
-            "inlet_section": "ZM2-入口断面",
-            "gates": gate_names_by_station.get("ZM2", default_gate_names["ZM2"]),
-            "role": "坟庄河倒虹吸出口控制点",
-        },
-    ]
+    raw_gate_stations = parse_gate_stations(yaml_text)
+    csv_gate_names = set(gate_df["object_name"].dropna().unique().tolist())
+    
+    gate_stations = []
+    gate_markers = []
+    for gs in raw_gate_stations:
+        st_location = gs["location"]
+        if gs["inlet_section"]:
+            matching_points = [p["location"] for p in profile_points if p["name"] == gs["inlet_section"]]
+            if matching_points:
+                st_location = matching_points[0]
+        
+        valid_gates = [g for g in gs["gates"] if g in csv_gate_names]
+        if not valid_gates:
+            valid_gates = gs["gates"]
+            
+        gate_stations.append({
+            "short_name": gs["short_name"],
+            "name": gs["name"],
+            "location": st_location,
+            "inlet_section": gs["inlet_section"],
+            "gates": valid_gates,
+            "role": gs["role"]
+        })
+        
+        gate_markers.append({
+            "name": gs["inlet_section"] or gs["name"],
+            "short_name": gs["short_name"],
+            "location": st_location,
+        })
 
     return {
         "meta": {
@@ -180,7 +232,7 @@ def build_dataset(
             "min_bed_elevation": round(min_bed, 3),
             "max_water_level": round(max_water, 3),
             "max_top_elevation": round(max_top, 3),
-            "flow_direction": "左侧上游（QD-1） → 右侧下游（QD-14）",
+            "flow_direction": f"左侧上游（{start['name']}） → 右侧下游（{end['name']}）",
             "gate_station_count": len(gate_stations),
         },
         "profile_points": profile_points,
@@ -240,7 +292,7 @@ def save_profile_png(dataset: dict, output_png: Path) -> None:
     ax.text(x_data[0], y_top - 0.12, "上游", fontsize=10, color="#1c7fb5", ha="left")
     ax.text(x_data[-1], y_top - 0.12, "下游", fontsize=10, color="#1c7fb5", ha="right")
 
-    ax.set_title("京石段渠道纵剖面", fontsize=15, fontweight="bold", pad=10)
+    ax.set_title("渠道纵剖面", fontsize=15, fontweight="bold", pad=10)
     ax.set_xlabel("里程 (km)", fontsize=12, labelpad=8)
     ax.set_ylabel("高程 / 水位 (m)", fontsize=12, labelpad=10)
     ax.xaxis.set_label_coords(0.5, -0.065)
@@ -262,7 +314,7 @@ def build_html(dataset: dict) -> str:
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>京石段纵剖面</title>
+    <title>渠道纵剖面</title>
     <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
     <style>
       :root {{
@@ -447,9 +499,9 @@ def build_html(dataset: dict) -> str:
     <div class="shell">
       <section class="hero">
         <p class="eyebrow">Hydros Longitudinal Profile</p>
-        <h1>京石段纵剖面图</h1>
+        <h1>渠道纵剖面图</h1>
         <p>
-          纵剖面基于 `objects.yaml` 中的断面里程与底高程构建，并叠加 `timeseries_data_100001_v5.csv`
+          纵剖面基于 `objects.yaml` 中的断面里程与底高程构建，并叠加相应 CSV 数据
           在最后时刻（当前展示步 `__LAST_STEP__`）的水位线。这样可以同时观察沿程床面变化和当前工况下的水面线走势。
         </p>
         <div class="meta">
@@ -468,7 +520,7 @@ def build_html(dataset: dict) -> str:
           <p class="subtle">
             灰色虚线表示断面顶高程，棕色线表示断面底高程，蓝色线表示当前展示水位。蓝色阴影仅填充到床面线，
             棕色阴影填充到坐标轴底部，用来同时表达过水断面和床面起伏。
-            图中额外用竖线标出 `ZM1` 和 `ZM2` 两个闸站入口位置。
+            图中额外用竖线标出各闸站入口位置。
           </p>
           <div class="legend">
             <span><i class="dot" style="background: #637487"></i>断面顶高程</span>

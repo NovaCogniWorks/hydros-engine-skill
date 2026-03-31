@@ -114,18 +114,16 @@ def round_number(value: float | int | None, digits: int = 2) -> float | None:
     return round(float(value), digits)
 
 
-def object_sort_key(name: str) -> tuple[int, int, str]:
-    if name.startswith("QD-"):
-        try:
-            number = int(name.split("-")[1].split("#")[0])
-        except (IndexError, ValueError):
-            number = 999
-        return (0, number, name)
-    if name.startswith("ZM"):
-        return (1, 0, name)
-    if name.startswith("FSK"):
-        return (2, 0, name)
-    return (3, 0, name)
+def create_object_sort_key(location_map: dict[str, float]):
+    def sort_key(name: str) -> tuple[float, str]:
+        loc = location_map.get(name, float('inf'))
+        if loc == float('inf'):
+            for k in location_map:
+                if name.startswith(k):
+                    loc = location_map[k]
+                    break
+        return (loc, name)
+    return sort_key
 
 
 def format_datetime_text(value: datetime | None) -> str | None:
@@ -296,7 +294,7 @@ def detect_placeholder_steps(metric_df: pd.DataFrame) -> list[int]:
     return placeholder_steps
 
 
-def build_metric_series(df: pd.DataFrame, metric: str, excluded_steps: set[int] | None = None) -> list[dict[str, Any]]:
+def build_metric_series(df: pd.DataFrame, metric: str, excluded_steps: set[int] | None = None, sort_key_func=None) -> list[dict[str, Any]]:
     series = []
     metric_df = df[df["metrics_code"] == metric].copy()
     if excluded_steps:
@@ -315,11 +313,14 @@ def build_metric_series(df: pd.DataFrame, metric: str, excluded_steps: set[int] 
             item["minValue"] = round_number(ordered["value"].min())
         series.append(item)
 
-    series.sort(key=lambda item: (item["objectType"], object_sort_key(item["name"])))
+    if sort_key_func:
+        series.sort(key=lambda item: (item["objectType"], sort_key_func(item["name"])))
+    else:
+        series.sort(key=lambda item: (item["objectType"], item["name"]))
     return series
 
 
-def build_gate_series(df: pd.DataFrame, excluded_steps: set[int] | None = None) -> list[dict[str, Any]]:
+def build_gate_series(df: pd.DataFrame, excluded_steps: set[int] | None = None, sort_key_func=None) -> list[dict[str, Any]]:
     series = []
     gate_df = df[(df["object_type"] == "Gate") & (df["metrics_code"] == "gate_opening")].copy()
     if excluded_steps:
@@ -347,7 +348,10 @@ def build_gate_series(df: pd.DataFrame, excluded_steps: set[int] | None = None) 
             }
         )
 
-    series.sort(key=lambda item: item["name"])
+    if sort_key_func:
+        series.sort(key=lambda item: sort_key_func(item["name"]))
+    else:
+        series.sort(key=lambda item: item["name"])
     return series
 
 
@@ -450,7 +454,10 @@ def build_report_data(
     profile_dataset: dict[str, Any] | None = None,
     asset_status: dict[str, Any] | None = None,
     profile_error: str | None = None,
+    location_map: dict[str, float] | None = None,
 ) -> dict[str, Any]:
+    location_map = location_map or {}
+    sort_key_func = create_object_sort_key(location_map)
     raw_unique_steps = sorted(int(step) for step in df["data_index"].unique().tolist())
     step_interval = runtime_config.csv_step_interval
     scenario_id = str(df["biz_scenario_id"].iloc[0])
@@ -541,16 +548,22 @@ def build_report_data(
             (flow_display_df["object_name"] == highlight_flow_name) & (flow_display_df["object_type"] == highlight_flow_type)
         ]
 
-    qd_level_df = level_df[
-        (level_df["object_type"] == "CrossSection")
-        & (level_df["object_name"].str.startswith("QD-"))
-        & (level_df["object_name"].str.contains("#001"))
-    ].copy()
     last_step = unique_steps[-1]
-    qd_last = qd_level_df[qd_level_df["data_index"] == last_step].copy()
-    qd_last["order"] = qd_last["object_name"].str.extract(r"QD-(\d+)").astype(int)
-    qd_last = qd_last.sort_values("order")
-    level_drop = round_number(qd_last["value"].max() - qd_last["value"].min())
+    cs_level_df = level_df[level_df["object_type"] == "CrossSection"].copy()
+    cs_last = cs_level_df[cs_level_df["data_index"] == last_step].copy()
+    
+    if location_map:
+        cs_last["order"] = cs_last["object_name"].map(lambda n: location_map.get(n, float('inf')))
+        cs_last = cs_last[cs_last["order"] != float('inf')]
+        cs_last = cs_last.sort_values("order")
+    else:
+        cs_last = cs_last.sort_values("object_name")
+        
+    level_drop = 0
+    if not cs_last.empty:
+        start_level = round_number(cs_last["value"].iloc[0])
+        end_level = round_number(cs_last["value"].iloc[-1])
+        level_drop = round_number((start_level or 0) - (end_level or 0))
 
     anomaly_items: list[dict[str, str]] = []
     if zero_flow_groups:
@@ -561,7 +574,7 @@ def build_report_data(
                 "object": object_name,
                 "metric": "water_flow",
                 "finding": f"全程 {len(group)} 个采样点流量均为 0。",
-                "advice": "确认该退水闸/分水口在当前工况下是否应参与配水，必要时复核场景配置。",
+                "advice": "确认该对象在当前工况下是否应参与配水（如保持关闭状态），必要时复核场景配置。",
             }
         )
 
@@ -709,8 +722,7 @@ def build_report_data(
         f"该 CSV 共包含 {len(df)} 条记录，覆盖 {df['object_name'].nunique()} 个对象、"
         f"{df['metrics_code'].nunique()} 类指标，展示时间步范围 {unique_steps[0]} ~ {unique_steps[-1]}，"
         f"图表展示共 {display_sampled_point_count} 个采样点。"
-        f"整体未发现负流量和明显水位突跳，主干断面在最后时刻的水位从 {round_number(qd_last['value'].max())} m "
-        f"下降到 {round_number(qd_last['value'].min())} m，沿程水头损失约 {level_drop} m，表现为稳定下泄。"
+        f"整体未发现负流量和明显水位突跳，断面的沿程水头损失约 {level_drop} m，表现为稳定下泄。"
         f"当前更值得关注的是个别退水闸零流量，以及 {highlight_flow_name} 的局部流量大幅波动。"
     )
     if runtime_config.expected_sample_count is not None and runtime_config.expected_sample_count != raw_sampled_point_count:
@@ -759,8 +771,8 @@ def build_report_data(
         )
 
     recommendations = [
-        "优先确认 FSK2-北易水退水闸在该场景下是否应保持关闭，避免把配置状态误判为异常。",
-        f"复核 {highlight_flow_name} 附近的边界条件、分流关系和闸门联动，解释其波动来源。",
+        "优先确认发生零流量或极低流量的节点在该场景下是否应保持关闭，避免把配置状态误判为异常。",
+        f"复核 {highlight_flow_name} 附近的边界条件、分流关系和联动控制，解释其波动来源。",
         (
             f"若需要更细的过程诊断，建议把输出步长从当前 {runtime_config.output_step_size} 秒/次缩短到 600-1200 秒/次。"
             if runtime_config.output_step_size
@@ -896,9 +908,9 @@ def build_report_data(
         ],
         "miniTable": mini_table,
         "charts": {
-            "levelSeries": build_metric_series(df, "water_level", set(placeholder_level_steps)),
-            "flowSeries": build_metric_series(df, "water_flow", set(placeholder_flow_steps)),
-            "gateSeries": build_gate_series(df, set(display_excluded_steps)),
+            "levelSeries": build_metric_series(df, "water_level", set(placeholder_level_steps), sort_key_func),
+            "flowSeries": build_metric_series(df, "water_flow", set(placeholder_flow_steps), sort_key_func),
+            "gateSeries": build_gate_series(df, set(display_excluded_steps), sort_key_func),
         },
         "chartInterpretations": {
             "level": {
@@ -989,7 +1001,7 @@ def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
 
 ![渠道纵剖面](../charts/chart7_longitudinal_profile.png)
 
-{profile['summary']} 图中同时标出了 `ZM1`、`ZM2` 两个闸站位置，便于把闸门控制动作和沿程水面线一起解释。
+{profile['summary']} 图中同时标出了各闸站位置，便于把控制动作和沿程水面线一起解释。
 """
     else:
         profile_markdown = f"""
@@ -1080,7 +1092,7 @@ def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
 
 ![关键断面水位时序](../charts/chart1_water_level.png)
 
-{payload['chartInterpretations']['level']['analysis']} 主干断面在最后时刻从上游 `QD-1#断面#001` 到下游 `QD-14#断面#001` 约下降 `2.80 m`，说明整体水力坡降关系清晰。
+{payload['chartInterpretations']['level']['analysis']} 沿程断面平稳下降，整体水力坡降关系清晰。
 
 ### 2. 流量时序
 
@@ -1092,13 +1104,13 @@ def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
 
 ![闸门开度时序](../charts/chart4_gate_opening.png)
 
-{payload['chartInterpretations']['gate']['analysis']} 其中 `ZM1-节制闸#1/#2` 和 `ZM2-节制闸#2` 都有明显阶跃变化，说明场景中存在控制动作，而不是完全静态工况。
+{payload['chartInterpretations']['gate']['analysis']} 存在明显阶跃变化，说明场景中存在控制动作，而不是完全静态工况。
 
 ### 4. 分水口/退水闸流量
 
 ![分水口流量时序](../charts/chart5_disturbance_flow.png)
 
-分水口/退水闸侧呈现“少数动态、多数恒定”的特征。`FSK2-北易水退水闸` 全程为零，`FSK1/3/5/6` 基本维持恒定流量，更像稳态配水结果而非持续调节过程。
+分流/退水节点侧呈现“少数动态、多数恒定”的特征。部分节点全程为零或维持恒定流量，更像稳态配水结果而非持续调节过程。
 
 ### 5. 沿程水位热力图
 
@@ -1114,7 +1126,7 @@ def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
 - 报告完整性：`{"完整" if not missing_assets else "存在缺失"}`。
 {asset_issue_markdown}
 - 系统整体稳定，无倒流、无明显水位异常波动，适合作为一次稳定工况分析样本。
-- 建议优先复核 `FSK2-北易水退水闸` 的零流量合理性，以及 `{analysis['top_flow_variation']['object_name']}` 的局部波动来源。
+- 建议优先复核零流量或恒定流量节点的合理性，以及 `{analysis['top_flow_variation']['object_name']}` 的局部波动来源。
 - 若下一步要做动态评估，建议增加事件注入或更细粒度输出。
 
 ## 后续建议动作
@@ -1189,10 +1201,14 @@ def main() -> None:
     run_command(chart_command)
 
     objects_yaml_path = None
+    location_map = {}
     try:
         objects_yaml_path = cache_objects_yaml(paths["data"], scenario_meta)
+        if objects_yaml_path and objects_yaml_path.exists():
+            from build_longitudinal_profile import parse_object_locations
+            location_map = parse_object_locations(objects_yaml_path.read_text(encoding="utf-8"))
     except Exception as exc:
-        print(f"objects.yaml 预取失败: {exc}")
+        print(f"objects.yaml 预取失败或解析 location 失败: {exc}")
 
     profile_dataset = None
     profile_error = None
@@ -1213,7 +1229,7 @@ def main() -> None:
     if charts_stats.exists():
         shutil.move(str(charts_stats), str(paths["data"] / "analysis_stats.json"))
 
-    payload = build_report_data(df, working_csv_path, runtime_config, profile_dataset, asset_status, profile_error)
+    payload = build_report_data(df, working_csv_path, runtime_config, profile_dataset, asset_status, profile_error, location_map)
     write_html_assets(paths["report"], paths["data"], payload)
     write_markdown_report(paths["report"], payload)
 
