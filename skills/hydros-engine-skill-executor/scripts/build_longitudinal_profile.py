@@ -215,7 +215,7 @@ def save_profile_png(dataset: dict, output_png: Path) -> None:
     ax.fill_between(x_data, y_bottom, bed_data, color="#87603d", alpha=0.16)
     ax.plot(x_data, top_data, color="#637487", linewidth=2, linestyle="--", label="断面顶高程")
     ax.plot(x_data, bed_data, color="#87603d", linewidth=2.4, label="断面底高程")
-    ax.plot(x_data, water_data, color="#1c7fb5", linewidth=3, label="末步水位")
+    ax.plot(x_data, water_data, color="#1c7fb5", linewidth=3, label="当前展示水位")
     ax.fill_between(x_data, bed_data, water_data, color="#1c7fb5", alpha=0.12)
 
     for station in dataset["gate_stations"]:
@@ -450,7 +450,7 @@ def build_html(dataset: dict) -> str:
         <h1>京石段纵剖面图</h1>
         <p>
           纵剖面基于 `objects.yaml` 中的断面里程与底高程构建，并叠加 `timeseries_data_100001_v5.csv`
-          在末步 `data_index=__LAST_STEP__` 的水位线。这样可以同时观察沿程床面变化和当前工况下的水面线走势。
+          在最后时刻（当前展示步 `__LAST_STEP__`）的水位线。这样可以同时观察沿程床面变化和当前工况下的水面线走势。
         </p>
         <div class="meta">
           <div class="card"><small>总里程</small><strong>__DISTANCE_KM__ km</strong></div>
@@ -466,14 +466,14 @@ def build_html(dataset: dict) -> str:
         <section class="panel">
           <h2>床面线与水面线</h2>
           <p class="subtle">
-            灰色虚线表示断面顶高程，棕色线表示断面底高程，蓝色线表示末步水位。蓝色阴影仅填充到床面线，
+            灰色虚线表示断面顶高程，棕色线表示断面底高程，蓝色线表示当前展示水位。蓝色阴影仅填充到床面线，
             棕色阴影填充到坐标轴底部，用来同时表达过水断面和床面起伏。
             图中额外用竖线标出 `ZM1` 和 `ZM2` 两个闸站入口位置。
           </p>
           <div class="legend">
             <span><i class="dot" style="background: #637487"></i>断面顶高程</span>
             <span><i class="dot" style="background: var(--bed)"></i>断面底高程</span>
-            <span><i class="dot" style="background: var(--water)"></i>末步水位</span>
+            <span><i class="dot" style="background: var(--water)"></i>当前展示水位</span>
             <span><i class="dot" style="background: var(--gate)"></i>闸站位置</span>
           </div>
           <div class="flow-direction">
@@ -493,7 +493,7 @@ def build_html(dataset: dict) -> str:
             <p class="eyebrow" style="color: rgba(255,255,255,0.58);">Profile Highlights</p>
             <h3>关键观察</h3>
             <p>
-              末步水面线从 <strong>__START_NAME__</strong> 的
+              最后时刻水面线从 <strong>__START_NAME__</strong> 的
               <strong>__START_WATER__ m</strong> 下降到
               <strong>__END_NAME__</strong> 的
               <strong>__END_WATER__ m</strong>，
@@ -603,7 +603,7 @@ def build_html(dataset: dict) -> str:
           top: 12,
           left: 96,
           right: 40,
-          data: ['断面顶高程', '断面底高程', '末步水位', '闸站位置'],
+          data: ['断面顶高程', '断面底高程', '当前展示水位', '闸站位置'],
           textStyle: {{ color: '#5b7385' }}
         }},
         xAxis: {{
@@ -691,7 +691,7 @@ def build_html(dataset: dict) -> str:
             data: matched.map((item) => [item.location, item.bottom_elevation])
           }},
           {{
-            name: '末步水位',
+            name: '当前展示水位',
             type: 'line',
             smooth: true,
             showSymbol: true,

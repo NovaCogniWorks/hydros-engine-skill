@@ -447,7 +447,7 @@
                       <span id="timelineStatus">已暂停</span>
                       <div class="flex items-center gap-3">
                         <span id="timelineCurrentMeta" class="text-xs text-ink/58">沿程水头损失 -</span>
-                        <span id="timelineCurrentStep" class="font-medium text-primary term-hint" title="data_index">采样步 -</span>
+                        <span id="timelineCurrentStep" class="font-medium text-primary term-hint" title="data_index">当前展示步 -/-</span>
                       </div>
                     </div>
                     <input id="timelineSlider" type="range" min="0" max="0" value="0" class="h-2 w-full cursor-pointer appearance-none rounded-full bg-primary/18 accent-primary" />
@@ -482,7 +482,7 @@
             <article class="section-shell rounded-[30px] p-5">
               <div>
                 <p class="text-xs font-semibold uppercase tracking-[0.24em] text-primary/70">Section 03</p>
-                <h2 class="mt-2 text-2xl font-semibold">完整曲线</h2>
+                <h2 class="mt-2 text-2xl font-semibold">结果曲线</h2>
                 <p class="mt-2 text-sm text-ink/58">
                   展示全部
                   <span class="term-hint" title="water_level">水位</span>、
@@ -550,7 +550,7 @@
 
           <aside class="space-y-6">
             <article class="section-shell-dark rounded-[30px] px-5 py-5 text-white">
-              <p class="text-xs font-semibold uppercase tracking-[0.24em] text-white/58">Task Snapshot</p>
+              <p class="text-xs font-semibold uppercase tracking-[0.24em] text-white/58">任务概览</p>
               <dl class="mt-4 space-y-3 text-sm" id="snapshotPanel"></dl>
             </article>
 
@@ -614,7 +614,8 @@
       }
 
       function formatStepLabel(step) {
-        return step == null ? "采样步 -" : `采样步 ${step}`;
+        const totalSteps = reportData.meta?.total_steps ?? "-";
+        return step == null ? `-/${totalSteps}` : `${step}/${totalSteps}`;
       }
 
       function collectNumericValues(items) {
@@ -673,7 +674,7 @@
         water_level: "水位",
         water_flow: "流量",
         gate_opening: "闸门开度",
-        data_index: "采样步",
+        data_index: "采样时间步",
         step_index: "计算步",
         source_time: "源时间",
       };
@@ -870,7 +871,7 @@
       function renderHeader() {
         document.title = `${reportData.meta.report_title} - Hydros 仿真分析报告`;
         document.getElementById("reportTitle").textContent = reportData.meta.report_title;
-        document.getElementById("summaryBadge").textContent = `外部数据 payload · ${reportData.meta.record_count.toLocaleString("zh-CN")} 条记录`;
+        document.getElementById("summaryBadge").textContent = `共 ${reportData.meta.record_count.toLocaleString("zh-CN")} 条记录`;
         document.getElementById("summaryParagraph").textContent = reportData.summaryParagraph;
       }
 
@@ -971,7 +972,7 @@
                   <span class="term-hint rounded-full border border-line/80 px-2.5 py-1 text-[11px] text-ink/56" title="${escapeHtml(item.metrics_code)}">${localizedTermLabel(item.metrics_code)}</span>
                 </div>
                 <div class="mt-2 flex items-center justify-between text-sm text-ink/72">
-                  <span class="term-hint" title="data_index">采样步 ${item.data_index}</span>
+                  <span class="term-hint" title="data_index">采样时间步 ${item.data_index}</span>
                   <span>${item.value}</span>
                 </div>
               </div>
@@ -1129,12 +1130,12 @@
           ]);
 
           document.getElementById("longitudinalSummary").textContent =
-            `当前浏览 ${formatStepLabel(step)}，水面线从 ${startPoint.name} 的 ${startPoint.water_level} m 下降到 ` +
+            `当前展示步 ${formatStepLabel(step)}，水面线从 ${startPoint.name} 的 ${startPoint.water_level} m 下降到 ` +
             `${endPoint.name} 的 ${endPoint.water_level} m，沿程水头损失 ${headLoss} m。`;
           document.getElementById("timelineCurrentMeta").textContent = `沿程水头损失 ${headLoss} m`;
 
           document.getElementById("longitudinalHighlights").innerHTML = [
-            `主干渠当前步沿程水头损失约 ${headLoss} m，整体保持稳定下泄。`,
+            `主干渠当前展示时刻沿程水头损失约 ${headLoss} m，整体保持稳定下泄。`,
             `共匹配 ${points.length} 个断面，线路总长约 ${profile.meta.distance_km} km。`,
             `已叠加 ${profile.meta.gate_station_count} 个闸站位置，流向为 ${profile.meta.flow_direction}。`,
             `最大水深断面为 ${deepest.name}，最小水深断面为 ${shallowest.name}。`,
@@ -1357,15 +1358,15 @@
         const flowSeries = reportData.charts.flowSeries || [];
         const gateSeries = reportData.charts.gateSeries || [];
 
-        document.getElementById("levelCardTitle").textContent = `完整${localizedTermLabel("water_level")}曲线`;
+        document.getElementById("levelCardTitle").textContent = `${localizedTermLabel("water_level")}结果曲线`;
         document.getElementById("levelCardTitle").title = "water_level";
         document.getElementById("levelCardDesc").textContent = `共 ${levelSeries.length} 条序列，支持按对象类型筛选后多选查看。`;
         document.getElementById("levelCardDesc").title = "water_level";
-        document.getElementById("flowCardTitle").textContent = `完整${localizedTermLabel("water_flow")}曲线`;
+        document.getElementById("flowCardTitle").textContent = `${localizedTermLabel("water_flow")}结果曲线`;
         document.getElementById("flowCardTitle").title = "water_flow";
         document.getElementById("flowCardDesc").textContent = `共 ${flowSeries.length} 条序列，支持按对象类型筛选后多选查看。`;
         document.getElementById("flowCardDesc").title = "water_flow";
-        document.getElementById("gateCardTitle").textContent = `完整${localizedTermLabel("gate_opening")}曲线`;
+        document.getElementById("gateCardTitle").textContent = `${localizedTermLabel("gate_opening")}结果曲线`;
         document.getElementById("gateCardTitle").title = "gate_opening";
         document.getElementById("gateCardDesc").textContent = `共 ${gateSeries.length} 条序列，压缩重复平台段后展示全部闸门变化。`;
         document.getElementById("gateCardDesc").title = "gate_opening";
@@ -1376,15 +1377,7 @@
         function renderCurveInterpretation(elementId, interpretation, selectedSeries, selectedType) {
           const element = document.getElementById(elementId);
           if (!element) return;
-          const placeholderSteps = interpretation?.placeholder_steps || [];
-          const selectedNames = selectedSeries.slice(0, 3).map((item) => item.name);
-          const selectionText = selectedSeries.length
-            ? `当前显示 ${selectedSeries.length} 条${typeLabels[selectedType] || selectedType || '序列'}，${selectedNames.join('、')}${selectedSeries.length > 3 ? ' 等' : ''}。`
-            : "当前未选中序列，可在上方多选对象后查看详细走势。";
-          const placeholderText = placeholderSteps.length
-            ? `已自动剔除占位零值采样步：${placeholderSteps.join('、')}。`
-            : "";
-          element.innerHTML = [selectionText, interpretation?.analysis, placeholderText]
+          element.innerHTML = [interpretation?.analysis]
             .filter(Boolean)
             .map((text) => `<p>${localizeTermText(text)}</p>`)
             .join("");
@@ -1481,7 +1474,7 @@
             ],
             xAxis: {
               type: "value",
-              name: "采样步",
+              name: reportData.meta?.axis_label || "采样时间步",
               min: stepBounds.min,
               max: stepBounds.max,
               nameLocation: "middle",
@@ -1558,7 +1551,7 @@
             ],
             xAxis: {
               type: "value",
-              name: "采样步",
+              name: reportData.meta?.axis_label || "采样时间步",
               min: stepBounds.min,
               max: stepBounds.max,
               nameLocation: "middle",
@@ -1640,7 +1633,7 @@
             ],
             xAxis: {
               type: "value",
-              name: "采样步",
+              name: reportData.meta?.axis_label || "采样时间步",
               min: stepBounds.min,
               max: stepBounds.max,
               nameLocation: "middle",

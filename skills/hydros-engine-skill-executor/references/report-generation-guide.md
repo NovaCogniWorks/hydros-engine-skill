@@ -7,7 +7,7 @@
 ### HTML 报告
 - **用途**：正式汇报、截图、归档、结果复盘
 - **模板**：`assets/hydros-report-template/index.html`
-- **数据模式**：`index.html + report.data.js` 分离模式
+- **数据模式**：`simulation_report.html` 默认内联真实数据，单文件可直接打开；`report.data.js` 仅作为兼容产物保留在 `data/` 目录
 - **特性**：纵剖面与时序曲线联动、播放、拖拽、暂停、继续
 
 ### Markdown 报告
@@ -80,19 +80,23 @@
 
 ### 目录结构
 ```
-report/
-  ├── index.html          # 报告主文件
-  └── report.data.js      # 数据 payload
-charts/
-  ├── chart1_water_level.png
-  ├── chart2_water_flow.png
-  ├── chart4_gate_opening.png
-  ├── chart5_disturbance_flow.png
-  ├── chart6_heatmap.png
-  └── chart7_longitudinal_profile.png
-data/
-  ├── result.csv          # 原始数据
-  └── summary.json        # 统计摘要
+output/
+  └── <biz_scene_instance_id>/
+      ├── report/
+      │   ├── simulation_report.html
+      │   └── simulation_report.md
+      ├── charts/
+      │   ├── chart1_water_level.png
+      │   ├── chart2_water_flow.png
+      │   ├── chart4_gate_opening.png
+      │   ├── chart5_disturbance_flow.png
+      │   ├── chart6_heatmap.png
+      │   └── chart7_longitudinal_profile.png
+      └── data/
+          ├── <原始CSV文件名>.csv
+          ├── objects.yaml
+          ├── report.data.js        # 兼容产物，可选引用
+          └── analysis_summary.json
 ```
 
 ### 报告结构
@@ -104,7 +108,7 @@ data/
 - 场景 YAML ID
 - 任务状态（中文显示，如"已完成"）
 
-**完整曲线区块**：
+**结果曲线区块**：
 - 必须配套文字解读
 - 解释波动范围、重点对象、控制动作
 - 提供建议关注点
@@ -206,7 +210,7 @@ data/
 ## 模板选择
 
 ### 选择报告模板
-- 用户要求"报告页""汇报页""导出截图""完整曲线"
+- 用户要求"报告页""汇报页""导出截图""结果曲线"
 - 正式汇报需求
 - 模板：`assets/hydros-report-template/index.html`
 

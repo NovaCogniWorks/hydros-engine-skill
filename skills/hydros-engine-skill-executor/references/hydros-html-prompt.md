@@ -82,11 +82,11 @@
 - [../assets/hydros-report-template/index.html](../assets/hydros-report-template/index.html)
 - [../assets/hydros-report-template/report.data.js](../assets/hydros-report-template/report.data.js)
 
-报告页模式建议采用 `index.html + report.data.js` 分离结构：
+报告页模式当前默认采用“`simulation_report.html` 内联真实数据”的单文件交付方式：
 
-- `index.html` 负责排版、样式和图表渲染函数
-- `report.data.js` 负责元数据、摘要文案、异常列表和完整曲线序列
-- 接入真实结果时，优先只替换 `report.data.js`，不要把真实数据硬编码进 HTML
+- `index.html` 仍然是基础模板，负责排版、样式和图表渲染函数
+- 生成正式报告时，把真实 payload 直接内联进 `simulation_report.html`，保证单文件可直接打开
+- `report.data.js` 作为兼容产物保留在 `data/` 目录，需要外部调试或二次接线时再引用
 - 默认输出符合模板的完整版报告页，不要另起自定义轻量页、单页汇报版或仅摘要页。
 
 ## 推荐页面结构
@@ -173,7 +173,7 @@ Tech:
 - 单文件 HTML
 - Tailwind CSS CDN
 - ECharts
-- 外部数据文件 report.data.js
+- 真实数据内联到 HTML
 
 目标:
 - 展示真实仿真结果，不要营销 hero
@@ -183,10 +183,10 @@ Tech:
 页面结构:
 - 顶部摘要区: 任务标题、场景、任务 ID、状态、记录数、对象数
 - 执行摘要: 结论段落 + 关键 bullet
-- 完整曲线区:
-  - 完整 water_level 曲线
-  - 完整 water_flow 曲线
-  - 完整 gate_opening 曲线
+- 结果曲线区:
+  - 水位结果曲线
+  - 流量结果曲线
+  - 闸门结果曲线
 - 异常与建议表
 - 风险等级条
 - 后续动作
@@ -201,8 +201,8 @@ Visualization Rules:
 - tooltip 显示对象名、指标、step、value
 
 Implementation Constraints:
-- 模板使用 index.html + report.data.js 分离结构
-- HTML 里不要硬编码真实数据
+- 模板基于 hydros-report-template/index.html，但正式交付物应把真实 payload 内联到 HTML
+- `report.data.js` 仅作为兼容产物保留，不再作为正式交付的唯一依赖
 - 报告文案、异常表和图表都由 payload 驱动
 - 所有模块必须有数据为空时的兜底提示
 - 不要实现自定义轻量页、单页汇报版或摘要页来替代模板完整版
@@ -233,7 +233,7 @@ Implementation Constraints:
 如果用户只要一个能打开就看的页面：
 
 1. 直接复用 [../assets/hydros-report-template/index.html](../assets/hydros-report-template/index.html)
-2. 替换同目录 [../assets/hydros-report-template/report.data.js](../assets/hydros-report-template/report.data.js)
+2. 按当前脚本实现把真实 payload 内联到 `simulation_report.html`
 3. 优先保留完整曲线、滚动图例和 `dataZoom`
 4. 不要缩减成单页轻量汇报版，默认保持模板完整版结构
 

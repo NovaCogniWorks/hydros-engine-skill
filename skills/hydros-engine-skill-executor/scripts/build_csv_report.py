@@ -30,6 +30,7 @@ from lib.url_utils import normalize_remote_url
 
 
 ROOT = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = ROOT.parent.parent
 TEMPLATE_HTML = ROOT / "assets" / "hydros-report-template" / "index.html"
 CHART_SCRIPT = ROOT / "scripts" / "generate_charts.py"
 SCENARIO_URL_TEMPLATE = "http://47.97.1.45:9000/hydros/mdm/scenarios/{scenario_id}.yaml"
@@ -71,10 +72,39 @@ def prepare_output_dirs(output_dir: Path) -> dict[str, Path]:
     return paths
 
 
+def resolve_task_output_dir(csv_path: Path, df: pd.DataFrame, explicit_output_dir: str | None) -> Path:
+    if explicit_output_dir:
+        return Path(explicit_output_dir).resolve()
+
+    task_id = None
+    if "biz_scenario_instance_id" in df.columns and not df["biz_scenario_instance_id"].dropna().empty:
+        task_id = str(df["biz_scenario_instance_id"].dropna().iloc[0]).strip()
+    safe_task_id = task_id or csv_path.stem
+    return PROJECT_ROOT / "output" / safe_task_id
+
+
 def load_dataframe(csv_path: Path) -> pd.DataFrame:
     df = pd.read_csv(csv_path)
-    df["value"] = pd.to_numeric(df["value"])
-    df["data_index"] = pd.to_numeric(df["data_index"])
+    required_columns = {
+        "biz_scenario_id",
+        "data_index",
+        "object_name",
+        "object_type",
+        "metrics_code",
+        "value",
+    }
+    missing_columns = sorted(required_columns - set(df.columns))
+    if missing_columns:
+        raise ValueError(f"CSV 缺少必需列: {', '.join(missing_columns)}")
+    if df.empty:
+        raise ValueError("CSV 不包含任何数据行")
+
+    df["value"] = pd.to_numeric(df["value"], errors="coerce")
+    df["data_index"] = pd.to_numeric(df["data_index"], errors="coerce")
+    if df["data_index"].dropna().empty:
+        raise ValueError("CSV 中 data_index 全部无效，疑似坏文件或残缺文件")
+    if df["value"].dropna().empty:
+        raise ValueError("CSV 中 value 全部无效，疑似坏文件或残缺文件")
     return df
 
 
@@ -211,14 +241,14 @@ def resolve_runtime_config(
     if stable_csv_interval is not None and stable_csv_interval > 1:
         axis_mode = "calculation_step"
         axis_label = "计算步"
-        axis_note = "CSV 的 data_index 已表现为稀疏计算步号，图表横轴按计算步展示。"
+        axis_note = "CSV 的时间步字段已表现为稀疏计算步号，图表横轴按计算步展示。"
         sample_step_note = f"计算步 {unique_steps[0]} ~ {unique_steps[-1]}"
     elif output_ratio is not None and stable_csv_interval == 1 and expected_sample_count is not None:
         if abs(expected_sample_count - len(unique_steps)) <= 1:
             axis_mode = "output_ordinal"
             axis_label = "输出序号"
             axis_note = (
-                f"CSV 的 data_index 更像输出序号；时间轴按用户参数 total_steps={total_steps}, "
+                f"CSV 的时间步字段更像输出序号；时间轴按用户参数 total_steps={total_steps}, "
                 f"sim_step_size={sim_step_size}, output_step_size={output_step_size} 推导。"
             )
             sample_step_note = f"输出序号 {unique_steps[0]} ~ {unique_steps[-1]}"
@@ -397,7 +427,7 @@ def build_longitudinal_profile_payload(
             "shallowest": shallowest,
         },
         "summary": (
-            f"纵剖面显示末步水面线从 {start_point['name']} 的 {start_point['water_level']} m "
+            f"纵剖面显示最后时刻水面线从 {start_point['name']} 的 {start_point['water_level']} m "
             f"下降到 {end_point['name']} 的 {end_point['water_level']} m，沿程水头损失 "
             f"{round_number(start_point['water_level'] - end_point['water_level'], 3)} m。"
         ),
@@ -651,13 +681,13 @@ def build_report_data(
             {
                 "priority": "高",
                 "object": "CSV 时间轴",
-                "metric": "data_index / step_index / source_time",
+                "metric": "时间步字段 / step_index / source_time",
                 "finding": (
                     f"按参数应约有 {runtime_config.expected_sample_count} 个输出点，但 CSV 实际只有 {raw_sampled_point_count} 个原始采样点；"
                     f"期望总时长 {format_seconds_text(simulation_duration_seconds) or '无法推导'}，"
                     f"按现有采样点最多只能覆盖 {format_seconds_text(sampled_duration_seconds) or '无法推导'}。"
                 ),
-                "advice": "将该 CSV 标记为时间轴不可靠，报告中不要把 data_index 直接解释为真实计算步；建议排查导出逻辑或补齐 step_index。",
+                "advice": "将该 CSV 标记为时间轴不可靠，报告中不要把时间步字段直接解释为真实计算步；建议排查导出逻辑或补齐 step_index。",
             },
         )
     if asset_status["missing"]:
@@ -677,10 +707,10 @@ def build_report_data(
 
     summary_paragraph = (
         f"该 CSV 共包含 {len(df)} 条记录，覆盖 {df['object_name'].nunique()} 个对象、"
-        f"{df['metrics_code'].nunique()} 类指标，展示步范围 {unique_steps[0]} ~ {unique_steps[-1]}，"
+        f"{df['metrics_code'].nunique()} 类指标，展示时间步范围 {unique_steps[0]} ~ {unique_steps[-1]}，"
         f"图表展示共 {display_sampled_point_count} 个采样点。"
-        f"整体未发现负流量和明显水位突跳，主干断面末步水位由 {round_number(qd_last['value'].max())} m "
-        f"降至 {round_number(qd_last['value'].min())} m，沿程水头损失约 {level_drop} m，表现为稳定下泄。"
+        f"整体未发现负流量和明显水位突跳，主干断面在最后时刻的水位从 {round_number(qd_last['value'].max())} m "
+        f"下降到 {round_number(qd_last['value'].min())} m，沿程水头损失约 {level_drop} m，表现为稳定下泄。"
         f"当前更值得关注的是个别退水闸零流量，以及 {highlight_flow_name} 的局部流量大幅波动。"
     )
     if runtime_config.expected_sample_count is not None and runtime_config.expected_sample_count != raw_sampled_point_count:
@@ -690,19 +720,9 @@ def build_report_data(
         )
 
     summary_bullets = [
-        (
-            f"{runtime_config.axis_note} 实际 CSV 采样序号为 {'、'.join(str(step) for step in unique_steps[:5])} ... {unique_steps[-1]}；"
-            f"图表默认剔除了启动占位步 {'、'.join(str(step) for step in display_excluded_steps)}。"
-            if display_excluded_steps
-            else f"{runtime_config.axis_note} 实际 CSV 采样序号为 {'、'.join(str(step) for step in unique_steps[:5])} ... {unique_steps[-1]}。"
-        ),
-        (
-            f"未检测到负流量，water_flow 图表已剔除占位零值步 {'、'.join(str(step) for step in placeholder_flow_steps)}；"
-            f"其余零值仍保留用于识别真实停流对象。"
-            if placeholder_flow_steps
-            else f"未检测到负流量，flow 最小值为 {round_number(flow_display_df['value'].min())} m³/s，渠道主流方向保持一致。"
-        ),
-        f"主干断面末步沿程水头损失约 {level_drop} m，符合上游高、下游低的基本水力梯度。",
+        f"{runtime_config.axis_note} 当前展示时间步为 {'、'.join(str(step) for step in unique_steps[:5])} ... {unique_steps[-1]}。",
+        f"未检测到负流量，流量最小值为 {round_number(flow_display_df['value'].min())} m³/s，渠道主流方向保持一致。",
+        f"主干断面在最后时刻的沿程水头损失约 {level_drop} m，符合上游高、下游低的基本水力梯度。",
         f"{highlight_flow_name} 的流量范围最大，达到 {round_number(highlight_flow_stats['range'])} m³/s，需要结合工况解释其波动来源。",
         (
             f"{len(dynamic_gate_groups)} 个闸门序列存在开度调整，"
@@ -731,7 +751,7 @@ def build_report_data(
         longitudinal_profile["reason"] = profile_error
     if longitudinal_profile["available"]:
         summary_bullets.append(
-            f"纵剖面显示末步水面线沿程平滑下降，已叠加 {longitudinal_profile['meta']['gate_station_count']} 个闸站位置，可直接用于工程复核。"
+            f"纵剖面显示最后时刻水面线沿程平滑下降，已叠加 {longitudinal_profile['meta']['gate_station_count']} 个闸站位置，可直接用于工程复核。"
         )
     else:
         summary_bullets.append(
@@ -869,7 +889,7 @@ def build_report_data(
             {"label": "CSV 覆盖时长", "value": format_seconds_text(sampled_duration_seconds) or "无法推导"},
             {"label": "时长差值", "value": format_seconds_text(duration_gap_seconds) or "无法推导"},
             {"label": "时间轴口径", "value": runtime_config.axis_note},
-            {"label": "展示步范围", "value": f"{unique_steps[0]} ~ {unique_steps[-1]}（共 {display_sampled_point_count} 个展示采样点）"},
+            {"label": "展示时间步范围", "value": f"{unique_steps[0]} ~ {unique_steps[-1]}（共 {display_sampled_point_count} 个展示采样点）"},
             {"label": "结果导出时间", "value": format_datetime_text(runtime_completed_at.to_pydatetime()) or str(df["gmt_create"].max())},
             {"label": "报告完整性", "value": "完整" if asset_status["complete"] else f"缺失 {'、'.join(asset_status['missing'])}"},
             {"label": "分析人", "value": "Codex / Hydros Simulation Skill"},
@@ -883,21 +903,21 @@ def build_report_data(
         "chartInterpretations": {
             "level": {
                 "analysis": (
-                    f"完整 water_level 曲线整体波动不大，{highlight_level_name} 的波动范围最大，为 "
+                    f"水位结果曲线整体波动不大，{highlight_level_name} 的波动范围最大，为 "
                     f"{round_number(highlight_level_stats['range'])} m；默认建议优先查看断面序列的同步变化。"
                 ),
                 "placeholder_steps": placeholder_level_steps,
             },
             "flow": {
                 "analysis": (
-                    f"完整 water_flow 曲线以稳定输水为主，{highlight_flow_name} 的波动范围最大，为 "
+                    f"流量结果曲线以稳定输水为主，{highlight_flow_name} 的波动范围最大，为 "
                     f"{round_number(highlight_flow_stats['range'])} m³/s；真实零值对象仍保留用于识别停流和退水状态。"
                 ),
                 "placeholder_steps": placeholder_flow_steps,
             },
             "gate": {
                 "analysis": (
-                    f"完整 gate_opening 曲线共 {int(gate_df.groupby('object_name').ngroups)} 条，"
+                    f"闸门结果曲线共 {int(gate_df.groupby('object_name').ngroups)} 条，"
                     f"{dynamic_gate_count} 条存在明显开度切换，适合与水位、流量阶段变化联动解释。"
                 ),
                 "placeholder_steps": display_excluded_steps,
@@ -990,7 +1010,7 @@ def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
         )
     else:
         conclusion_axis_line = (
-            f"- 本次 CSV 的 `data_index` 可按{payload['meta'].get('axis_label', '计算步')}解读，时间轴口径清晰；"
+            f"- 本次 CSV 的时间步字段可按{payload['meta'].get('axis_label', '计算步')}解读，时间轴口径清晰；"
             f"本次报告覆盖 `{analysis['step_values'][0]} ~ {analysis['step_values'][-1]}`，共 `{payload['meta']['sampled_point_count']}` 个采样点。"
         )
 
@@ -1023,7 +1043,7 @@ def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
 - 记录数：`{payload['meta']['record_count']}`
 - 对象数：`{payload['meta']['object_count']}`
 - 指标数：`{payload['meta']['metric_count']}`
-- CSV 采样序号：`{analysis['step_values'][0]} ~ {analysis['step_values'][-1]}`，共 `{payload['meta']['sampled_point_count']}` 个采样点
+- 采样时间步范围：`{analysis['step_values'][0]} ~ {analysis['step_values'][-1]}`，共 `{payload['meta']['sampled_point_count']}` 个采样点
 - 配置总计算步：`{payload['meta']['total_steps']}`
 
 ## 执行摘要
@@ -1060,13 +1080,13 @@ def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
 
 ![关键断面水位时序](../charts/chart1_water_level.png)
 
-{payload['chartInterpretations']['level']['analysis']} {'已自动剔除占位零值采样步 `' + '、'.join(str(step) for step in payload['chartInterpretations']['level']['placeholder_steps']) + '`。' if payload['chartInterpretations']['level']['placeholder_steps'] else ''} 主干断面末步从上游 `QD-1#断面#001` 到下游 `QD-14#断面#001` 约下降 `2.80 m`，说明整体水力坡降关系清晰。
+{payload['chartInterpretations']['level']['analysis']} 主干断面在最后时刻从上游 `QD-1#断面#001` 到下游 `QD-14#断面#001` 约下降 `2.80 m`，说明整体水力坡降关系清晰。
 
 ### 2. 流量时序
 
 ![关键断面流量时序](../charts/chart2_water_flow.png)
 
-{payload['chartInterpretations']['flow']['analysis']} {'已自动剔除占位零值采样步 `' + '、'.join(str(step) for step in payload['chartInterpretations']['flow']['placeholder_steps']) + '`。' if payload['chartInterpretations']['flow']['placeholder_steps'] else ''} 主干断面流量大多维持在 `25 ~ 29 m³/s` 区间，没有出现负流量，表明主流方向稳定。
+{payload['chartInterpretations']['flow']['analysis']} 主干断面流量大多维持在 `25 ~ 29 m³/s` 区间，没有出现负流量，表明主流方向稳定。
 
 ### 3. 闸门开度
 
@@ -1143,11 +1163,15 @@ def main() -> None:
     args = parse_args(sys.argv[1:])
 
     csv_path = Path(args.timeseries_csv).resolve()
-    output_dir = Path(args.output_dir).resolve() if args.output_dir else csv_path.parent / f"{csv_path.stem}_report"
+    df = load_dataframe(csv_path)
+    output_dir = resolve_task_output_dir(csv_path, df, args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     paths = prepare_output_dirs(output_dir)
 
-    df = load_dataframe(csv_path)
+    working_csv_path = paths["data"] / csv_path.name
+    if working_csv_path != csv_path:
+        shutil.copy2(csv_path, working_csv_path)
+
     scenario_meta = fetch_scenario_metadata(str(df["biz_scenario_id"].iloc[0]))
     runtime_config = resolve_runtime_config(
         sorted(int(step) for step in df["data_index"].unique().tolist()),
@@ -1155,7 +1179,7 @@ def main() -> None:
         args,
     )
 
-    chart_command = [sys.executable, str(CHART_SCRIPT), str(csv_path), str(paths["charts"])]
+    chart_command = [sys.executable, str(CHART_SCRIPT), str(working_csv_path), str(paths["charts"])]
     if runtime_config.total_steps is not None:
         chart_command.extend(["--total-steps", str(runtime_config.total_steps)])
     if runtime_config.sim_step_size is not None:
@@ -1174,7 +1198,7 @@ def main() -> None:
     profile_error = None
     try:
         profile_dataset = build_longitudinal_dataset(
-            csv_path,
+            working_csv_path,
             objects_yaml_path=objects_yaml_path,
             objects_yaml_url=(scenario_meta or {}).get("objects_yaml_url"),
         )
@@ -1189,7 +1213,7 @@ def main() -> None:
     if charts_stats.exists():
         shutil.move(str(charts_stats), str(paths["data"] / "analysis_stats.json"))
 
-    payload = build_report_data(df, csv_path, runtime_config, profile_dataset, asset_status, profile_error)
+    payload = build_report_data(df, working_csv_path, runtime_config, profile_dataset, asset_status, profile_error)
     write_html_assets(paths["report"], paths["data"], payload)
     write_markdown_report(paths["report"], payload)
 
