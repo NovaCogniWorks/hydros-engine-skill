@@ -33,20 +33,19 @@ description: |
    - Copaw: `workspaces/agent.json`
    这样可以及早发现连接问题，避免在后续流程中遇到意外失败。
 
-2. **Token 配置**：检查用户是否已配置 API token。如果 token 缺失，引导用户：
+2. **Token 配置**：检查用户是否已配置 Bearer token。如果 token 缺失，引导用户：
    - 访问 `https://hydroos.cn/playground/` 注册或登录
    - 在”账号管理”中获取 API token
    - 将 token 提供给我来完成配置
 
-3. **使用正确的工具链**：优先使用已安装的 `hydros-engine-executor` 工具，避免临时直连 MCP 端点。直连容易遇到超时或 Header 配置问题；如果必须直连，至少带上 `Authorization`、`Execution-Source: codex`、`Production-Code: copaw`、`Accept: application/json,text/event-stream`。
+3. **使用正确的工具链**：优先使用已注册的 `hydros-engine-executor` MCP 工具（如 `get_timeseries_data`、`create_simulation_task` 等）。对于 MCP 协议标准方法（如 `resources/read`），需通过 HTTP POST 直接调用 MCP 端点，并带上必要 Header：`Authorization`、`Execution-Source: codex`、`Production-Code: copaw`、`Accept: application/json,text/event-stream`。
 
-4. **结果下载默认路径**：凡是用户要求“下载 CSV”“落盘到本地”“保存结果文件”，默认走标准下载链：
-   - 先调用 `get_timeseries_data`
-   - 再读取返回的 `resource_uri`
-   - 优先用 `read_mcp_resource(server="hydros-engine-executor", uri=resource_uri)` 读取完整 CSV 文本
-   - 如需走底层 HTTP，使用 `https://hydroos.cn/mcps/hydros-engine-executor` 执行 `initialize -> resources/read`，并带齐 `Authorization`、`Execution-Source: codex`、`Production-Code: copaw`、`Accept: application/json,text/event-stream`
-   - 最后一次性写入本地 `.csv`
-   不要把大段 CSV 文本通过终端交互会话、`cat > file`、分块粘贴或聊天输出中转来落盘，这类方式容易被截断，生成坏文件。
+4. **结果下载默认路径**：凡是用户要求"下载 CSV""落盘到本地""保存结果文件"，默认走标准下载链：
+    - 调用 `get_timeseries_data` 获取 `resource_uri`
+    - 通过 MCP 协议 `resources/read` 方法读取 CSV 内容（参见阶段五详细说明）
+    - 从响应 `result.contents[0].text` 提取 CSV 文本
+    - 一次性写入本地 `.csv` 文件
+    不要把大段 CSV 文本通过终端交互会话、`cat > file`、分块粘贴或聊天输出中转来落盘，这类方式容易被截断，生成坏文件。
 
 **详细连接排查指南**：如遇连接问题，参考 [references/mcp-connection-guide.md](references/mcp-connection-guide.md)。
 
@@ -76,15 +75,15 @@ description: |
   - **流式模式（可选）**：利用 Claude 的流式输出特性，在轮询循环中每次查询后立即输出进度条。通过缩短轮询间隔（2-5 秒）和连续输出，让进度更新更流畅。参考 `scripts/streamable_progress_demo.py` 查看两种模式的对比演示。
 - 在追加消息型聊天环境里，”自动显示进度条”的正确含义是：只要本轮仍在持续轮询，代理就必须主动连续发送文本进度条快照，不需要用户再次提醒；如果本轮被用户中断，则自动刷新链条随之中断，恢复后必须先说明”监测曾中断，现已恢复”。
 - 调用 `get_timeseries_data` 前先确认任务状态为 `COMPLETED`。未完成的任务可能返回不完整的数据。
-- `get_timeseries_data` 返回 `resource_uri`。如果本地脚本需要消费数据，继续调用 `read_mcp_resource` 读取 CSV 文本并落盘。这样脚本可以直接处理本地文件。
-- 当目标是“下载 CSV 到本地”而不是立刻做报告时，也必须走同一条标准链路：`get_timeseries_data -> resource_uri -> read_mcp_resource / resources/read -> 本地一次性写盘`。不要把 CSV 内容通过终端标准输入、交互式 `cat`、消息复制粘贴等方式中转。
+- `get_timeseries_data` 返回 `resource_uri`。如果本地脚本需要消费数据，通过 MCP 协议 `resources/read` 方法读取 CSV 文本并落盘。这样脚本可以直接处理本地文件。
+- 当目标是“下载 CSV 到本地”而不是立刻做报告时，也必须走同一条标准链路：`get_timeseries_data -> resource_uri -> resources/read -> 本地一次性写盘`。不要把 CSV 内容通过终端标准输入、交互式 `cat`、消息复制粘贴等方式中转。
 - 如果本地已经存在同名 `.csv`，覆盖前先核对文件大小或行数；如发现明显偏小、行数异常少，优先视为“落盘被截断”，重新按标准链路完整下载，不要在坏文件基础上追加写入。
 - 如果 CSV 下载、读取、写盘或完整性校验任一步失败，立即报告“结果下载失败”，并停止后续分析、图表和报告生成。不要回退到任何默认数据、历史缓存、旧 CSV 或明显残缺的数据文件继续产出结果。
 - 如果用户要做 HTML 报告或其他 HTML 页面，先读 [references/hydros-html-prompt.md](references/hydros-html-prompt.md)。
 - 如果需要理解数据结构、聚合口径或指标映射，先读 [references/hydros-data-contract.md](references/hydros-data-contract.md)。
 - 如果需要快速交付一个可直接打开的页面，优先复用模板资产，而不是从零开始。
 - 需要完整版 HTML 报告、结果曲线展示或可直接打开的单文件页面时，优先复用 [assets/hydros-report-template/index.html](assets/hydros-report-template/index.html) 模板，并按当前脚本实现把真实 payload 内联到 `simulation_report.html`。
-- 当用户明确要“报告”“完整报告”“HTML 报告”“汇报页”时，不要先交付临时分析报告、手写摘要页或简版 HTML 作为最终产物；如果本地 CSV 尚未就位，先完成 `read_mcp_resource -> 落盘 .csv -> build_csv_report.py`，再输出遵循模板的正式报告。
+- 当用户明确要“报告”“完整报告”“HTML 报告”“汇报页”时，不要先交付临时分析报告、手写摘要页或简版 HTML 作为最终产物；如果本地 CSV 尚未就位，先完成 `resources/read -> 落盘 .csv -> build_csv_report.py`，再输出遵循模板的正式报告。
 - HTML 正式报告应尽量包含结果曲线图产物和渠道纵剖面图；若 `chart1_water_level.png`、`chart2_water_flow.png`、`chart4_gate_opening.png`、`chart5_disturbance_flow.png`、`chart6_heatmap.png`、`chart7_longitudinal_profile.png` 中有缺失，仍可交付 HTML，但必须在报告正文里显式写明缺失项、缺失原因和影响范围，不能把缺图问题只留在聊天回复里解释。
 
 ## 资源导航
@@ -297,14 +296,34 @@ INIT -> WAITING_AGENTS -> READY -> STEPPING -> COMPLETED
 
 ### 阶段五：获取结果与分析
 
-1. **数据获取**：确认任务状态为 `COMPLETED`，调用 `get_timeseries_data` 获取 `resource_uri`，再按以下顺序落盘：
-   - 优先：`read_mcp_resource(server="hydros-engine-executor", uri=resource_uri)`
-   - 备选：对 `https://hydroos.cn/mcps/hydros-engine-executor` 执行 `initialize -> resources/read`
-   - 将返回的完整 CSV 文本一次性写入本地 `.csv`
-   - 写完后立刻校验文件大小、行数，必要时补充总记录数核对
-   - 如果用户后续要生成 HTML 报告、Markdown 报告、拓扑页或纵剖面页，则在这一步一并基于场景 YAML 下载并缓存 `objects.yaml`；下载方式同样是“读取 `hydros_objects_modeling_url` -> 规范化 URL -> 标准 HTTP GET 下载 -> 以 UTF-8 一次性写入本地缓存文件”；若本轮前面已经缓存过，则优先复用，不要重复拉取
-   - 如果 CSV 下载失败、资源读取失败、写盘失败，或校验后判断为坏文件/残缺文件，则直接报告阶段五失败并停止，不允许继续生成图表、异常分析或任何正式报告
-   传递用户显式提供的仿真参数给脚本，避免写死默认值。
+1. **数据获取**：
+    - 确认任务状态为 `COMPLETED`
+    - 调用 `get_timeseries_data(biz_scene_instance_id)` 获取 `resource_uri`（如 `hydroengine://downloads/SIM_xxx.csv`）
+    - 通过 MCP 协议的 `resources/read` 方法读取 CSV 内容。这是一个 MCP 标准方法，需通过 HTTP POST 调用：
+
+    ```bash
+    curl -X POST "https://hydroos.cn/mcps/hydros-engine-executor" \
+      -H "Content-Type: application/json" \
+      -H "Authorization: Bearer <token>" \
+      -H "Execution-Source: codex" \
+      -H "Production-Code: copaw" \
+      -H "Accept: application/json" \
+      -d '{
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "resources/read",
+        "params": {
+          "uri": "<resource_uri>"
+        }
+      }'
+    ```
+
+    - 从响应中提取 `result.contents[0].text` 字段，即为完整 CSV 文本
+    - 将 CSV 内容一次性写入本地 `.csv` 文件
+    - 写完后立刻校验文件大小、行数，必要时补充总记录数核对
+    - 如果用户后续要生成 HTML 报告、Markdown 报告、拓扑页或纵剖面页，则在这一步一并基于场景 YAML 下载并缓存 `objects.yaml`；下载方式同样是"读取 `hydros_objects_modeling_url` -> 规范化 URL -> 标准 HTTP GET 下载 -> 以 UTF-8 一次性写入本地缓存文件"；若本轮前面已经缓存过，则优先复用，不要重复拉取
+    - 如果 CSV 下载失败、资源读取失败、写盘失败，或校验后判断为坏文件/残缺文件，则直接报告阶段五失败并停止，不允许继续生成图表、异常分析或任何正式报告
+    - 传递用户显式提供的仿真参数给脚本，避免写死默认值
 
 2. **统计摘要**：生成总记录数、采样步数、对象数、指标数、异常点数量。
 
