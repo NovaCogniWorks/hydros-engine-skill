@@ -421,6 +421,7 @@ def build_longitudinal_profile_payload(
         "chartImage": "../charts/chart7_longitudinal_profile.png",
         "meta": meta,
         "gateMarkers": profile_dataset["gate_markers"],
+        "objectAnnotations": profile_dataset.get("object_annotations", []),
         "points": current_frame["points"],
         "frames": frames,
         "stepValues": [frame["step"] for frame in frames],
@@ -694,13 +695,13 @@ def build_report_data(
             {
                 "priority": "高",
                 "object": "CSV 时间轴",
-                "metric": "时间步字段 / step_index / source_time",
+                "metric": "时间步字段 / 计算时间步 / 源业务时间",
                 "finding": (
                     f"按参数应约有 {runtime_config.expected_sample_count} 个输出点，但 CSV 实际只有 {raw_sampled_point_count} 个原始采样点；"
                     f"期望总时长 {format_seconds_text(simulation_duration_seconds) or '无法推导'}，"
                     f"按现有采样点最多只能覆盖 {format_seconds_text(sampled_duration_seconds) or '无法推导'}。"
                 ),
-                "advice": "将该 CSV 标记为时间轴不可靠，报告中不要把时间步字段直接解释为真实计算步；建议排查导出逻辑或补齐 step_index。",
+                "advice": "将该 CSV 标记为时间轴不可靠，报告中不要把时间步字段直接解释为真实计算步；建议排查导出逻辑或补齐计算时间步字段。",
             },
         )
     if asset_status["missing"]:

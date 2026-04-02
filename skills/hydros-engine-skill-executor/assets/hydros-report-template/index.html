@@ -251,6 +251,10 @@
         font-weight: 600;
       }
 
+      .anomaly-table {
+        table-layout: fixed;
+      }
+
       .table-shell tbody tr:nth-child(odd) {
         background: rgba(248, 251, 252, 0.88);
       }
@@ -261,13 +265,30 @@
 
       .anomaly-table th,
       .anomaly-table td {
-        vertical-align: top;
+        vertical-align: middle;
+        text-align: center;
+        white-space: normal;
+        word-break: break-word;
+        overflow-wrap: anywhere;
+      }
+
+      .anomaly-table th {
+        text-align: center;
+      }
+
+      .anomaly-table td > *,
+      .anomaly-table th > * {
+        margin-left: auto;
+        margin-right: auto;
       }
 
       .metric-pill {
         display: inline-flex;
         align-items: center;
-        white-space: nowrap;
+        justify-content: center;
+        max-width: 100%;
+        white-space: normal;
+        text-align: center;
       }
 
       .chart-legend {
@@ -280,6 +301,24 @@
 
       .chart-stage {
         overflow: hidden;
+        min-width: 0;
+      }
+
+      .chart-canvas {
+        width: 100%;
+        min-width: 0;
+      }
+
+      .chart-canvas--wide {
+        height: clamp(320px, 46vw, 540px);
+      }
+
+      .chart-canvas--standard {
+        height: clamp(300px, 36vw, 440px);
+      }
+
+      .chart-canvas--compact {
+        height: clamp(260px, 30vw, 390px);
       }
 
       .chart-axis-label {
@@ -358,11 +397,13 @@
 
         .anomaly-table td {
           display: flex;
-          align-items: flex-start;
-          justify-content: space-between;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
           gap: 14px;
           padding: 0;
           border: 0;
+          text-align: center;
         }
 
         .anomaly-table td + td {
@@ -371,19 +412,19 @@
 
         .anomaly-table td::before {
           content: attr(data-label);
-          flex: 0 0 4.75rem;
-          min-width: 4.75rem;
+          flex: none;
+          min-width: 0;
           font-size: 11px;
           font-weight: 700;
           letter-spacing: 0.08em;
           text-transform: uppercase;
           color: rgba(16, 35, 50, 0.48);
+          text-align: center;
         }
 
         .anomaly-table td[data-label="现象"],
         .anomaly-table td[data-label="建议"] {
-          flex-direction: column;
-          align-items: flex-start;
+          align-items: center;
           gap: 6px;
         }
 
@@ -395,6 +436,18 @@
 
         .anomaly-table .metric-pill {
           max-width: 100%;
+        }
+
+        .chart-canvas--wide {
+          height: clamp(280px, 68vw, 420px);
+        }
+
+        .chart-canvas--standard {
+          height: clamp(260px, 64vw, 380px);
+        }
+
+        .chart-canvas--compact {
+          height: clamp(240px, 56vw, 340px);
         }
       }
     </style>
@@ -413,8 +466,8 @@
 
         <section id="headlineCards" class="grid gap-4 border-b border-line/80 bg-white/36 px-6 py-6 lg:grid-cols-4 lg:px-10"></section>
 
-        <section class="grid gap-6 px-6 py-8 lg:grid-cols-[minmax(0,1.3fr)_360px] lg:px-10">
-          <div class="space-y-6">
+        <section class="grid gap-6 px-6 py-8 lg:grid-cols-[minmax(0,1fr)_minmax(280px,360px)] xl:grid-cols-[minmax(0,1.3fr)_360px] lg:px-10">
+          <div class="min-w-0 space-y-6">
             <article class="section-shell rounded-[30px] p-5">
               <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                 <div>
@@ -433,7 +486,7 @@
               <div>
                 <p class="text-xs font-semibold uppercase tracking-[0.24em] text-primary/70">Section 02</p>
                 <h2 class="mt-2 text-2xl font-semibold">渠道纵剖面</h2>
-                <p class="mt-2 text-sm text-ink/58">叠加断面顶高程、底高程、水面线、闸站位置与流向</p>
+                <p class="mt-2 text-sm text-ink/58">叠加断面顶高程、底高程、水体填充、闸站位置、对象标注与流向</p>
               </div>
               <div class="soft-panel mt-4 rounded-[24px] px-4 py-4">
                 <div class="flex flex-col gap-4 lg:flex-row lg:items-center">
@@ -459,11 +512,12 @@
                   <div class="chart-legend text-sm font-medium text-ink/72">
                     <span class="inline-flex items-center gap-2"><span class="h-0.5 w-6 border-t-2 border-dashed border-[#637487]"></span>断面顶高程</span>
                     <span class="inline-flex items-center gap-2"><span class="h-0.5 w-6 border-t-2 border-[#87603d]"></span>断面底高程</span>
-                    <span class="inline-flex items-center gap-2"><span class="h-0.5 w-6 border-t-[3px] border-[#1c7fb5]"></span>当前步水位</span>
+                    <span class="inline-flex items-center gap-2"><span class="h-3 w-6 rounded-full bg-[#1c7fb5]/18"></span>当前步水体</span>
                     <span class="inline-flex items-center gap-2"><span class="h-4 w-0 border-l-2 border-dashed border-[#a5456f]"></span>闸站位置</span>
+                    <span class="inline-flex items-center gap-2"><span class="h-2.5 w-2.5 rounded-full bg-[#176a87]"></span>对象标注</span>
                   </div>
                   <div class="chart-stage mt-1 rounded-[20px] border border-line/70 bg-white/42 px-1 py-1 lg:px-1.5 lg:py-1.5">
-                    <div id="longitudinalChart" class="h-[420px] lg:h-[470px]"></div>
+                    <div id="longitudinalChart" class="chart-canvas chart-canvas--wide"></div>
                   </div>
                 </div>
                 <div class="grid gap-4 lg:grid-cols-2">
@@ -499,7 +553,7 @@
                     <select id="levelTypeSelect" class="shrink-0 rounded-lg border border-line px-3 py-1.5 text-xs text-ink/72 focus:outline-primary"></select>
                     <div id="levelObjectList" class="flex flex-wrap gap-1.5 max-h-[96px] overflow-y-auto"></div>
                   </div>
-                  <div id="levelChart" class="mt-2 h-[420px]"></div>
+                  <div id="levelChart" class="chart-canvas chart-canvas--standard mt-2"></div>
                   <div id="levelInterpretation" class="soft-panel mt-3 rounded-[18px] px-4 py-3 text-sm leading-7 text-ink/72"></div>
                 </div>
                 <div class="soft-panel rounded-[24px] p-4">
@@ -509,13 +563,13 @@
                     <select id="flowTypeSelect" class="shrink-0 rounded-lg border border-line px-3 py-1.5 text-xs text-ink/72 focus:outline-primary"></select>
                     <div id="flowObjectList" class="flex flex-wrap gap-1.5 max-h-[96px] overflow-y-auto"></div>
                   </div>
-                  <div id="flowChart" class="mt-2 h-[420px]"></div>
+                  <div id="flowChart" class="chart-canvas chart-canvas--standard mt-2"></div>
                   <div id="flowInterpretation" class="soft-panel mt-3 rounded-[18px] px-4 py-3 text-sm leading-7 text-ink/72"></div>
                 </div>
                 <div class="soft-panel rounded-[24px] p-4">
                   <h3 id="gateCardTitle" class="text-base font-semibold">闸门开度响应</h3>
                   <p id="gateCardDesc" class="mt-1 text-sm text-ink/62">查看闸门控制策略是否存在滞后或平台期。</p>
-                  <div id="gateChart" class="mt-4 h-[380px]"></div>
+                  <div id="gateChart" class="chart-canvas chart-canvas--compact mt-4"></div>
                   <div id="gateInterpretation" class="soft-panel mt-3 rounded-[18px] px-4 py-3 text-sm leading-7 text-ink/72"></div>
                 </div>
               </div>
@@ -548,7 +602,7 @@
 
           </div>
 
-          <aside class="space-y-6">
+          <aside class="min-w-0 space-y-6">
             <article class="section-shell-dark rounded-[30px] px-5 py-5 text-white">
               <p class="text-xs font-semibold uppercase tracking-[0.24em] text-white/58">任务概览</p>
               <dl class="mt-4 space-y-3 text-sm" id="snapshotPanel"></dl>
@@ -644,6 +698,17 @@
         };
       }
 
+      function computeAxisExtent(values) {
+        const numericValues = collectNumericValues(values);
+        if (!numericValues.length) {
+          return { min: null, max: null };
+        }
+        return {
+          min: Number(Math.min(...numericValues).toFixed(3)),
+          max: Number(Math.max(...numericValues).toFixed(3)),
+        };
+      }
+
       function normalizeStepValue(value) {
         if (typeof value === "number") return value;
         const match = String(value ?? "").match(/-?\d+(?:\.\d+)?/);
@@ -675,8 +740,8 @@
         water_flow: "流量",
         gate_opening: "闸门开度",
         data_index: "采样时间步",
-        step_index: "计算步",
-        source_time: "源时间",
+        step_index: "计算时间步",
+        source_time: "源业务时间",
       };
       const termKeys = Object.keys(termLabels).sort((a, b) => b.length - a.length);
 
@@ -745,6 +810,9 @@
       }
 
       window.addEventListener("resize", scheduleChartResize, { passive: true });
+      window.addEventListener("orientationchange", scheduleChartResize, { passive: true });
+      window.addEventListener("transitionend", scheduleChartResize, { passive: true });
+      window.visualViewport?.addEventListener("resize", scheduleChartResize, { passive: true });
 
       function buildStepMarkLine(step, options = {}) {
         const data = [];
@@ -1039,13 +1107,138 @@
         }
 
         const chart = registerChart(createChart("longitudinalChart"), "longitudinalChart");
+        const longitudinalZoomState = { start: 0, end: 100 };
         const frameMap = new Map((profile.frames || []).map((frame) => [Number(frame.step), frame]));
         const allFramePoints = (profile.frames || []).flatMap((frame) => frame.points || []);
         const staticPoints = allFramePoints.length ? allFramePoints : profile.points || [];
-        const xBounds = computeAxisBounds(
-          staticPoints.map((item) => item.location),
-          { paddingRatio: 0.02, minPadding: 0.15 }
-        );
+        const xBounds = computeAxisExtent(staticPoints.map((item) => item.location));
+        const getCoordClipRect = (params) => ({
+          x: params.coordSys.x,
+          y: params.coordSys.y,
+          width: params.coordSys.width,
+          height: params.coordSys.height,
+        });
+        const clipPolygonToCoordSys = (polygon, params) =>
+          echarts.graphic.clipPointsByRect(polygon, getCoordClipRect(params));
+        const clipPolylineToCoordSys = (polyline, params) =>
+          echarts.graphic.clipPointsByRect(polyline, getCoordClipRect(params));
+        const clipVerticalLineToCoordSys = (x, y1, y2, params) => {
+          const clipRect = getCoordClipRect(params);
+          const yMin = clipRect.y;
+          const yMax = clipRect.y + clipRect.height;
+          if (x < clipRect.x || x > clipRect.x + clipRect.width) {
+            return null;
+          }
+          const clippedY1 = Math.max(yMin, Math.min(yMax, y1));
+          const clippedY2 = Math.max(yMin, Math.min(yMax, y2));
+          if ((y1 < yMin && y2 < yMin) || (y1 > yMax && y2 > yMax)) {
+            return null;
+          }
+          return { x, y1: clippedY1, y2: clippedY2, clipRect };
+        };
+        const annotationTypeColors = {
+          UnifiedCanal: "#176a87",
+          Pipe: "#8b623d",
+          GateStation: "#a5456f",
+          DisturbanceNode: "#2b8a57",
+        };
+        const getAnnotationColor = (type) => annotationTypeColors[type] || "#4c6476";
+        const annotationTypeLabels = {
+          UnifiedCanal: "渠道",
+          Pipe: "倒虹吸/管道",
+          GateStation: "闸站",
+          DisturbanceNode: "分水口/退水闸",
+        };
+        const annotationParamLabels = {
+          manning_n: "曼宁系数",
+          length: "长度",
+          loss_coeff: "损失系数",
+          orifice_count: "孔口数量",
+          single_orifice_height: "单孔高度",
+          single_orifice_width: "单孔宽度",
+          cross_section_type: "断面形式",
+          boundary_type: "边界类型",
+          min_sectional_area: "最小过水面积",
+          t_bottom_width: "底宽",
+          t_side_slope_ratio: "边坡系数",
+        };
+        const localizeAnnotationType = (type) => annotationTypeLabels[type] || type;
+        const localizeAnnotationParams = (params) =>
+          (params || []).map((item) => `${annotationParamLabels[item.key] || item.key}=${item.value}`).join("，");
+        const positionFloatingTooltip = (point, params, dom, rect, size) => {
+          const [mouseX, mouseY] = point;
+          const viewWidth = size.viewSize[0];
+          const viewHeight = size.viewSize[1];
+          const boxWidth = size.contentSize[0];
+          const boxHeight = size.contentSize[1];
+          const offsetX = 18;
+          const offsetY = 18;
+          let x = mouseX + offsetX;
+          let y = mouseY - boxHeight - offsetY;
+          if (x + boxWidth > viewWidth - 12) {
+            x = Math.max(12, mouseX - boxWidth - offsetX);
+          }
+          if (y < 12) {
+            y = Math.min(viewHeight - boxHeight - 12, mouseY + offsetY);
+          }
+          return [x, y];
+        };
+        const formatAnnotationTooltip = (item) =>
+          [
+            `<strong>${escapeHtml(item.name)}</strong>`,
+            `类型: ${escapeHtml(localizeAnnotationType(item.type))}`,
+            item.mode === "range"
+              ? `范围: ${escapeHtml(item.start_section_name)} → ${escapeHtml(item.end_section_name)}`
+              : `位置: ${Number(item.location).toFixed(3)} km`,
+            item.params?.length ? `参数: ${escapeHtml(localizeAnnotationParams(item.params))}` : "参数: 无",
+          ].join("<br>");
+        const interpolateWaterLevel = (profilePoints, location) => {
+          if (!profilePoints.length) return null;
+          if (location <= profilePoints[0].location) return profilePoints[0].water_level;
+          if (location >= profilePoints[profilePoints.length - 1].location) {
+            return profilePoints[profilePoints.length - 1].water_level;
+          }
+          for (let index = 0; index < profilePoints.length - 1; index += 1) {
+            const left = profilePoints[index];
+            const right = profilePoints[index + 1];
+            if (location < left.location || location > right.location) continue;
+            const span = right.location - left.location;
+            if (!span) return left.water_level;
+            const ratio = (location - left.location) / span;
+            return left.water_level + (right.water_level - left.water_level) * ratio;
+          }
+          return null;
+        };
+        const buildRangeObjectAnnotations = (profilePoints) =>
+          (profile.objectAnnotations || [])
+            .filter((item) => item.mode === "range")
+            .map((item, index) => {
+              const startPoint = profilePoints.find((point) => point.name === item.start_section_name);
+              const endPoint = profilePoints.find((point) => point.name === item.end_section_name);
+              if (!startPoint || !endPoint) return null;
+              return {
+                ...item,
+                index,
+                start_water_level: startPoint.water_level,
+                end_water_level: endPoint.water_level,
+              };
+            })
+            .filter(Boolean);
+        const buildPointObjectAnnotations = (profilePoints) =>
+          (profile.objectAnnotations || [])
+            .filter((item) => item.mode === "point")
+            .map((item, index) => {
+              const location = item.location ?? item.start_location;
+              const waterLevel = interpolateWaterLevel(profilePoints, location);
+              if (location == null || waterLevel == null) return null;
+              return {
+                ...item,
+                index,
+                location,
+                water_level: waterLevel,
+              };
+            })
+            .filter(Boolean);
         const gateLineSegments = (profile.gateMarkers || []).map((item) => [
           item.location,
           0,
@@ -1065,19 +1258,23 @@
             const x = api.coord([api.value(0), api.value(1)])[0];
             const yBottom = api.coord([api.value(0), api.value(1)])[1];
             const yTop = api.coord([api.value(0), api.value(2)])[1];
+            const clippedLine = clipVerticalLineToCoordSys(x, yBottom, yTop, params);
+            if (!clippedLine) {
+              return null;
+            }
             return {
               type: "group",
               children: [
                 {
                   type: "line",
-                  shape: { x1: x, y1: yBottom, x2: x, y2: yTop },
+                  shape: { x1: clippedLine.x, y1: clippedLine.y1, x2: clippedLine.x, y2: clippedLine.y2 },
                   style: { stroke: chartTheme.gate, lineWidth: 1.4, lineDash: [6, 4], opacity: 0.92 },
                 },
                 {
                   type: "text",
                   style: {
-                    x,
-                    y: yTop - 8,
+                    x: clippedLine.x,
+                    y: Math.max(clippedLine.clipRect.y + 10, clippedLine.y2 - 8),
                     text: stationKey,
                     fill: chartTheme.gate,
                     textAlign: "center",
@@ -1089,6 +1286,125 @@
             };
           },
           data: gateLineSegments,
+        });
+        const buildObjectRangeSeries = (items) => ({
+          name: "对象范围",
+          type: "custom",
+          silent: false,
+          animation: false,
+          tooltip: {
+            show: true,
+            trigger: "item",
+            confine: true,
+            enterable: false,
+            transitionDuration: 0,
+            extraCssText: "pointer-events:none;",
+            position: positionFloatingTooltip,
+            formatter: (params) => formatAnnotationTooltip(params.data.meta),
+          },
+          z: 6.6,
+          renderItem: (params, api) => {
+            const clippedPolyline = clipPolylineToCoordSys(
+              [
+                api.coord([api.value(0), api.value(1)]),
+                api.coord([api.value(2), api.value(3)]),
+              ],
+              params
+            );
+            if (!clippedPolyline?.length || clippedPolyline.length < 2) {
+              return null;
+            }
+            const color = getAnnotationColor(api.value(5));
+            const startPoint = clippedPolyline[0];
+            const endPoint = clippedPolyline[clippedPolyline.length - 1];
+            return {
+              type: "group",
+              children: [
+                {
+                  type: "line",
+                  shape: { x1: startPoint[0], y1: startPoint[1], x2: endPoint[0], y2: endPoint[1] },
+                  style: { stroke: color, lineWidth: 2.4, opacity: 0.78 },
+                },
+                {
+                  type: "circle",
+                  shape: { cx: startPoint[0], cy: startPoint[1], r: 3.2 },
+                  style: { fill: color, stroke: "#ffffff", lineWidth: 1.2 },
+                },
+                {
+                  type: "circle",
+                  shape: { cx: endPoint[0], cy: endPoint[1], r: 3.2 },
+                  style: { fill: color, stroke: "#ffffff", lineWidth: 1.2 },
+                },
+              ],
+            };
+          },
+          data: items.map((item) => ({
+            value: [
+              item.start_location,
+              item.start_water_level,
+              item.end_location,
+              item.end_water_level,
+              item.name,
+              item.type,
+              item.index,
+            ],
+            meta: item,
+          })),
+        });
+        const buildObjectPointSeries = (items) => ({
+          name: "对象节点",
+          type: "custom",
+          silent: false,
+          animation: false,
+          tooltip: {
+            show: true,
+            trigger: "item",
+            confine: true,
+            enterable: false,
+            transitionDuration: 0,
+            extraCssText: "pointer-events:none;",
+            position: positionFloatingTooltip,
+            formatter: (params) => formatAnnotationTooltip(params.data.meta),
+          },
+          z: 6.7,
+          renderItem: (params, api) => {
+            const clipRect = getCoordClipRect(params);
+            const point = api.coord([api.value(0), api.value(1)]);
+            if (
+              point[0] < clipRect.x ||
+              point[0] > clipRect.x + clipRect.width ||
+              point[1] < clipRect.y ||
+              point[1] > clipRect.y + clipRect.height
+            ) {
+              return null;
+            }
+            const color = getAnnotationColor(api.value(3));
+            return {
+              type: "group",
+              children: [
+                {
+                  type: "circle",
+                  shape: { cx: point[0], cy: point[1], r: 4.2 },
+                  style: { fill: color, stroke: "#ffffff", lineWidth: 1.4 },
+                },
+              ],
+            };
+          },
+          data: items.map((item) => ({
+            value: [item.location, item.water_level, item.name, item.type, item.index],
+            meta: item,
+          })),
+        });
+
+        chart.on("dataZoom", (event) => {
+          const zoomPayload = Array.isArray(event?.batch) ? event.batch[0] : event;
+          if (!zoomPayload) return;
+          if (Number.isFinite(Number(zoomPayload.start))) {
+            longitudinalZoomState.start = Number(zoomPayload.start);
+          }
+          if (Number.isFinite(Number(zoomPayload.end))) {
+            longitudinalZoomState.end = Number(zoomPayload.end);
+          }
         });
 
         interactionState.api.updateLongitudinal = (step) => {
@@ -1128,6 +1444,8 @@
             item.water_level,
             points[index + 1].water_level,
           ]);
+          const objectRangeAnnotations = buildRangeObjectAnnotations(points);
+          const objectPointAnnotations = buildPointObjectAnnotations(points);
 
           document.getElementById("longitudinalSummary").textContent =
             `当前展示步 ${formatStepLabel(step)}，水面线从 ${startPoint.name} 的 ${startPoint.water_level} m 下降到 ` +
@@ -1138,6 +1456,7 @@
             `主干渠当前展示时刻沿程水头损失约 ${headLoss} m，整体保持稳定下泄。`,
             `共匹配 ${points.length} 个断面，线路总长约 ${profile.meta.distance_km} km。`,
             `已叠加 ${profile.meta.gate_station_count} 个闸站位置，流向为 ${profile.meta.flow_direction}。`,
+            `额外叠加 ${profile.objectAnnotations?.length || 0} 个对象标注，显示名称、类型和关键参数。`,
             `最大水深断面为 ${deepest.name}，最小水深断面为 ${shallowest.name}。`,
           ]
             .map((text) => `<div class="soft-panel rounded-[18px] px-4 py-3">${text}</div>`)
@@ -1146,7 +1465,7 @@
           chart.setOption({
             animationDuration: 350,
             animationDurationUpdate: 350,
-            grid: { left: 38, right: 34, top: 28, bottom: 44, containLabel: true },
+            grid: { left: 38, right: 34, top: 28, bottom: 96, containLabel: true },
             graphic: [
               {
                 type: "rect",
@@ -1184,6 +1503,25 @@
               },
             },
             legend: { show: false },
+            dataZoom: [
+              {
+                type: "inside",
+                xAxisIndex: 0,
+                filterMode: "none",
+                start: longitudinalZoomState.start,
+                end: longitudinalZoomState.end,
+              },
+              {
+                type: "slider",
+                xAxisIndex: 0,
+                height: 22,
+                bottom: 22,
+                borderColor: "transparent",
+                fillerColor: "rgba(28, 127, 181, 0.14)",
+                start: longitudinalZoomState.start,
+                end: longitudinalZoomState.end,
+              },
+            ],
             xAxis: {
               type: "value",
               min: xBounds.min,
@@ -1238,9 +1576,13 @@
                     api.coord([api.value(1), api.value(4)]),
                     api.coord([api.value(1), api.value(2)]),
                   ];
+                  const clippedPolygon = clipPolygonToCoordSys(polygon, params);
+                  if (!clippedPolygon?.length) {
+                    return null;
+                  }
                   return {
                     type: "polygon",
-                    shape: { points: polygon },
+                    shape: { points: clippedPolygon },
                     style: { fill: chartTheme.bedFill, stroke: "none" },
                   };
                 },
@@ -1258,9 +1600,13 @@
                     api.coord([api.value(1), api.value(5)]),
                     api.coord([api.value(1), api.value(3)]),
                   ];
+                  const clippedPolygon = clipPolygonToCoordSys(polygon, params);
+                  if (!clippedPolygon?.length) {
+                    return null;
+                  }
                   return {
                     type: "polygon",
-                    shape: { points: polygon },
+                    shape: { points: clippedPolygon },
                     style: { fill: chartTheme.waterFill, stroke: "none" },
                   };
                 },
@@ -1271,6 +1617,7 @@
                 type: "line",
                 showSymbol: true,
                 symbolSize: 5,
+                clip: true,
                 lineStyle: { color: chartTheme.crest, width: 2, type: "dashed" },
                 itemStyle: { color: chartTheme.crest },
                 z: 4,
@@ -1281,26 +1628,19 @@
                 type: "line",
                 showSymbol: true,
                 symbolSize: 6,
+                clip: true,
                 lineStyle: { color: chartTheme.bed, width: 2.2 },
                 itemStyle: { color: chartTheme.bed },
                 z: 5,
                 data: points.map((item) => [item.location, item.bottom_elevation]),
               },
-              {
-                name: "当前步水位",
-                type: "line",
-                smooth: true,
-                showSymbol: true,
-                symbolSize: 7,
-                lineStyle: { color: chartTheme.water, width: 3 },
-                itemStyle: { color: chartTheme.water },
-                z: 6,
-                data: points.map((item) => [item.location, item.water_level]),
-              },
+              buildObjectRangeSeries(objectRangeAnnotations),
+              buildObjectPointSeries(objectPointAnnotations),
               {
                 name: "起点/终点",
                 type: "scatter",
                 symbolSize: 10,
+                clip: true,
                 z: 8,
                 tooltip: { show: false },
                 itemStyle: { color: chartTheme.water, borderColor: "#ffffff", borderWidth: 2 },
@@ -1448,9 +1788,8 @@
             selectedSeriesMeta.map((item) => item.data.map((point) => point[1])),
             { paddingRatio: 0.12, minPadding: 0.03 }
           );
-          const stepBounds = computeAxisBounds(
-            selectedSeriesMeta.map((item) => item.data.map((point) => normalizeStepValue(point[0]) ?? point[0])),
-            { paddingRatio: 0.035, minPadding: 12 }
+          const stepBounds = computeAxisExtent(
+            selectedSeriesMeta.map((item) => item.data.map((point) => normalizeStepValue(point[0]) ?? point[0]))
           );
           renderCurveInterpretation("levelInterpretation", chartInterpretations.level, selectedSeriesMeta, levelTypeSelect.value);
           if (selectedSeries[0] && step != null) {
@@ -1525,9 +1864,8 @@
             selectedSeriesMeta.map((item) => item.data.map((point) => point[1])),
             { paddingRatio: 0.14, minPadding: 0.2 }
           );
-          const stepBounds = computeAxisBounds(
-            selectedSeriesMeta.map((item) => item.data.map((point) => normalizeStepValue(point[0]) ?? point[0])),
-            { paddingRatio: 0.035, minPadding: 12 }
+          const stepBounds = computeAxisExtent(
+            selectedSeriesMeta.map((item) => item.data.map((point) => normalizeStepValue(point[0]) ?? point[0]))
           );
           renderCurveInterpretation("flowInterpretation", chartInterpretations.flow, selectedSeriesMeta, flowTypeSelect.value);
           if (selectedSeries[0]) {
@@ -1608,9 +1946,8 @@
             gateSeries.map((series) => series.data.map((point) => point[1])),
             { paddingRatio: 0.12, minPadding: 0.02 }
           );
-          const stepBounds = computeAxisBounds(
-            gateSeries.map((series) => series.data.map((point) => normalizeStepValue(point[0]) ?? point[0])),
-            { paddingRatio: 0.035, minPadding: 12 }
+          const stepBounds = computeAxisExtent(
+            gateSeries.map((series) => series.data.map((point) => normalizeStepValue(point[0]) ?? point[0]))
           );
           if (gateChartSeries[0] && step != null) {
             gateChartSeries[0] = {

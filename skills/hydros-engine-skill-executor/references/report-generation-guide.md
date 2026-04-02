@@ -131,7 +131,7 @@ output/
 
 1. 用户显式参数（`total_steps` / `sim_step_size` / `output_step_size`）
 2. 场景 YAML 配置
-3. CSV 自身可靠字段（如非空的 `step_index`）
+3. CSV 自身可靠字段（如非空的 `step_index`，即计算时间步）
 4. 仅展示离散采样序号
 
 **禁止**：写死 `120 秒/步` 之类的默认值
@@ -220,8 +220,8 @@ output/
 
 **识别条件**：
 - `data_index` 看起来只是输出序号
-- `step_index` 为空
-- `source_time` 出现异常未来时间
+- `step_index`（计算时间步）为空
+- `source_time`（源业务时间）出现异常未来时间
 
 **处理方式**：
 - 明确告诉用户"CSV 时间轴不可靠"

@@ -150,6 +150,132 @@ def parse_cross_sections(text: str) -> list[dict]:
     return sections
 
 
+def extract_objects_section(text: str) -> str:
+    marker = "\nobjects:\n"
+    start = text.find(marker)
+    if start == -1:
+        marker = "objects:\n"
+        start = text.find(marker)
+    if start == -1:
+        return ""
+    return text[start + len(marker):]
+
+
+def split_object_blocks(text: str) -> list[str]:
+    section = extract_objects_section(text)
+    if not section:
+        return []
+    return [block for block in re.split(r"(?m)^ -\s*$", section) if block.strip()]
+
+
+def extract_block_value(block: str, key: str) -> str | None:
+    match = re.search(rf"(?m)^  {re.escape(key)}:\s*(.*?)\s*$", block)
+    return match.group(1).strip() if match else None
+
+
+def extract_nested_block(block: str, key: str) -> str:
+    lines = block.splitlines()
+    nested_lines: list[str] = []
+    capture = False
+    for line in lines:
+        if re.match(rf"^  {re.escape(key)}:\s*$", line):
+            capture = True
+            continue
+        if capture:
+            if re.match(r"^  [A-Za-z_][A-Za-z0-9_]*:\s*", line):
+                break
+            nested_lines.append(line)
+    return "\n".join(nested_lines)
+
+
+def parse_scalar_parameters(block: str) -> list[dict[str, str]]:
+    parameters: list[dict[str, str]] = []
+    parameters_block = extract_nested_block(block, "parameters")
+    for line in parameters_block.splitlines():
+        match = re.match(r"^    ([A-Za-z_][A-Za-z0-9_]*):\s*(.+?)\s*$", line)
+        if not match:
+            continue
+        key, value = match.groups()
+        if key == "location":
+            continue
+        parameters.append({"key": key, "value": value})
+    return parameters
+
+
+def parse_object_annotations(text: str, sections: list[dict]) -> list[dict]:
+    sections_by_id = {item["id"]: item for item in sections}
+    sections_by_name = {item["name"]: item for item in sections}
+    annotations: list[dict] = []
+
+    for block in split_object_blocks(text):
+        object_type = extract_block_value(block, "type")
+        object_name = extract_block_value(block, "name")
+        if not object_type or not object_name:
+            continue
+
+        params = parse_scalar_parameters(block)
+        param_summary = " · ".join(f"{item['key']}={item['value']}" for item in params)
+
+        if object_type == "DisturbanceNode":
+            location_match = re.search(r"(?m)^    location:\s*([-\d.]+)\s*$", extract_nested_block(block, "parameters"))
+            if not location_match:
+                continue
+            annotations.append(
+                {
+                    "mode": "point",
+                    "name": object_name,
+                    "type": object_type,
+                    "location": round(float(location_match.group(1)) / 1000, 3),
+                    "params": params,
+                    "param_summary": param_summary,
+                }
+            )
+            continue
+
+        child_block = extract_nested_block(block, "cross_section_children")
+        child_ids = [int(value) for value in re.findall(r"(?m)^\s+id:\s*(\d+)\s*$", child_block)]
+        child_names = [value.strip() for value in re.findall(r"(?m)^\s+name:\s*(.+?)\s*$", child_block)]
+        if not child_ids or not child_names:
+            continue
+
+        start_section = sections_by_id.get(child_ids[0]) or sections_by_name.get(child_names[0])
+        end_section = sections_by_id.get(child_ids[-1]) or sections_by_name.get(child_names[-1])
+        if not start_section or not end_section:
+            continue
+
+        mode = "range"
+        location = None
+        if start_section["name"] == end_section["name"]:
+            mode = "point"
+            location = round(start_section["location"] / 1000, 3)
+
+        annotations.append(
+            {
+                "mode": mode,
+                "name": object_name,
+                "type": object_type,
+                "start_section_id": child_ids[0],
+                "end_section_id": child_ids[-1],
+                "start_section_name": start_section["name"],
+                "end_section_name": end_section["name"],
+                "start_location": round(start_section["location"] / 1000, 3),
+                "end_location": round(end_section["location"] / 1000, 3),
+                "location": location,
+                "params": params,
+                "param_summary": param_summary,
+            }
+        )
+
+    annotations.sort(
+        key=lambda item: (
+            item.get("location")
+            if item.get("location") is not None
+            else item.get("start_location", 0.0)
+        )
+    )
+    return annotations
+
+
 def build_dataset(
     csv_path: Path,
     objects_yaml_path: Path | None = None,
@@ -157,6 +283,7 @@ def build_dataset(
 ) -> dict:
     yaml_text = load_objects_yaml(objects_yaml_path=objects_yaml_path, objects_yaml_url=objects_yaml_url)
     sections = parse_cross_sections(yaml_text)
+    object_annotations = parse_object_annotations(yaml_text, sections)
 
     df = pd.read_csv(csv_path)
     df["value"] = pd.to_numeric(df["value"])
@@ -238,6 +365,7 @@ def build_dataset(
         "profile_points": profile_points,
         "gate_markers": gate_markers,
         "gate_stations": gate_stations,
+        "object_annotations": object_annotations,
         "highlights": {
             "start": start,
             "end": end,
@@ -267,7 +395,6 @@ def save_profile_png(dataset: dict, output_png: Path) -> None:
     ax.fill_between(x_data, y_bottom, bed_data, color="#87603d", alpha=0.16)
     ax.plot(x_data, top_data, color="#637487", linewidth=2, linestyle="--", label="断面顶高程")
     ax.plot(x_data, bed_data, color="#87603d", linewidth=2.4, label="断面底高程")
-    ax.plot(x_data, water_data, color="#1c7fb5", linewidth=3, label="当前展示水位")
     ax.fill_between(x_data, bed_data, water_data, color="#1c7fb5", alpha=0.12)
 
     for station in dataset["gate_stations"]:
@@ -518,14 +645,14 @@ def build_html(dataset: dict) -> str:
         <section class="panel">
           <h2>床面线与水面线</h2>
           <p class="subtle">
-            灰色虚线表示断面顶高程，棕色线表示断面底高程，蓝色线表示当前展示水位。蓝色阴影仅填充到床面线，
+            灰色虚线表示断面顶高程，棕色线表示断面底高程，蓝色阴影表示当前展示水体范围，
             棕色阴影填充到坐标轴底部，用来同时表达过水断面和床面起伏。
             图中额外用竖线标出各闸站入口位置。
           </p>
           <div class="legend">
             <span><i class="dot" style="background: #637487"></i>断面顶高程</span>
             <span><i class="dot" style="background: var(--bed)"></i>断面底高程</span>
-            <span><i class="dot" style="background: var(--water)"></i>当前展示水位</span>
+            <span><i class="dot" style="background: rgba(28,127,181,0.36)"></i>当前展示水体</span>
             <span><i class="dot" style="background: var(--gate)"></i>闸站位置</span>
           </div>
           <div class="flow-direction">
@@ -608,7 +735,6 @@ def build_html(dataset: dict) -> str:
       const yMax = Number((rawMax + 0.38).toFixed(3));
       const xMin = Math.min(...xData);
       const xMax = Math.max(...xData);
-      const xPadding = Math.max((xMax - xMin) * 0.02, 0.15);
       const bedFillSegments = matched.slice(0, -1).map((item, index) => [
         item.location,
         matched[index + 1].location,
@@ -624,6 +750,214 @@ def build_html(dataset: dict) -> str:
         item.water_level,
         matched[index + 1].water_level
       ]);
+      const annotationTypeColors = {{
+        UnifiedCanal: '#176a87',
+        Pipe: '#8b623d',
+        GateStation: '#a5456f',
+        DisturbanceNode: '#2b8a57'
+      }};
+      const getAnnotationColor = (type) => annotationTypeColors[type] || '#4c6476';
+      const annotationTypeLabels = {{
+        UnifiedCanal: '渠道',
+        Pipe: '倒虹吸/管道',
+        GateStation: '闸站',
+        DisturbanceNode: '分水口/退水闸'
+      }};
+      const annotationParamLabels = {{
+        manning_n: '曼宁系数',
+        length: '长度',
+        loss_coeff: '损失系数',
+        orifice_count: '孔口数量',
+        single_orifice_height: '单孔高度',
+        single_orifice_width: '单孔宽度',
+        cross_section_type: '断面形式',
+        boundary_type: '边界类型',
+        min_sectional_area: '最小过水面积',
+        t_bottom_width: '底宽',
+        t_side_slope_ratio: '边坡系数'
+      }};
+      const localizeAnnotationType = (type) => annotationTypeLabels[type] || type;
+      const localizeAnnotationParams = (params) =>
+        (params || []).map((item) => `${{annotationParamLabels[item.key] || item.key}}=${{item.value}}`).join('，');
+      const positionFloatingTooltip = (point, params, dom, rect, size) => {{
+        const [mouseX, mouseY] = point;
+        const viewWidth = size.viewSize[0];
+        const viewHeight = size.viewSize[1];
+        const boxWidth = size.contentSize[0];
+        const boxHeight = size.contentSize[1];
+        const offsetX = 18;
+        const offsetY = 18;
+        let x = mouseX + offsetX;
+        let y = mouseY - boxHeight - offsetY;
+        if (x + boxWidth > viewWidth - 12) {{
+          x = Math.max(12, mouseX - boxWidth - offsetX);
+        }}
+        if (y < 12) {{
+          y = Math.min(viewHeight - boxHeight - 12, mouseY + offsetY);
+        }}
+        return [x, y];
+      }};
+      const formatAnnotationTooltip = (item) => [
+        `<strong>${{item.name}}</strong>`,
+        `类型: ${{localizeAnnotationType(item.type)}}`,
+        item.mode === 'range'
+          ? `范围: ${{item.start_section_name}} → ${{item.end_section_name}}`
+          : `位置: ${{Number(item.location).toFixed(3)}} km`,
+        item.params?.length ? `参数: ${{localizeAnnotationParams(item.params)}}` : '参数: 无'
+      ].join('<br>');
+      const interpolateWaterLevel = (location) => {{
+        if (!matched.length) return null;
+        if (location <= matched[0].location) return matched[0].water_level;
+        if (location >= matched[matched.length - 1].location) return matched[matched.length - 1].water_level;
+        for (let index = 0; index < matched.length - 1; index += 1) {{
+          const left = matched[index];
+          const right = matched[index + 1];
+          if (location < left.location || location > right.location) continue;
+          const span = right.location - left.location;
+          if (!span) return left.water_level;
+          const ratio = (location - left.location) / span;
+          return left.water_level + (right.water_level - left.water_level) * ratio;
+        }}
+        return null;
+      }};
+      const objectRangeAnnotations = (dataset.object_annotations || [])
+        .filter((item) => item.mode === 'range')
+        .map((item, index) => {{
+          const startPoint = matched.find((point) => point.name === item.start_section_name);
+          const endPoint = matched.find((point) => point.name === item.end_section_name);
+          if (!startPoint || !endPoint) return null;
+          return {{
+            ...item,
+            index,
+            start_water_level: startPoint.water_level,
+            end_water_level: endPoint.water_level,
+          }};
+        }})
+        .filter(Boolean);
+      const objectPointAnnotations = (dataset.object_annotations || [])
+        .filter((item) => item.mode === 'point')
+        .map((item, index) => {{
+          const location = item.location ?? item.start_location;
+          const waterLevel = location == null ? null : interpolateWaterLevel(location);
+          if (location == null || waterLevel == null) return null;
+          return {{
+            ...item,
+            index,
+            location,
+            water_level: waterLevel,
+          }};
+        }})
+        .filter(Boolean);
+      const clipRect = (params) => ({{
+        x: params.coordSys.x,
+        y: params.coordSys.y,
+        width: params.coordSys.width,
+        height: params.coordSys.height,
+      }});
+      const clipPolyline = (polyline, params) => echarts.graphic.clipPointsByRect(polyline, clipRect(params));
+      const buildObjectRangeSeries = () => ({{
+        name: '对象标注',
+        type: 'custom',
+        silent: false,
+        animation: false,
+        tooltip: {{
+          show: true,
+          trigger: 'item',
+          confine: true,
+          enterable: false,
+          transitionDuration: 0,
+          extraCssText: 'pointer-events:none;',
+          position: positionFloatingTooltip,
+          formatter: (params) => formatAnnotationTooltip(params.data.meta)
+        }},
+        z: 6.6,
+        renderItem: (params, api) => {{
+          const clippedPolyline = clipPolyline([
+            api.coord([api.value(0), api.value(1)]),
+            api.coord([api.value(2), api.value(3)])
+          ], params);
+          if (!clippedPolyline?.length || clippedPolyline.length < 2) return null;
+          const color = getAnnotationColor(api.value(5));
+          const startPoint = clippedPolyline[0];
+          const endPoint = clippedPolyline[clippedPolyline.length - 1];
+          return {{
+            type: 'group',
+            children: [
+              {{
+                type: 'line',
+                shape: {{ x1: startPoint[0], y1: startPoint[1], x2: endPoint[0], y2: endPoint[1] }},
+                style: {{ stroke: color, lineWidth: 2.4, opacity: 0.78 }}
+              }},
+              {{
+                type: 'circle',
+                shape: {{ cx: startPoint[0], cy: startPoint[1], r: 3.2 }},
+                style: {{ fill: color, stroke: '#ffffff', lineWidth: 1.2 }}
+              }},
+              {{
+                type: 'circle',
+                shape: {{ cx: endPoint[0], cy: endPoint[1], r: 3.2 }},
+                style: {{ fill: color, stroke: '#ffffff', lineWidth: 1.2 }}
+              }}
+            ]
+          }};
+        }},
+        data: objectRangeAnnotations.map((item) => ({{
+          value: [
+            item.start_location,
+            item.start_water_level,
+            item.end_location,
+            item.end_water_level,
+            item.name,
+            item.type,
+            item.index
+          ],
+          meta: item
+        }}))
+      }});
+      const buildObjectPointSeries = () => ({{
+        name: '对象标注',
+        type: 'custom',
+        silent: false,
+        animation: false,
+        tooltip: {{
+          show: true,
+          trigger: 'item',
+          confine: true,
+          enterable: false,
+          transitionDuration: 0,
+          extraCssText: 'pointer-events:none;',
+          position: positionFloatingTooltip,
+          formatter: (params) => formatAnnotationTooltip(params.data.meta)
+        }},
+        z: 6.7,
+        renderItem: (params, api) => {{
+          const bounds = clipRect(params);
+          const point = api.coord([api.value(0), api.value(1)]);
+          if (
+            point[0] < bounds.x ||
+            point[0] > bounds.x + bounds.width ||
+            point[1] < bounds.y ||
+            point[1] > bounds.y + bounds.height
+          ) {{
+            return null;
+          }}
+          const color = getAnnotationColor(api.value(3));
+          return {{
+            type: 'group',
+            children: [
+              {{
+                type: 'circle',
+                shape: {{ cx: point[0], cy: point[1], r: 4.2 }},
+                style: {{ fill: color, stroke: '#ffffff', lineWidth: 1.4 }}
+              }}
+            ]
+          }};
+        }},
+        data: objectPointAnnotations.map((item) => ({{
+          value: [item.location, item.water_level, item.name, item.type, item.index],
+          meta: item
+        }}))
+      }});
 
       const gateLines = dataset.gate_markers.map((item) => ({
         xAxis: item.location,
@@ -655,14 +989,14 @@ def build_html(dataset: dict) -> str:
           top: 12,
           left: 96,
           right: 40,
-          data: ['断面顶高程', '断面底高程', '当前展示水位', '闸站位置'],
+          data: ['断面顶高程', '断面底高程', '闸站位置', '对象标注'],
           textStyle: {{ color: '#5b7385' }}
         }},
         xAxis: {{
           type: 'value',
           name: '里程 (km)',
-          min: Number((xMin - xPadding).toFixed(3)),
-          max: Number((xMax + xPadding).toFixed(3)),
+          min: Number(xMin.toFixed(3)),
+          max: Number(xMax.toFixed(3)),
           nameLocation: 'middle',
           nameGap: 44,
           axisLabel: {{ color: '#5b7385', margin: 14 }},
@@ -742,17 +1076,8 @@ def build_html(dataset: dict) -> str:
             z: 5,
             data: matched.map((item) => [item.location, item.bottom_elevation])
           }},
-          {{
-            name: '当前展示水位',
-            type: 'line',
-            smooth: true,
-            showSymbol: true,
-            symbolSize: 7,
-            lineStyle: {{ color: '#1c7fb5', width: 3 }},
-            itemStyle: {{ color: '#1c7fb5' }},
-            z: 6,
-            data: matched.map((item) => [item.location, item.water_level])
-          }},
+          buildObjectRangeSeries(),
+          buildObjectPointSeries(),
           {{
             name: '闸站位置',
             type: 'line',
