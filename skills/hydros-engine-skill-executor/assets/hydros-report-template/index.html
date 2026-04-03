@@ -494,6 +494,15 @@
                     <button id="timelinePlay" class="timeline-button rounded-full bg-primary px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-primary/92">播放</button>
                     <button id="timelinePause" class="timeline-button rounded-full border border-line bg-white px-4 py-2 text-sm font-medium text-ink/78 hover:bg-slate-50">暂停</button>
                     <button id="timelineResume" class="timeline-button rounded-full border border-line bg-white px-4 py-2 text-sm font-medium text-ink/78 hover:bg-slate-50">继续</button>
+                    <label class="inline-flex items-center gap-2 rounded-full border border-line bg-white px-3 py-2 text-sm text-ink/72 shadow-sm">
+                      <span>倍速</span>
+                      <select id="timelineRate" class="rounded-full border-0 bg-transparent pr-6 text-sm font-medium text-primary focus:outline-none">
+                        <option value="0.5">0.5x</option>
+                        <option value="1" selected>1x</option>
+                        <option value="2">2x</option>
+                        <option value="4">4x</option>
+                      </select>
+                    </label>
                   </div>
                   <div class="min-w-0 flex-1">
                     <div class="mb-2 flex items-center justify-between gap-3 text-sm text-ink/62">
@@ -862,6 +871,7 @@
         playing: false,
         timer: null,
         scrubbing: false,
+        playbackRate: 1,
         api: {},
       };
 
@@ -886,8 +896,15 @@
           currentMeta.textContent = "沿程水头损失 -";
         }
         if (statusLabel) {
-          statusLabel.textContent = interactionState.playing ? "播放中" : "已暂停";
+          statusLabel.textContent = interactionState.playing
+            ? `播放中 · ${interactionState.playbackRate}x`
+            : `已暂停 · ${interactionState.playbackRate}x`;
         }
+      }
+
+      function getPlaybackInterval() {
+        const safeRate = Math.max(0.25, Number(interactionState.playbackRate) || 1);
+        return Math.max(180, Math.round(900 / safeRate));
       }
 
       function stopPlayback() {
@@ -933,7 +950,20 @@
         stopPlayback();
         interactionState.playing = true;
         updateTimelineUI();
-        interactionState.timer = window.setInterval(advanceStep, 900);
+        interactionState.timer = window.setInterval(advanceStep, getPlaybackInterval());
+      }
+
+      function setPlaybackRate(rate) {
+        interactionState.playbackRate = Math.max(0.25, Number(rate) || 1);
+        const rateSelect = document.getElementById("timelineRate");
+        if (rateSelect) {
+          rateSelect.value = String(interactionState.playbackRate);
+        }
+        if (interactionState.playing) {
+          clearInterval(interactionState.timer);
+          interactionState.timer = window.setInterval(advanceStep, getPlaybackInterval());
+        }
+        updateTimelineUI();
       }
 
       function renderHeader() {
@@ -2022,9 +2052,10 @@
         const playButton = document.getElementById("timelinePlay");
         const pauseButton = document.getElementById("timelinePause");
         const resumeButton = document.getElementById("timelineResume");
+        const rateSelect = document.getElementById("timelineRate");
 
         if (!interactionState.steps.length) {
-          [slider, playButton, pauseButton, resumeButton].forEach((element) => {
+          [slider, playButton, pauseButton, resumeButton, rateSelect].forEach((element) => {
             if (element) element.disabled = true;
           });
           return;
@@ -2032,6 +2063,7 @@
 
         slider.step = "1";
         slider.setAttribute("aria-label", "纵剖面时间轴");
+        rateSelect.value = String(interactionState.playbackRate);
 
         const handleScrub = (event) => {
           stopPlayback();
@@ -2075,6 +2107,7 @@
         playButton.addEventListener("click", () => startPlayback(true));
         pauseButton.addEventListener("click", () => stopPlayback());
         resumeButton.addEventListener("click", () => startPlayback(false));
+        rateSelect.addEventListener("change", (event) => setPlaybackRate(event.target.value));
 
         updateTimelineUI();
         setCurrentStepByIndex(interactionState.steps.indexOf(interactionState.currentStep));
