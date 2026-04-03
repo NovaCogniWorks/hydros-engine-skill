@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 import shutil
 import subprocess
@@ -114,6 +115,20 @@ def round_number(value: float | int | None, digits: int = 2) -> float | None:
     return round(float(value), digits)
 
 
+def describe_variation_window(group: pd.DataFrame) -> str:
+    if group.empty or "data_index" not in group.columns or "value" not in group.columns:
+        return "全过程"
+
+    ordered = group.sort_values("data_index").copy()
+    min_row = ordered.loc[ordered["value"].idxmin()]
+    max_row = ordered.loc[ordered["value"].idxmax()]
+    start_step = int(min(min_row["data_index"], max_row["data_index"]))
+    end_step = int(max(min_row["data_index"], max_row["data_index"]))
+    if start_step == end_step:
+        return f"展示步 {start_step} 附近"
+    return f"展示步 {start_step} 到 {end_step} 之间"
+
+
 def create_object_sort_key(location_map: dict[str, float]):
     def sort_key(name: str) -> tuple[float, str]:
         loc = location_map.get(name, float('inf'))
@@ -209,7 +224,19 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--total-steps", type=int, default=None)
     parser.add_argument("--sim-step-size", type=int, default=None, help="计算步长，单位秒")
     parser.add_argument("--output-step-size", type=int, default=None, help="输出步长，单位秒")
+    parser.add_argument("--llm-name", default=None, help="当前使用的模型名称；如 gpt-5.4 / claude-sonnet")
     return parser.parse_args(argv)
+
+
+def resolve_llm_name(explicit_name: str | None) -> str | None:
+    if explicit_name and explicit_name.strip():
+        return explicit_name.strip()
+
+    for env_name in ["LLM_NAME", "LLM_MODEL", "MODEL", "OPENAI_MODEL", "CODEX_MODEL", "ANTHROPIC_MODEL"]:
+        value = os.getenv(env_name)
+        if value and value.strip():
+            return value.strip()
+    return None
 
 
 def resolve_runtime_config(
@@ -452,6 +479,7 @@ def build_report_data(
     df: pd.DataFrame,
     csv_path: Path,
     runtime_config: RuntimeConfig,
+    llm_name: str | None = None,
     profile_dataset: dict[str, Any] | None = None,
     asset_status: dict[str, Any] | None = None,
     profile_error: str | None = None,
@@ -548,6 +576,7 @@ def build_report_data(
         highlight_flow_group = flow_display_df[
             (flow_display_df["object_name"] == highlight_flow_name) & (flow_display_df["object_type"] == highlight_flow_type)
         ]
+    highlight_flow_window_text = describe_variation_window(highlight_flow_group)
 
     last_step = unique_steps[-1]
     cs_level_df = level_df[level_df["object_type"] == "CrossSection"].copy()
@@ -586,7 +615,7 @@ def build_report_data(
                 "object": highlight_flow_name,
                 "metric": "water_flow",
                 "finding": (
-                    f"流量波动范围最大，最小 {round_number(highlight_flow_stats['min'])}、"
+                    f"流量最大变化幅度最大，最小 {round_number(highlight_flow_stats['min'])}、"
                     f"最大 {round_number(highlight_flow_stats['max'])}，幅度 {round_number(highlight_flow_stats['range'])}。"
                 ),
                 "advice": "复核该断面附近的分流、闸门动作或边界条件切换，确认是否属于预期工况响应。",
@@ -621,11 +650,6 @@ def build_report_data(
             }
         )
 
-    overall_title = "总体稳定" if negative_flow.empty else "存在倒流风险"
-    highest_issue_title = "零流量节点" if zero_flow_groups else "无严重异常"
-    stability_title = "采样完整" if not completeness_issues else "采样不完整"
-    action_title = "复核末端波动"
-
     negative_points = int(len(negative_flow))
     zero_flow_count = len(zero_flow_groups)
     constant_flow_count = len(constant_flow_groups)
@@ -634,6 +658,10 @@ def build_report_data(
     control_score = min(85, 20 + dynamic_gate_count * 12 + (10 if highlight_flow_stats["range"] > 20 else 0))
     highlight_level_name, highlight_level_type = level_range.index[0]
     highlight_level_stats = level_range.iloc[0]
+    highlight_level_group = level_display_df[
+        (level_display_df["object_name"] == highlight_level_name) & (level_display_df["object_type"] == highlight_level_type)
+    ]
+    highlight_level_window_text = describe_variation_window(highlight_level_group)
 
     runtime_started_at = pd.to_datetime(df["gmt_create"].min())
     runtime_completed_at = pd.to_datetime(df["gmt_create"].max())
@@ -724,7 +752,7 @@ def build_report_data(
         f"{df['metrics_code'].nunique()} 类指标，展示时间步范围 {unique_steps[0]} ~ {unique_steps[-1]}，"
         f"图表展示共 {display_sampled_point_count} 个采样点。"
         f"整体未发现负流量和明显水位突跳，断面的沿程水头损失约 {level_drop} m，表现为稳定下泄。"
-        f"当前更值得关注的是个别退水闸零流量，以及 {highlight_flow_name} 的局部流量大幅波动。"
+        f"当前更值得关注的是个别退水闸零流量，以及 {highlight_flow_name} 的局部流量最大变化幅度较大。"
     )
     if runtime_config.expected_sample_count is not None and runtime_config.expected_sample_count != raw_sampled_point_count:
         summary_paragraph += (
@@ -736,7 +764,7 @@ def build_report_data(
         f"{runtime_config.axis_note} 当前展示时间步为 {'、'.join(str(step) for step in unique_steps[:5])} ... {unique_steps[-1]}。",
         f"未检测到负流量，流量最小值为 {round_number(flow_display_df['value'].min())} m³/s，渠道主流方向保持一致。",
         f"主干断面在最后时刻的沿程水头损失约 {level_drop} m，符合上游高、下游低的基本水力梯度。",
-        f"{highlight_flow_name} 的流量范围最大，达到 {round_number(highlight_flow_stats['range'])} m³/s，需要结合工况解释其波动来源。",
+        f"{highlight_flow_name} 的流量最大变化幅度最大，达到 {round_number(highlight_flow_stats['range'])} m³/s，需要结合工况解释其变化原因。",
         (
             f"{len(dynamic_gate_groups)} 个闸门序列存在开度调整，"
             f"最大开度变化 {round_number(gate_df.groupby('object_name')['value'].agg(lambda s: s.max() - s.min()).max())}。"
@@ -773,7 +801,7 @@ def build_report_data(
 
     recommendations = [
         "优先确认发生零流量或极低流量的节点在该场景下是否应保持关闭，避免把配置状态误判为异常。",
-        f"复核 {highlight_flow_name} 附近的边界条件、分流关系和联动控制，解释其波动来源。",
+        f"复核 {highlight_flow_name} 附近的边界条件、分流关系和联动控制，解释其变化原因。",
         (
             f"若需要更细的过程诊断，建议把输出步长从当前 {runtime_config.output_step_size} 秒/次缩短到 600-1200 秒/次。"
             if runtime_config.output_step_size
@@ -801,6 +829,67 @@ def build_report_data(
     scenario_name = scenario_meta["scenario_name"] if scenario_meta and scenario_meta.get("scenario_name") else None
     report_title = f"{scenario_name} 分析报告" if scenario_name else "Hydros 仿真分析报告"
 
+    condition_text = (
+        f"总步数 {scenario_total_steps}、输出步长 {output_interval_seconds} 秒/次的当前工况"
+        if scenario_total_steps is not None and output_interval_seconds is not None
+        else "当前仿真工况"
+    )
+    overall_operation_text = (
+        "主干渠整体保持稳定输水，未见明显倒流和突发失稳"
+        if negative_flow.empty
+        else "主干渠整体可运行，但存在局部倒流风险"
+    )
+    overall_control_text = (
+        "闸门调节过程总体平稳"
+        if dynamic_gate_groups
+        else "闸门运行状态总体平稳"
+    )
+    overall_risk_text = (
+        "局部节点仍需结合零流量和变化较大区段继续复核"
+        if zero_flow_groups or highlight_flow_stats is not None
+        else "当前未见突出的局部异常"
+    )
+    overall_judgement_text = (
+        "当前结果未见明显整体失稳迹象"
+        if asset_status["complete"] and not runtime_config.has_unreliable_time_axis and negative_flow.empty
+        else "当前结果还需结合缺失图表或时间轴情况继续核查"
+    )
+
+    risk_area_names: list[str] = []
+    risk_findings: list[str] = []
+    if zero_flow_groups:
+        risk_area_names.append(zero_flow_groups[0][0])
+        risk_findings.append("局部节点长时间零流量")
+    if highlight_flow_name:
+        risk_area_names.append(highlight_flow_name)
+        risk_findings.append("流量最大变化幅度偏大")
+    if dynamic_gate_groups:
+        risk_area_names.append(dynamic_gate_groups[0][0])
+        risk_findings.append("控制动作存在阶段切换")
+
+    risk_area_text = "、".join(dict.fromkeys(risk_area_names[:3])) if risk_area_names else "当前未发现集中的高风险区域"
+    risk_finding_text = "、".join(dict.fromkeys(risk_findings[:3])) if risk_findings else "以局部变化区段复核为主"
+
+    max_level_variation_text = f"{round_number(highlight_level_stats['range'])} m"
+    max_flow_variation_text = (
+        f"{round_number(highlight_flow_stats['range'])} m³/s"
+        if highlight_flow_stats is not None
+        else "无法可靠提取"
+    )
+    key_range_area_text = highlight_flow_name or highlight_level_name or "主干渠重点区段"
+    range_assessment_text = (
+        "需要重点复核"
+        if zero_flow_groups or not negative_flow.empty
+        else "仍处于可控范围内"
+    )
+
+    recommendation_targets = [name for name in [highlight_flow_name, zero_flow_groups[0][0] if zero_flow_groups else None] if name]
+    recommendation_target_text = "、".join(dict.fromkeys(recommendation_targets[:2])) or "关键变化区段"
+    recommendation_actions = [
+        "更细粒度输出步长",
+        "关键节点控制动作复核",
+        "工况事件补充校核",
+    ]
     payload = {
         "csvPath": csv_path.name,
         "meta": {
@@ -826,7 +915,7 @@ def build_report_data(
             "output_step_text": output_step_text,
             "time_axis_note": runtime_config.axis_note,
             "axis_label": runtime_config.axis_label,
-            "analyst": "Codex / Hydros Simulation Skill",
+            "analyst": llm_name,
             "record_count": int(len(df)),
             "object_count": int(df["object_name"].nunique()),
             "metric_count": int(df["metrics_code"].nunique()),
@@ -842,42 +931,38 @@ def build_report_data(
         "metaCards": [],
         "headlineCards": [
             {
-                "eyebrow": "执行结论",
-                "title": overall_title,
-                "body": "无倒流和大幅水位突跳，整体呈稳定下泄过程。",
-            },
-            {
-                "eyebrow": "最高优先级问题",
-                "title": highest_issue_title,
+                "eyebrow": "关键总结 1",
+                "title": "总体结论",
                 "body": (
-                    f"{zero_flow_groups[0][0]} 全程零流量，需要先确认其是否为设计关闭状态。"
-                    if zero_flow_groups
-                    else "当前未看到高风险异常，重点转向局部波动解释。"
+                    f"{overall_operation_text}，{overall_control_text}，{overall_risk_text}，"
+                    f"{overall_judgement_text}。"
                 ),
             },
             {
-                "eyebrow": "数据质量",
-                "title": (
-                    "报告不完整"
-                    if asset_status["missing"]
-                    else ("时间轴异常" if runtime_config.has_unreliable_time_axis else stability_title)
-                ),
+                "eyebrow": "关键总结 2",
+                "title": "主要风险",
                 "body": (
-                    (
-                        f"缺失图表：{'、'.join(asset_status['missing'])}。"
-                        f"{(' 纵剖面原因：' + profile_error) if profile_error else ''}"
-                    )
-                    if asset_status["missing"]
-                    else (
-                        f"{display_sampled_point_count} 个展示采样点已导出。{runtime_config.axis_note}"
-                        if not completeness_issues else f"发现 {len(completeness_issues)} 组对象/指标缺步。"
-                    )
+                    f"风险主要出现在 {risk_area_text}，主要表现为 {risk_finding_text}。"
+                    if risk_area_names
+                    else "当前未发现集中爆发的高风险区域，主要风险集中在局部变化区段解释和配置复核。"
                 ),
             },
             {
-                "eyebrow": "建议动作",
-                "title": action_title,
-                "body": f"重点复核 {highlight_flow_name} 的波动原因，并结合闸门动作解释末端响应。",
+                "eyebrow": "关键总结 3",
+                "title": "影响范围与程度",
+                "body": (
+                    f"断面 {highlight_level_name} 的水位最大变化幅度约为 {max_level_variation_text}，"
+                    f"{(highlight_flow_name + ' 的流量最大变化幅度约为 ' + max_flow_variation_text) if highlight_flow_name else ('流量最大变化幅度约为 ' + max_flow_variation_text)}，"
+                    f"其中 {key_range_area_text} {range_assessment_text}。"
+                ),
+            },
+            {
+                "eyebrow": "关键总结 4",
+                "title": "建议措施",
+                "body": (
+                    f"建议优先对 {recommendation_target_text} 做重点核查，并补充 "
+                    f"{'、'.join(recommendation_actions)}，以降低局部变化误判风险，并支撑后续设计决策。"
+                ),
             },
         ],
         "summaryParagraph": summary_paragraph,
@@ -891,9 +976,7 @@ def build_report_data(
         ],
         "snapshotRows": [
             {"label": "任务状态", "value": "已完成"},
-            {"label": "任务 ID", "value": str(df["biz_scenario_instance_id"].iloc[0])},
             {"label": "场景 ID", "value": scenario_id},
-            {"label": "仿真 YML", "value": scenario_meta["scenario_yaml_id"] if scenario_meta else f"{scenario_id}.yaml"},
             {"label": "开始时间", "value": format_datetime_text(simulation_start_dt) or "场景 YAML 未提供"},
             {"label": "结束时间", "value": format_datetime_text(simulation_end_dt) or "根据显式参数与场景信息无法推导"},
             {"label": "时间步长", "value": sim_step_size_text},
@@ -901,11 +984,8 @@ def build_report_data(
             {"label": "仿真时长", "value": simulation_duration_text},
             {"label": "CSV 覆盖时长", "value": format_seconds_text(sampled_duration_seconds) or "无法推导"},
             {"label": "时长差值", "value": format_seconds_text(duration_gap_seconds) or "无法推导"},
-            {"label": "时间轴口径", "value": runtime_config.axis_note},
             {"label": "展示时间步范围", "value": f"{unique_steps[0]} ~ {unique_steps[-1]}（共 {display_sampled_point_count} 个展示采样点）"},
             {"label": "结果导出时间", "value": format_datetime_text(runtime_completed_at.to_pydatetime()) or str(df["gmt_create"].max())},
-            {"label": "报告完整性", "value": "完整" if asset_status["complete"] else f"缺失 {'、'.join(asset_status['missing'])}"},
-            {"label": "分析人", "value": "Codex / Hydros Simulation Skill"},
         ],
         "miniTable": mini_table,
         "charts": {
@@ -916,14 +996,14 @@ def build_report_data(
         "chartInterpretations": {
             "level": {
                 "analysis": (
-                    f"水位结果曲线整体波动不大，{highlight_level_name} 的波动范围最大，为 "
+                    f"水位结果曲线整体变化不大，{highlight_level_name} 的最大变化幅度为 "
                     f"{round_number(highlight_level_stats['range'])} m；默认建议优先查看断面序列的同步变化。"
                 ),
                 "placeholder_steps": placeholder_level_steps,
             },
             "flow": {
                 "analysis": (
-                    f"流量结果曲线以稳定输水为主，{highlight_flow_name} 的波动范围最大，为 "
+                    f"流量结果曲线以稳定输水为主，{highlight_flow_name} 的最大变化幅度为 "
                     f"{round_number(highlight_flow_stats['range'])} m³/s；真实零值对象仍保留用于识别停流和退水状态。"
                 ),
                 "placeholder_steps": placeholder_flow_steps,
@@ -1124,10 +1204,9 @@ def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
 
 {conclusion_axis_line}
 {conclusion_duration_line}
-- 报告完整性：`{"完整" if not missing_assets else "存在缺失"}`。
 {asset_issue_markdown}
-- 系统整体稳定，无倒流、无明显水位异常波动，适合作为一次稳定工况分析样本。
-- 建议优先复核零流量或恒定流量节点的合理性，以及 `{analysis['top_flow_variation']['object_name']}` 的局部波动来源。
+- 系统整体稳定，无倒流、无明显水位异常变化，适合作为一次稳定工况分析样本。
+- 建议优先复核零流量或恒定流量节点的合理性，以及 `{analysis['top_flow_variation']['object_name']}` 的局部变化原因。
 - 若下一步要做动态评估，建议增加事件注入或更细粒度输出。
 
 ## 后续建议动作
@@ -1174,6 +1253,7 @@ def validate_required_report_assets(charts_dir: Path, profile_dataset: Any) -> d
 
 def main() -> None:
     args = parse_args(sys.argv[1:])
+    llm_name = resolve_llm_name(args.llm_name)
 
     csv_path = Path(args.timeseries_csv).resolve()
     df = load_dataframe(csv_path)
@@ -1230,7 +1310,16 @@ def main() -> None:
     if charts_stats.exists():
         shutil.move(str(charts_stats), str(paths["data"] / "analysis_stats.json"))
 
-    payload = build_report_data(df, working_csv_path, runtime_config, profile_dataset, asset_status, profile_error, location_map)
+    payload = build_report_data(
+        df,
+        working_csv_path,
+        runtime_config,
+        llm_name,
+        profile_dataset,
+        asset_status,
+        profile_error,
+        location_map,
+    )
     write_html_assets(paths["report"], paths["data"], payload)
     write_markdown_report(paths["report"], payload)
 
