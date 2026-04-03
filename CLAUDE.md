@@ -4,37 +4,37 @@
 
 本项目是一个 **Claude Code Skill**（hydros-engine-skill），不是 MCP 服务本身。
 
-- **hydros-engine-mcp**（外部提供）：MCP 服务，提供 4 个工具
-- **hydros-engine-skill**（本项目）：Skill，编排调用这些 MCP 工具，引导用户完成完整工作流
+- **hydros-engine-executor**（外部提供）：仿真任务执行 MCP 服务
+- **hydros-engine-mdm**（外部提供）：场景建模元数据与拓扑前置条件服务
+- **hydros-engine-skill**（本项目）：Skill，编排调用这些能力并引导用户完成完整工作流
 
 ## 架构关系
 
 ```
 Claude Code
   └── hydros-engine-skill（本项目，Skill 层）
-        └── 调用 hydros-engine-mcp（外部 MCP 服务）
-              └── 连接 hydros-engine（水力仿真引擎）
+        ├── 调用 hydros-engine-executor（仿真执行 MCP）
+        │     └── 连接 hydros-engine（水力仿真引擎）
+        └── 检查 hydros-engine-mdm（元数据前置条件）
 ```
 
-## 外部 MCP 服务提供的 4 个工具
+## 外部服务分工
 
-| 工具 | 功能 |
+| 服务 | 功能 |
 |------|------|
-| `list_scenarios` | 获取场景清单 |
-| `create_simulation` | 创建仿真任务 |
-| `subscribe_progress` | 建立 SSE 连接，推送仿真进度/完成/失败 |
-| `query_timeseries` | 查询水网对象时序数据 |
+| `hydros-engine-executor` | 获取场景、创建仿真任务、跟踪进度、导出结果 |
+| `hydros-engine-mdm` | 提供场景建模元数据、拓扑和 `objects.yaml` 相关前置条件 |
 
 ## Skill 职责
 
-1. **场景查询与展示** — 调用 list_scenarios，格式化展示，引导用户选择
-2. **仿真任务创建与进度跟踪** — 调用 create_simulation + subscribe_progress，SSE 消息过滤（heartbeat 丢弃、progress 节流、completed/failed 终态），向用户推送进度
-3. **结果查询、图表生成与数据分析** — 调用 query_timeseries，生成时序曲线/对比图，执行异常检测（负压、流速异常、水头损失等）
+1. **场景查询与展示** — 查询场景、补充建模元数据前置检查、引导用户选择
+2. **仿真任务创建与进度跟踪** — 创建仿真任务，持续跟踪进度直到终态
+3. **结果查询、图表生成与数据分析** — 导出结果 CSV，生成时序曲线/对比图，执行异常检测（负压、流速异常、水头损失等）
 
 ## 当前进度
 
 - [x] README.md 已创建并推送到 GitHub
-- [ ] SKILL.md 待创建（Skill 定义文件）
+- [x] SKILL.md 已创建
 - [ ] 测试用例待编写
 - [ ] 评估与优化
 

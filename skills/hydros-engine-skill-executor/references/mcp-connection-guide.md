@@ -2,6 +2,20 @@
 
 本文档提供详细的 MCP 连接排查和配置指南。
 
+## 双服务前置条件
+
+进入 executor skill 前，至少要确认两类 MCP 配置都已存在并可用：
+
+- `hydros-engine-executor`
+  用于仿真任务创建、进度跟踪、结果导出和倍速调整。
+- `hydros-engine-mdm`
+  用于场景建模元数据、拓扑和 `objects.yaml` 相关前置检查。
+
+说明：
+- 本文下面的直连示例仍以 `hydros-engine-executor` 为主，因为当前任务执行链路和 `resources/read` 下载链路都落在这一侧。
+- `hydros-engine-mdm` 的服务名固定为 `hydros-engine-mdm`，实际 URL 和 Header 以当前环境生效配置为准。
+- 如果场景拓扑、建模元数据或 `objects.yaml` 相关步骤报错，不要只检查 executor，也要一起检查 mdm 配置。
+
 ## 连接方式
 
 ### 正确连接方式
@@ -37,7 +51,7 @@
 | Codex | `~/.codex/config.toml` |
 | Copaw | `workspaces/agent.json` |
 
-检查 `hydros-engine-executor` MCP 服务是否在配置文件中正确配置。
+检查 `hydros-engine-executor` 和 `hydros-engine-mdm` 两个 MCP 服务是否都在配置文件中正确配置。
 
 ### HTTP 直连排查
 
@@ -67,6 +81,7 @@ curl -X POST https://hydroos.cn/mcps/hydros-engine-executor \
 | `32602` | 参数缺失 | 检查是否漏传 `sse_client_id` 等必需参数 |
 | 返回 HTML | URL 错误 | 使用 `/mcp` 端点，不是 `/api/xxx` |
 | 连接超时 | 使用了不兼容的客户端库 | 避免使用 SSE 客户端库做初始化，使用标准 HTTP POST |
+| 场景拓扑或 `objects.yaml` 读取失败 | `hydros-engine-mdm` 未配置或未生效 | 回到配置文件检查 `hydros-engine-mdm` 是否存在、服务名是否正确、当前环境是否已加载 |
 
 ## 连接避坑指南
 
@@ -113,7 +128,7 @@ curl -X POST https://hydroos.cn/mcps/hydros-engine-executor \
 
 ## 推荐连接流程
 
-1. **检查 MCP 安装**：确认 `hydros-engine-executor` 已安装并可连通
+1. **检查 MCP 安装**：确认 `hydros-engine-executor` 和 `hydros-engine-mdm` 都已安装并可连通
 2. **轻量探测**：检查 MCP 服务是否可用
 3. **使用工具链**：优先走已安装的 `hydros-engine-executor` 工具链，避免临时直连
 4. **仅在排查时直连**：只在需要排查问题时才使用 HTTP 直连，且必须带齐必需 Header

@@ -27,22 +27,22 @@ description: |
 
 在进入任何仿真流程前，先确认以下前置条件：
 
-1. **MCP 服务检查**：检查 `hydros-engine-executor` MCP 服务是否可用。不同 AI 助手的 MCP 配置文件位置：
+1. **MCP 服务检查**：同时检查 `hydros-engine-executor` 和 `hydros-engine-mdm` 两个 MCP 服务是否都已配置且可用。不同 AI 助手的 MCP 配置文件位置：
    - Claude Code: `.claude.json` 或 `~/.claude.json`
    - Codex: `~/.codex/config.toml`
    - Copaw: `workspaces/agent.json`
-   这样可以及早发现连接问题，避免在后续流程中遇到意外失败。
+   其中 `hydros-engine-executor` 负责仿真任务链路，`hydros-engine-mdm` 作为场景建模元数据、拓扑和 `objects.yaml` 相关流程的前置条件。这样可以及早发现连接问题，避免在后续流程中遇到意外失败。
 
 2. **Token 配置**：检查用户是否已配置 Bearer token。如果 token 缺失，引导用户：
    - 访问 `https://hydroos.cn/playground/` 注册或登录
    - 在”账号管理”中获取 API token
    - 将 token 提供给我来完成配置
 
-3. **使用正确的工具链**：优先使用已注册的 `hydros-engine-executor` MCP 工具（如 `get_timeseries_data`、`create_simulation_task` 等）。对于 MCP 协议标准方法（如 `resources/read`），需通过 HTTP POST 直接调用 MCP 端点，并带上必要 Header：`Authorization`、`Execution-Source: codex`、`Production-Code: copaw`、`Accept: application/json,text/event-stream`。
+3. **使用正确的工具链**：仿真执行、进度跟踪和结果导出优先走已注册的 `hydros-engine-executor` MCP 工具。场景建模元数据、拓扑和 `objects.yaml` 相关动作开始前，先确认 `hydros-engine-mdm` 已接通；如果缺失，先报告“元数据前置条件不足”，不要静默跳过。对于 MCP 协议标准方法（如 `resources/read`），需通过 HTTP POST 直接调用 MCP 端点，并带上必要 Header：`Authorization`、`Execution-Source: codex`、`Production-Code: copaw`、`Accept: application/json,text/event-stream`。
 
 4. **结果下载默认路径**：凡是用户要求"下载 CSV""落盘到本地""保存结果文件"，默认走标准下载链：
     - 调用 `get_timeseries_data` 获取 `resource_uri`
-    - 通过 MCP 协议 `resources/read` 方法读取 CSV 内容（参见阶段五详细说明）
+    - 优先使用 `scripts/download_timeseries_csv.py` 调用 MCP 协议 `resources/read` 方法读取 CSV 内容（参见阶段五详细说明）
     - 从响应 `result.contents[0].text` 提取 CSV 文本
     - 一次性写入本地 `.csv` 文件
     不要把大段 CSV 文本通过终端交互会话、`cat > file`、分块粘贴或聊天输出中转来落盘，这类方式容易被截断，生成坏文件。
@@ -56,9 +56,11 @@ description: |
 ## 沟通与硬规则
 
 - 始终使用中文与用户沟通，技术术语和代码标识保持原文。
+- 凡是执行本 skill 目录下的 Python 脚本，一律使用 `python3`，不要使用 `python`。
 - 先调用 `subscribe_to_simulation_events` 建立 SSE 事件订阅通道，再创建仿真任务。这样可以确保任务创建后的进度事件能被正确接收，避免错过关键状态更新。
 - `biz_scenario_id` 和 `biz_scenario_config_url` 成对使用，且只能来自 `biz_scenario_id_lists` 的返回结果。这样可以保证场景配置的一致性和有效性。
 - 用户选定场景后，在参数确认前先拉取并缓存一份 `objects.yaml`，再基于这份本地文件输出场景拓扑总结。下载方式要与脚本实现保持一致：先从场景 YAML 读取 `hydros_objects_modeling_url`，对 URL 做规范化编码，再通过标准 HTTP GET 下载，最后以 UTF-8 一次性写入本地缓存文件。这样后续生成纵剖面图时可以直接复用，避免重复拉取和口径漂移。
+- 场景建模元数据、拓扑和 `objects.yaml` 属于元数据链路。进入这部分前，先确认 `hydros-engine-mdm` 已配置可用；若未配置，明确告诉用户当前缺少元数据前置条件，不要假设拓扑正确或跳过说明继续产出结果。
 - 用户选定场景后，调用 `get_scenario_events` 查询预置事件，与默认参数一起展示。这让用户全面了解场景配置，一次性确认所有关键参数。
 - 用户只回复场景 ID 或”选这个”时，视为”选定场景”而非”立即启动”。先展示默认参数供确认，避免使用错误配置启动任务。
 - 创建 live 仿真任务后，持续监测到终态（`COMPLETED` 或 `FAILED`）。中途停止会导致用户无法及时了解任务结果。
@@ -75,8 +77,8 @@ description: |
   - **流式模式（可选）**：利用 Claude 的流式输出特性，在轮询循环中每次查询后立即输出进度条。通过缩短轮询间隔（2-5 秒）和连续输出，让进度更新更流畅。参考 `scripts/streamable_progress_demo.py` 查看两种模式的对比演示。
 - 在追加消息型聊天环境里，”自动显示进度条”的正确含义是：只要本轮仍在持续轮询，代理就必须主动连续发送文本进度条快照，不需要用户再次提醒；如果本轮被用户中断，则自动刷新链条随之中断，恢复后必须先说明”监测曾中断，现已恢复”。
 - 调用 `get_timeseries_data` 前先确认任务状态为 `COMPLETED`。未完成的任务可能返回不完整的数据。
-- `get_timeseries_data` 返回 `resource_uri`。如果本地脚本需要消费数据，通过 MCP 协议 `resources/read` 方法读取 CSV 文本并落盘。这样脚本可以直接处理本地文件。
-- 当目标是“下载 CSV 到本地”而不是立刻做报告时，也必须走同一条标准链路：`get_timeseries_data -> resource_uri -> resources/read -> 本地一次性写盘`。不要把 CSV 内容通过终端标准输入、交互式 `cat`、消息复制粘贴等方式中转。
+- `get_timeseries_data` 返回 `resource_uri`。如果本地脚本需要消费数据，优先使用 `scripts/download_timeseries_csv.py` 调用 MCP 协议 `resources/read` 方法读取 CSV 文本并落盘。这样脚本可以直接处理本地文件。
+- 当目标是“下载 CSV 到本地”而不是立刻做报告时，也必须走同一条标准链路：`get_timeseries_data -> resource_uri -> scripts/download_timeseries_csv.py -> 本地一次性写盘`。不要把 CSV 内容通过终端标准输入、交互式 `cat`、消息复制粘贴等方式中转。
 - 如果本地已经存在同名 `.csv`，覆盖前先核对文件大小或行数；如发现明显偏小、行数异常少，优先视为“落盘被截断”，重新按标准链路完整下载，不要在坏文件基础上追加写入。
 - 如果 CSV 下载、读取、写盘或完整性校验任一步失败，立即报告“结果下载失败”，并停止后续分析、图表和报告生成。不要回退到任何默认数据、历史缓存、旧 CSV 或明显残缺的数据文件继续产出结果。
 - 如果用户要做 HTML 报告或其他 HTML 页面，先读 [references/hydros-html-prompt.md](references/hydros-html-prompt.md)。
@@ -85,6 +87,8 @@ description: |
 - 需要完整版 HTML 报告、结果曲线展示或可直接打开的单文件页面时，优先复用 [assets/hydros-report-template/index.html](assets/hydros-report-template/index.html) 模板，并按当前脚本实现把真实 payload 内联到 `simulation_report.html`。
 - 当用户明确要“报告”“完整报告”“HTML 报告”“汇报页”时，不要先交付临时分析报告、手写摘要页或简版 HTML 作为最终产物；如果本地 CSV 尚未就位，先完成 `resources/read -> 落盘 .csv -> build_csv_report.py`，再输出遵循模板的正式报告。
 - HTML 正式报告应尽量包含结果曲线图产物和渠道纵剖面图；若 `chart1_water_level.png`、`chart2_water_flow.png`、`chart4_gate_opening.png`、`chart5_disturbance_flow.png`、`chart6_heatmap.png`、`chart7_longitudinal_profile.png` 中有缺失，仍可交付 HTML，但必须在报告正文里显式写明缺失项、缺失原因和影响范围，不能把缺图问题只留在聊天回复里解释。
+- 正式 HTML 报告生成完成后，默认调用 `hydros-engine-mdm` 的 `upload_and_fetch_report` MCP 工具上传 HTML，并把返回的在线访问地址作为交付结果的一部分；除非用户明确只要本地文件，否则不要停在“本地已生成 HTML”这一步。
+- HTML 报告上传必须走 `hydros-engine-mdm` 的 MCP 工具，不要用 `curl`、手写 HTTP 请求或其他旁路方式代替正式上传链路；`curl` 仅可用于 executor 侧 `resources/read` 等调试，不可替代报告上传。
 
 ## 资源导航
 
@@ -120,6 +124,7 @@ description: |
 
 异常处理：
 - 连接失败时，提示用户检查 `hydros-engine-executor` MCP 服务。
+- 如果场景建模元数据、拓扑或 `objects.yaml` 相关步骤失败，同时提示用户检查 `hydros-engine-mdm` MCP 配置是否完整。
 - 如果后续报 “SSE通道未建立”，用同一个 `sse_client_id` 重新订阅。
 
 ### 阶段二：查询与选择场景
@@ -128,9 +133,9 @@ description: |
 2. 将场景整理为 markdown 表格，至少包含：序号、场景 ID、场景名称、核心能力。
 3. 保存每个场景的 `biz_scenario_config_url`，后续创建任务时必须使用。
 4. 给出推荐场景，优先描述中包含“测试”或“SDK”的场景，其次选依赖较少的场景。
-5. 一旦用户明确选定某个场景（例如只回复场景 ID、场景名称，或说“就这个”“选这个”），在进入阶段三前，先基于场景 YAML 里的 `hydros_objects_modeling_url` 拉取并缓存 `objects.yaml`，再默认补一段简要拓扑总结。
+5. 一旦用户明确选定某个场景（例如只回复场景 ID、场景名称，或说“就这个”“选这个”），在进入阶段三前，先确认 `hydros-engine-mdm` 前置配置已完成，再基于场景 YAML 里的 `hydros_objects_modeling_url` 拉取并缓存 `objects.yaml`，再默认补一段简要拓扑总结。
    下载方式固定为：
-   - 先读取场景 YAML，提取 `hydros_objects_modeling_url`
+   - 先确认 `hydros-engine-mdm` 已配置可用，再读取场景 YAML，提取 `hydros_objects_modeling_url`
    - 对下载地址做 URL 规范化，兼容中文路径和特殊字符
    - 通过标准 HTTP GET 直接下载 `objects.yaml`
    - 以 UTF-8 文本形式一次性写入本地缓存文件，供本轮后续步骤复用
@@ -141,7 +146,7 @@ description: |
 - 用 1 到 3 句话概括主链路拓扑，例如“主渠从 QD-1 依次连接到 QD-14，中间穿插若干分水口、退水闸和 2 个闸站”。
 - 点出关键控制节点或特殊对象，例如 `ZM1`、`ZM2`、主要分水口、退水闸、入口断面。
 - 这是“简单总结”，默认放在场景确认反馈里即可，不要等用户追问后才补。
-- 如果 `objects.yaml` 暂时不可读，也要明确说明“当前无法读取对象拓扑，只展示场景基本信息”，不要静默跳过。
+- 如果 `objects.yaml` 暂时不可读，也要明确说明“当前无法读取对象拓扑，只展示场景基本信息”；如果根因是元数据链路未接通，要同时指出 `hydros-engine-mdm` 前置条件缺失，不要静默跳过。
 - 已成功拉取的 `objects.yaml` 默认视为本轮会话资产，后续生成纵剖面、拓扑页或正式报告时优先复用这份本地文件，不要再次重复拉取。
 
 场景预置事件展示要求：
@@ -299,7 +304,15 @@ INIT -> WAITING_AGENTS -> READY -> STEPPING -> COMPLETED
 1. **数据获取**：
     - 确认任务状态为 `COMPLETED`
     - 调用 `get_timeseries_data(biz_scene_instance_id)` 获取 `resource_uri`（如 `hydroengine://downloads/SIM_xxx.csv`）
-    - 通过 MCP 协议的 `resources/read` 方法读取 CSV 内容。这是一个 MCP 标准方法，需通过 HTTP POST 调用：
+    - 优先使用 `scripts/download_timeseries_csv.py` 读取并落盘 CSV：
+
+    ```bash
+    python3 scripts/download_timeseries_csv.py \
+      "hydroengine://downloads/SIM_xxx.csv" \
+      "output/SIM_xxx.csv"
+    ```
+
+    - 如需排查或脱离脚本调试，也可以直接通过 MCP 协议的 `resources/read` 方法读取 CSV 内容。这是一个 MCP 标准方法，需通过 HTTP POST 调用：
 
     ```bash
     curl -X POST "https://hydroos.cn/mcps/hydros-engine-executor" \
@@ -307,7 +320,7 @@ INIT -> WAITING_AGENTS -> READY -> STEPPING -> COMPLETED
       -H "Authorization: Bearer <token>" \
       -H "Execution-Source: codex" \
       -H "Production-Code: copaw" \
-      -H "Accept: application/json" \
+      -H "Accept: application/json,text/event-stream" \
       -d '{
         "jsonrpc": "2.0",
         "id": 1,
@@ -318,8 +331,8 @@ INIT -> WAITING_AGENTS -> READY -> STEPPING -> COMPLETED
       }'
     ```
 
-    - 从响应中提取 `result.contents[0].text` 字段，即为完整 CSV 文本
-    - 将 CSV 内容一次性写入本地 `.csv` 文件
+    - 从响应中提取 `result.contents[0].text` 字段，即为完整 CSV 文本；如果手动调试时用了 `curl`，不要把终端打印的整段 JSON 直接当成 CSV 文件
+    - 将 CSV 内容一次性写入本地 `.csv` 文件；正式交付优先用脚本，不要依赖终端复制粘贴或 stdout 重定向
     - 写完后立刻校验文件大小、行数，必要时补充总记录数核对
     - 如果用户后续要生成 HTML 报告、Markdown 报告、拓扑页或纵剖面页，则在这一步一并基于场景 YAML 下载并缓存 `objects.yaml`；下载方式同样是"读取 `hydros_objects_modeling_url` -> 规范化 URL -> 标准 HTTP GET 下载 -> 以 UTF-8 一次性写入本地缓存文件"；若本轮前面已经缓存过，则优先复用，不要重复拉取
     - 如果 CSV 下载失败、资源读取失败、写盘失败，或校验后判断为坏文件/残缺文件，则直接报告阶段五失败并停止，不允许继续生成图表、异常分析或任何正式报告
@@ -337,6 +350,9 @@ INIT -> WAITING_AGENTS -> READY -> STEPPING -> COMPLETED
    - **Markdown 报告**：图文并茂，每张图表配套文字分析
    - **目录结构**：统一落盘到 `output/<biz_scene_instance_id>/`；其中 `report/` 存放报告，`charts/` 存放图表，`data/` 存放 CSV、`objects.yaml` 和分析中间文件
    - **数据验证**：比较期望与实际的时长/点数，不一致时在报告中说明
+   - **上传交付**：当 HTML 正式报告生成完成后，读取完整 HTML 内容并调用 `hydros-engine-mdm` 的 `upload_and_fetch_report(biz_scene_instance_id, html_content)` MCP 工具上传；优先把返回的报告地址交付给用户，同时保留本地 `simulation_report.html`
+   - **上传约束**：报告上传禁止改用 `curl` 或手写 HTTP 请求旁路实现；若 MCP 工具不可用，应明确报告“上传链路受阻”，不要悄悄切换上传方式
+   - **失败处理**：如果 HTML 已生成但上传失败，要明确区分“本地报告生成成功”和“远端上传失败”，并把失败原因单独报告；不要伪装成整份报告都失败
 
 6. **模板选择**：
    - 用户要”报告页””汇报页””结果曲线” → 报告模板
