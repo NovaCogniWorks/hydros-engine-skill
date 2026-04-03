@@ -259,33 +259,33 @@ def resolve_runtime_config(
 
     has_unreliable_time_axis = False
     axis_mode = "csv_index"
-    axis_label = "CSV 采样序号"
-    axis_note = "CSV 时间轴字段不足以可靠还原真实计算步，图表横轴按 CSV 采样序号展示。"
-    sample_step_note = f"采样序号 {unique_steps[0]} ~ {unique_steps[-1]}"
+    axis_label = "输出顺序"
+    axis_note = "结果文件里的时间信息不够完整，图表横轴按结果输出先后顺序显示。"
+    sample_step_note = f"第 {unique_steps[0]} 次 ~ 第 {unique_steps[-1]} 次输出"
 
     if stable_csv_interval is not None and stable_csv_interval > 1:
         axis_mode = "calculation_step"
-        axis_label = "计算步"
-        axis_note = "CSV 的时间步字段已表现为稀疏计算步号，图表横轴按计算步展示。"
-        sample_step_note = f"计算步 {unique_steps[0]} ~ {unique_steps[-1]}"
+        axis_label = "仿真步"
+        axis_note = "结果文件里的序号可以对应到仿真推进过程，图表横轴显示仿真进行到第几步。"
+        sample_step_note = f"仿真第 {unique_steps[0]} 步 ~ 第 {unique_steps[-1]} 步"
     elif output_ratio is not None and stable_csv_interval == 1 and expected_sample_count is not None:
         if abs(expected_sample_count - len(unique_steps)) <= 1:
             axis_mode = "output_ordinal"
-            axis_label = "输出序号"
+            axis_label = "输出顺序"
             axis_note = (
-                f"CSV 的时间步字段更像输出序号；时间轴按用户参数 total_steps={total_steps}, "
-                f"sim_step_size={sim_step_size}, output_step_size={output_step_size} 推导。"
+                "结果文件里的序号更接近结果输出顺序，图表横轴按结果输出先后顺序显示，"
+                "并结合本次仿真设置做时长判断。"
             )
-            sample_step_note = f"输出序号 {unique_steps[0]} ~ {unique_steps[-1]}"
+            sample_step_note = f"第 {unique_steps[0]} 次 ~ 第 {unique_steps[-1]} 次输出"
         else:
             has_unreliable_time_axis = True
             axis_mode = "csv_index_unreliable"
-            axis_label = "CSV 采样序号"
+            axis_label = "输出顺序"
             axis_note = (
-                f"CSV 仅包含 {len(unique_steps)} 个采样点，但按用户参数应约有 {expected_sample_count} 个输出点；"
-                "CSV 时间轴疑似缺失或导出异常，因此图表横轴仅保留 CSV 采样序号。"
+                f"结果文件目前只看到 {len(unique_steps)} 次结果输出，但按本次设置原本应有约 {expected_sample_count} 次结果输出；"
+                "结果文件的时间信息可能不完整，因此图表横轴仅按结果输出先后顺序显示。"
             )
-            sample_step_note = f"CSV 采样序号 {unique_steps[0]} ~ {unique_steps[-1]}（时间轴不可靠）"
+            sample_step_note = f"第 {unique_steps[0]} 次 ~ 第 {unique_steps[-1]} 次输出（时间信息不完整）"
 
     return RuntimeConfig(
         total_steps=total_steps,
@@ -603,7 +603,7 @@ def build_report_data(
                 "priority": "中",
                 "object": object_name,
                 "metric": "water_flow",
-                "finding": f"全程 {len(group)} 个采样点流量均为 0。",
+                "finding": f"全部 {len(group)} 次结果输出的流量均为 0。",
                 "advice": "确认该对象在当前工况下是否应参与配水（如保持关闭状态），必要时复核场景配置。",
             }
         )
@@ -703,7 +703,7 @@ def build_report_data(
         f"{output_interval_seconds} 秒/次（{format_duration_text(output_interval_seconds)}）"
         if output_interval_seconds is not None
         else (
-            f"CSV 索引间隔 {step_interval}" if step_interval is not None else "无法可靠推导"
+            f"结果序号间隔 {step_interval}" if step_interval is not None else "无法可靠推导"
         )
     )
     simulation_duration_text = (
@@ -712,7 +712,7 @@ def build_report_data(
         else (
             f"{last_calculation_step} 个计算步"
             if runtime_config.total_steps is not None
-            else "根据当前 CSV 无法可靠推导"
+            else "根据当前结果文件无法可靠推导"
         )
     )
     raw_sampled_point_count = len(raw_unique_steps)
@@ -722,14 +722,14 @@ def build_report_data(
             0,
             {
                 "priority": "高",
-                "object": "CSV 时间轴",
-                "metric": "时间步字段 / 计算时间步 / 源业务时间",
+                "object": "结果文件时间轴",
+                "metric": "结果时间信息",
                 "finding": (
-                    f"按参数应约有 {runtime_config.expected_sample_count} 个输出点，但 CSV 实际只有 {raw_sampled_point_count} 个原始采样点；"
+                    f"按本次设置原本应看到约 {runtime_config.expected_sample_count} 次结果输出，但结果文件实际只有 {raw_sampled_point_count} 次结果输出；"
                     f"期望总时长 {format_seconds_text(simulation_duration_seconds) or '无法推导'}，"
-                    f"按现有采样点最多只能覆盖 {format_seconds_text(sampled_duration_seconds) or '无法推导'}。"
+                    f"按当前结果文件最多只能覆盖 {format_seconds_text(sampled_duration_seconds) or '无法推导'}。"
                 ),
-                "advice": "将该 CSV 标记为时间轴不可靠，报告中不要把时间步字段直接解释为真实计算步；建议排查导出逻辑或补齐计算时间步字段。",
+                "advice": "将该结果文件标记为时间信息不完整，报告中不要把文件里的编号直接解释为真实仿真步数；建议排查导出逻辑或补齐完整时间信息。",
             },
         )
     if asset_status["missing"]:
@@ -747,21 +747,45 @@ def build_report_data(
             },
         )
 
-    summary_paragraph = (
-        f"该 CSV 共包含 {len(df)} 条记录，覆盖 {df['object_name'].nunique()} 个对象、"
-        f"{df['metrics_code'].nunique()} 类指标，展示时间步范围 {unique_steps[0]} ~ {unique_steps[-1]}，"
-        f"图表展示共 {display_sampled_point_count} 个采样点。"
-        f"整体未发现负流量和明显水位突跳，断面的沿程水头损失约 {level_drop} m，表现为稳定下泄。"
-        f"当前更值得关注的是个别退水闸零流量，以及 {highlight_flow_name} 的局部流量最大变化幅度较大。"
-    )
+    scenario_name = scenario_meta["scenario_name"] if scenario_meta and scenario_meta.get("scenario_name") else None
+    recommendation_targets = [name for name in [highlight_flow_name, zero_flow_groups[0][0] if zero_flow_groups else None] if name]
+    recommendation_target_text = "、".join(dict.fromkeys(recommendation_targets[:2])) or "关键变化区段"
+    recommendation_actions = [
+        "更细粒度输出步长",
+        "关键节点控制动作复核",
+        "工况事件补充校核",
+    ]
+
+    summary_paragraphs = [
+        (
+            f"本次研究围绕{scenario_name or f'场景 {scenario_id}'}开展水动力仿真结果分析，"
+            f"重点复核主干渠及关键节点在当前工况下的水位、流量、闸门调节和沿程水面线变化。"
+            f"本次结果文件共包含 {len(df)} 条记录，覆盖 {df['object_name'].nunique()} 个对象、"
+            f"{df['metrics_code'].nunique()} 类指标，当前页面共展示 {display_sampled_point_count} 次结果输出，"
+            f"覆盖仿真第 {unique_steps[0]} 步至第 {unique_steps[-1]} 步。"
+        ),
+        (
+            f"结果表明，研究区整体保持稳定输水，未发现明显倒流和突发水位失稳；"
+            f"主干断面在最后时刻的沿程水头损失约 {level_drop} m，整体仍符合上游高、下游低的基本水力梯度。"
+            f"当前需要重点关注的是个别退水闸零流量，以及 {highlight_flow_name} 的局部流量最大变化幅度较大。"
+        ),
+        (
+            f"综合分析认为，当前结果反映出方案总体运行平稳，"
+            f"但 {recommendation_target_text} 等敏感区段仍需进一步做重点核查。"
+            f"建议下一阶段补充 {'、'.join(recommendation_actions)}，"
+            f"以降低局部变化误判风险，并为后续设计复核和调度判断提供支撑。"
+        ),
+    ]
     if runtime_config.expected_sample_count is not None and runtime_config.expected_sample_count != raw_sampled_point_count:
-        summary_paragraph += (
-            f" 同时，用户参数对应的期望输出点数约为 {runtime_config.expected_sample_count}，"
-            f"而 CSV 实际仅导出 {raw_sampled_point_count} 个原始采样点，说明结果文件的时间轴字段存在异常。"
+        summary_paragraphs[1] += (
+            f" 同时，按本次设置原本应看到约 {runtime_config.expected_sample_count} 次结果输出，"
+            f"而结果文件实际仅导出 {raw_sampled_point_count} 次结果输出，说明结果文件的时间信息存在异常。"
         )
 
+    summary_paragraph = "\n\n".join(summary_paragraphs)
+
     summary_bullets = [
-        f"{runtime_config.axis_note} 当前展示时间步为 {'、'.join(str(step) for step in unique_steps[:5])} ... {unique_steps[-1]}。",
+        f"{runtime_config.axis_note} 当前页面展示范围为第 {'、第 '.join(str(step) for step in unique_steps[:5])} 步 ... 第 {unique_steps[-1]} 步。",
         f"未检测到负流量，流量最小值为 {round_number(flow_display_df['value'].min())} m³/s，渠道主流方向保持一致。",
         f"主干断面在最后时刻的沿程水头损失约 {level_drop} m，符合上游高、下游低的基本水力梯度。",
         f"{highlight_flow_name} 的流量最大变化幅度最大，达到 {round_number(highlight_flow_stats['range'])} m³/s，需要结合工况解释其变化原因。",
@@ -782,7 +806,7 @@ def build_report_data(
             1,
             (
                 f"按参数推导的总时长为 {format_seconds_text(simulation_duration_seconds)}，"
-                f"但按 CSV 当前 {raw_sampled_point_count} 个原始采样点和输出步长推导，仅能覆盖 {format_seconds_text(sampled_duration_seconds)}；"
+                f"但按当前结果文件的 {raw_sampled_point_count} 次结果输出和输出步长推导，仅能覆盖 {format_seconds_text(sampled_duration_seconds)}；"
                 f"两者相差 {format_seconds_text(duration_gap_seconds)}。"
             ),
         )
@@ -826,7 +850,6 @@ def build_report_data(
             }
         )
 
-    scenario_name = scenario_meta["scenario_name"] if scenario_meta and scenario_meta.get("scenario_name") else None
     report_title = f"{scenario_name} 分析报告" if scenario_name else "Hydros 仿真分析报告"
 
     condition_text = (
@@ -883,13 +906,6 @@ def build_report_data(
         else "仍处于可控范围内"
     )
 
-    recommendation_targets = [name for name in [highlight_flow_name, zero_flow_groups[0][0] if zero_flow_groups else None] if name]
-    recommendation_target_text = "、".join(dict.fromkeys(recommendation_targets[:2])) or "关键变化区段"
-    recommendation_actions = [
-        "更细粒度输出步长",
-        "关键节点控制动作复核",
-        "工况事件补充校核",
-    ]
     payload = {
         "csvPath": csv_path.name,
         "meta": {
@@ -966,6 +982,7 @@ def build_report_data(
             },
         ],
         "summaryParagraph": summary_paragraph,
+        "summaryParagraphs": summary_paragraphs,
         "summaryBullets": summary_bullets,
         "anomalies": anomaly_items,
         "recommendations": recommendations,
@@ -982,9 +999,9 @@ def build_report_data(
             {"label": "时间步长", "value": sim_step_size_text},
             {"label": "输出步长", "value": output_step_text},
             {"label": "仿真时长", "value": simulation_duration_text},
-            {"label": "CSV 覆盖时长", "value": format_seconds_text(sampled_duration_seconds) or "无法推导"},
+            {"label": "结果文件覆盖时长", "value": format_seconds_text(sampled_duration_seconds) or "无法推导"},
             {"label": "时长差值", "value": format_seconds_text(duration_gap_seconds) or "无法推导"},
-            {"label": "展示时间步范围", "value": f"{unique_steps[0]} ~ {unique_steps[-1]}（共 {display_sampled_point_count} 个展示采样点）"},
+            {"label": "结果覆盖步段", "value": f"仿真第 {unique_steps[0]} 步至第 {unique_steps[-1]} 步（共输出 {display_sampled_point_count} 次结果）"},
             {"label": "结果导出时间", "value": format_datetime_text(runtime_completed_at.to_pydatetime()) or str(df["gmt_create"].max())},
         ],
         "miniTable": mini_table,
@@ -1098,45 +1115,43 @@ def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
         )
     if "不可靠" in str(payload["meta"].get("time_axis_note", "")):
         conclusion_axis_line = (
-            "- 本次 CSV 在数值层面可用于结果分析，但时间轴字段不可靠；"
-            "报告已按可用参数恢复时间口径，并把图表横轴降级为 CSV 采样序号。"
+            "- 本次结果文件在数值层面可用于结果分析，但时间信息不完整；"
+            "报告已按可用参数恢复时长判断，并把图表横轴降级为结果输出顺序。"
         )
     else:
         conclusion_axis_line = (
-            f"- 本次 CSV 的时间步字段可按{payload['meta'].get('axis_label', '计算步')}解读，时间轴口径清晰；"
-            f"本次报告覆盖 `{analysis['step_values'][0]} ~ {analysis['step_values'][-1]}`，共 `{payload['meta']['sampled_point_count']}` 个采样点。"
+            f"- 本次结果文件中的横轴可按{payload['meta'].get('axis_label', '仿真步')}理解，横轴含义明确；"
+            f"本次报告覆盖仿真第 `{analysis['step_values'][0]}` 步至第 `{analysis['step_values'][-1]}` 步，共输出 `{payload['meta']['sampled_point_count']}` 次结果。"
         )
 
     duration_gap_text = str(payload["meta"].get("duration_gap", ""))
     if duration_gap_text.startswith("0 秒"):
         conclusion_duration_line = (
-            f"- CSV 覆盖时长与当前可推导的仿真总时长一致，时长差值为 `{duration_gap_text}`，"
+            f"- 结果文件覆盖时长与当前可推导的仿真总时长一致，时长差值为 `{duration_gap_text}`，"
             "可用于完整过程复盘。"
         )
     else:
         conclusion_duration_line = (
-            f"- 用户参数推导的总时长与 CSV 覆盖时长存在差异，当前差值为 `{duration_gap_text}`；"
-            "需优先排查 CSV 导出链路，再决定是否可用于严格时间过程分析。"
+            f"- 用户参数推导的总时长与结果文件覆盖时长存在差异，当前差值为 `{duration_gap_text}`；"
+            "需优先排查结果文件导出链路，再决定是否可用于严格时间过程分析。"
         )
     markdown = f"""# {payload['meta']['report_title']}
 
 ## 概况
 
-- 任务 ID：`{payload['meta']['biz_scene_instance_id']}`
 - 场景 ID：`{payload['meta']['biz_scenario_id']}`
-- 仿真 YML：`{payload['meta']['scenario_yaml_id']}`
 - 任务状态：`{payload['meta']['task_status']}`
 - 开始时间：`{payload['meta']['simulation_start_time'] or '场景 YAML 未提供'}`
-- 结束时间：`{payload['meta']['simulation_end_time'] or '根据 CSV 无法推导'}`
+- 结束时间：`{payload['meta']['simulation_end_time'] or '根据结果文件无法推导'}`
 - 时间步长：`{payload['meta']['sim_step_size_text']}`
 - 输出步长：`{payload['meta']['output_step_text']}`
 - 仿真时长：`{payload['meta']['simulation_duration']}`
-- CSV 覆盖时长：`{payload['meta']['sampled_duration']}`
+- 结果文件覆盖时长：`{payload['meta']['sampled_duration']}`
 - 时长差值：`{payload['meta']['duration_gap']}`
 - 记录数：`{payload['meta']['record_count']}`
 - 对象数：`{payload['meta']['object_count']}`
 - 指标数：`{payload['meta']['metric_count']}`
-- 采样时间步范围：`{analysis['step_values'][0]} ~ {analysis['step_values'][-1]}`，共 `{payload['meta']['sampled_point_count']}` 个采样点
+- 结果覆盖步段：仿真第 `{analysis['step_values'][0]}` 步至第 `{analysis['step_values'][-1]}` 步，共输出 `{payload['meta']['sampled_point_count']}` 次结果
 - 配置总计算步：`{payload['meta']['total_steps']}`
 
 ## 执行摘要
