@@ -227,6 +227,11 @@
       }
 
       .timeline-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        cursor: pointer;
         transition:
           transform 180ms ease,
           background-color 180ms ease,
@@ -235,7 +240,70 @@
           box-shadow 180ms ease;
       }
 
+      .timeline-rate-control {
+        cursor: pointer;
+        transition:
+          transform 180ms ease,
+          background-color 180ms ease,
+          border-color 180ms ease,
+          color 180ms ease,
+          box-shadow 180ms ease;
+      }
+
+      .timeline-rate-select {
+        cursor: pointer;
+        appearance: none;
+        -webkit-appearance: none;
+        -moz-appearance: none;
+        text-align: center;
+        text-align-last: center;
+        background-image: none;
+      }
+
+      .timeline-rate-select-wrap {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        margin-left: 2px;
+        padding-left: 10px;
+        border-left: 1px solid rgba(24, 91, 117, 0.16);
+        cursor: pointer;
+        transition:
+          transform 180ms ease,
+          color 180ms ease,
+          opacity 180ms ease;
+      }
+
+      .timeline-rate-select-wrap:hover {
+        transform: translateY(-1px);
+      }
+
+      .timeline-rate-select-wrap:hover .timeline-rate-chevron {
+        transform: translateY(-1px) scale(1.06);
+        color: rgba(24, 91, 117, 0.96);
+      }
+
+      .timeline-rate-chevron {
+        pointer-events: none;
+        color: rgba(24, 91, 117, 0.72);
+        transition:
+          transform 180ms ease,
+          color 180ms ease;
+      }
+
+      .timeline-rate-label {
+        border: 0;
+        background: transparent;
+        color: inherit;
+        cursor: pointer;
+      }
+
       .timeline-button:hover {
+        transform: translateY(-1px);
+      }
+
+      .timeline-rate-control:hover {
         transform: translateY(-1px);
       }
 
@@ -473,16 +541,25 @@
                 <div>
                   <h2 class="mt-2 text-2xl font-semibold">执行摘要</h2>
                 </div>
-                <span id="summaryBadge" class="inline-flex w-fit rounded-full border border-primary/12 bg-primary/8 px-4 py-2 text-xs font-medium text-primary"></span>
+                <span id="summaryBadge" class="inline-flex w-fit rounded-full border border-primary/12 bg-primary/8 px-4 py-2 text-base font-medium text-primary"></span>
               </div>
               <div class="soft-panel mt-5 rounded-[24px] px-5 py-5">
                 <div id="summaryParagraph" class="space-y-4 text-base leading-7 text-ink/76"></div>
-                <ol class="mt-4 grid gap-3 lg:grid-cols-2" id="summaryBullets"></ol>
+              </div>
+              <div class="mt-6">
+                <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                  <div>
+                    <h2 class="mt-2 text-2xl font-semibold">关键发现</h2>
+                  </div>
+                </div>
+                <div class="soft-panel mt-5 rounded-[24px] px-5 py-5">
+                  <ol class="grid gap-3 lg:grid-cols-2" id="summaryBullets"></ol>
+                </div>
               </div>
             </article>
 
             <article id="longitudinalSection" class="section-shell min-w-0 rounded-[30px] p-5 lg:col-span-2 lg:col-start-1 lg:row-start-2">
-              <div>
+                <div>
                 <h2 class="mt-2 text-2xl font-semibold">渠道纵剖面</h2>
                 <p class="mt-2 text-sm text-ink/58">叠加断面顶高程、底高程、水体填充、闸站位置、对象标注与流向</p>
               </div>
@@ -492,15 +569,22 @@
                     <button id="timelinePlay" class="timeline-button rounded-full bg-primary px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-primary/92">播放</button>
                     <button id="timelinePause" class="timeline-button rounded-full border border-line bg-white px-4 py-2 text-sm font-medium text-ink/78 hover:bg-slate-50">暂停</button>
                     <button id="timelineResume" class="timeline-button rounded-full border border-line bg-white px-4 py-2 text-sm font-medium text-ink/78 hover:bg-slate-50">继续</button>
-                    <label class="inline-flex items-center gap-2 rounded-full border border-line bg-white px-3 py-2 text-sm text-ink/72 shadow-sm">
-                      <span>倍速</span>
-                      <select id="timelineRate" class="rounded-full border-0 bg-transparent pr-6 text-sm font-medium text-primary focus:outline-none">
-                        <option value="0.5">0.5x</option>
-                        <option value="1" selected>1x</option>
-                        <option value="2">2x</option>
-                        <option value="4">4x</option>
-                      </select>
-                    </label>
+                    <div class="timeline-rate-control inline-flex items-center justify-center gap-2 rounded-full border border-line bg-white px-3 py-2 text-sm text-ink/72 shadow-sm" role="group" aria-label="倍速控制">
+                      <button id="timelineRateLabel" type="button" class="timeline-rate-label inline-flex items-center justify-center rounded-full px-0 py-0 text-sm">
+                        倍速
+                      </button>
+                      <span id="timelineRateSelectWrap" class="timeline-rate-select-wrap" title="点这里展开下拉选择">
+                        <select id="timelineRate" class="timeline-rate-select rounded-full border-0 bg-transparent pr-1 text-sm font-medium text-primary focus:outline-none">
+                          <option value="0.5">0.5x</option>
+                          <option value="1" selected>1x</option>
+                          <option value="2">2x</option>
+                          <option value="4">4x</option>
+                        </select>
+                        <svg class="timeline-rate-chevron h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                          <path d="M4 6.5L8 10L12 6.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+                        </svg>
+                      </span>
+                    </div>
                   </div>
                   <div class="min-w-0 flex-1">
                     <div class="mb-2 flex items-center justify-between gap-3 text-sm text-ink/62">
@@ -605,8 +689,8 @@
             </article>
           <aside class="min-w-0 space-y-6 lg:col-start-2 lg:row-start-1">
             <article class="section-shell-dark rounded-[30px] px-5 py-5 text-white">
-              <p class="text-xs font-semibold uppercase tracking-[0.24em] text-white/58">任务概览</p>
-              <dl class="mt-4 space-y-3 text-sm" id="snapshotPanel"></dl>
+              <p class="text-sm font-semibold uppercase tracking-[0.2em] text-white/62">任务概览</p>
+              <dl class="mt-4 space-y-3 text-base" id="snapshotPanel"></dl>
             </article>
 
             <article class="section-shell rounded-[30px] p-5">
@@ -1009,11 +1093,11 @@
       function renderSummaryBullets() {
         document.getElementById("summaryBullets").innerHTML = reportData.summaryBullets
           .map(
-            (text, index) => `
+            (item) => `
               <li class="soft-panel rounded-[18px] px-4 py-3">
-                <div class="flex items-start gap-3">
-                  <span class="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary">${index + 1}</span>
-                  <span class="pt-0.5">${localizeTermText(text)}</span>
+                <div class="space-y-2">
+                  <h3 class="text-sm font-semibold text-primary">${localizeTermText(item.title || "")}</h3>
+                  <p class="text-sm leading-7 text-ink/76 [text-align:justify]">${localizeTermText(item.body || item)}</p>
                 </div>
               </li>
             `
@@ -1034,8 +1118,8 @@
           .map(
             (row) => `
               <div class="flex items-start justify-between gap-4 border-b border-white/10 pb-3 last:border-b-0 last:pb-0">
-                <dt class="text-white/58">${localizeTermText(row.label)}</dt>
-                <dd class="text-right font-medium">${localizeTermText(row.value)}</dd>
+                <dt class="text-sm text-white/62">${localizeTermText(row.label)}</dt>
+                <dd class="text-right text-base font-medium">${localizeTermText(row.value)}</dd>
               </div>
             `
           )
@@ -2096,6 +2180,9 @@
         const pauseButton = document.getElementById("timelinePause");
         const resumeButton = document.getElementById("timelineResume");
         const rateSelect = document.getElementById("timelineRate");
+        const rateControl = rateSelect?.closest(".timeline-rate-control");
+        const rateLabel = document.getElementById("timelineRateLabel");
+        const rateSelectWrap = document.getElementById("timelineRateSelectWrap");
 
         if (!interactionState.steps.length) {
           [slider, playButton, pauseButton, resumeButton, rateSelect].forEach((element) => {
@@ -2151,6 +2238,24 @@
         pauseButton.addEventListener("click", () => stopPlayback());
         resumeButton.addEventListener("click", () => startPlayback(false));
         rateSelect.addEventListener("change", (event) => setPlaybackRate(event.target.value));
+        rateControl?.addEventListener("click", (event) => {
+          if (event.target === rateSelect || event.target === rateLabel || rateSelectWrap?.contains(event.target)) return;
+          rateSelect.focus();
+        });
+        rateLabel?.addEventListener("click", () => {
+          const options = Array.from(rateSelect.options).map((option) => option.value);
+          const currentIndex = Math.max(0, options.indexOf(String(interactionState.playbackRate)));
+          const nextValue = options[(currentIndex + 1) % options.length];
+          setPlaybackRate(nextValue);
+        });
+        rateSelectWrap?.addEventListener("click", () => {
+          rateSelect.focus();
+          if (typeof rateSelect.showPicker === "function") {
+            rateSelect.showPicker();
+            return;
+          }
+          rateSelect.click();
+        });
 
         updateTimelineUI();
         setCurrentStepByIndex(interactionState.steps.indexOf(interactionState.currentStep));

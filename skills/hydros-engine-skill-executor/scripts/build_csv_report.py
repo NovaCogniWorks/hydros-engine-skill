@@ -755,6 +755,12 @@ def build_report_data(
         "关键节点控制动作复核",
         "工况事件补充校核",
     ]
+    max_gate_change = (
+        round_number(gate_df.groupby("object_name")["value"].agg(lambda s: s.max() - s.min()).max())
+        if not gate_df.empty
+        else None
+    )
+    leading_zero_flow_name = zero_flow_groups[0][0] if zero_flow_groups else None
 
     summary_paragraphs = [
         (
@@ -783,44 +789,78 @@ def build_report_data(
         )
 
     summary_paragraph = "\n\n".join(summary_paragraphs)
-
-    summary_bullets = [
-        f"{runtime_config.axis_note} 当前页面展示范围为第 {'、第 '.join(str(step) for step in unique_steps[:5])} 步 ... 第 {unique_steps[-1]} 步。",
-        f"未检测到负流量，流量最小值为 {round_number(flow_display_df['value'].min())} m³/s，渠道主流方向保持一致。",
-        f"主干断面在最后时刻的沿程水头损失约 {level_drop} m，符合上游高、下游低的基本水力梯度。",
-        f"{highlight_flow_name} 的流量最大变化幅度最大，达到 {round_number(highlight_flow_stats['range'])} m³/s，需要结合工况解释其变化原因。",
-        (
-            f"{len(dynamic_gate_groups)} 个闸门序列存在开度调整，"
-            f"最大开度变化 {round_number(gate_df.groupby('object_name')['value'].agg(lambda s: s.max() - s.min()).max())}。"
-            if dynamic_gate_groups
-            else "闸门开度全程稳定，未观察到控制动作。"
-        ),
-    ]
-    if asset_status["missing"]:
-        summary_bullets.insert(
-            0,
-            f"报告产物存在缺失：{'、'.join(asset_status['missing'])}；HTML 已显式标注该问题，相关图表分析需按缺失范围降级解读。",
-        )
-    if runtime_config.expected_sample_count is not None and runtime_config.expected_sample_count != raw_sampled_point_count:
-        summary_bullets.insert(
-            1,
-            (
-                f"按参数推导的总时长为 {format_seconds_text(simulation_duration_seconds)}，"
-                f"但按当前结果文件的 {raw_sampled_point_count} 次结果输出和输出步长推导，仅能覆盖 {format_seconds_text(sampled_duration_seconds)}；"
-                f"两者相差 {format_seconds_text(duration_gap_seconds)}。"
-            ),
-        )
-
     longitudinal_profile = build_longitudinal_profile_payload(df, profile_dataset, unique_steps)
     if not longitudinal_profile["available"] and profile_error:
         longitudinal_profile["reason"] = profile_error
-    if longitudinal_profile["available"]:
-        summary_bullets.append(
-            f"纵剖面显示最后时刻水面线沿程平滑下降，已叠加 {longitudinal_profile['meta']['gate_station_count']} 个闸站位置，可直接用于工程复核。"
+
+    summary_bullets = [
+        {
+            "title": "运行表现",
+            "body": (
+                f"研究区整体保持稳定输水，未发现明显倒流；"
+                f"主干断面最后时刻沿程水头损失约 {level_drop} m，整体仍保持上游高、下游低的基本趋势。"
+            ),
+        },
+        {
+            "title": "变化规律",
+            "body": (
+                f"从当前结果看，变化主要集中在 {highlight_level_name}、{highlight_flow_name} 等关键位置；"
+                "其余大多数区段过程较平顺，主干渠沿程水面线整体呈平滑下降。"
+                if longitudinal_profile is not None
+                else (
+                    f"从当前结果曲线看，变化主要集中在 {highlight_level_name}、{highlight_flow_name} 等关键位置；"
+                    "其余大多数区段过程较平顺。"
+                )
+            ),
+        },
+        {
+            "title": "局部差异",
+            "body": (
+                f"{highlight_flow_name} 的流量最大变化幅度最明显，达到 {round_number(highlight_flow_stats['range'])} m³/s；"
+                "相比之下，其余大多数对象变化幅度更小，说明差异主要集中在局部关键节点。"
+            ),
+        },
+        {
+            "title": "异常情况",
+            "body": (
+                f"{leading_zero_flow_name} 最为特殊，全程结果均为 0，需先核查是正常停运、关闭状态，还是配置或取数异常。"
+                if leading_zero_flow_name
+                else (
+                    f"当前最特殊的现象出现在 {highlight_flow_name}，其变化幅度明显高于其他对象，"
+                    "需要结合工况进一步复核。"
+                )
+            ),
+        },
+        {
+            "title": "重点复核",
+            "body": (
+                f"重点关注 {recommendation_target_text}。与其他位置相比，这两个位置对本次工况变化反应更明显，建议优先复核。"
+                f" 本次共有 {len(dynamic_gate_groups)} 个闸门序列发生调节，最大开度变化 {max_gate_change}。"
+                if dynamic_gate_groups and max_gate_change is not None
+                else (
+                    f"重点关注 {recommendation_target_text}。与其他位置相比，这些位置对本次工况变化反应更明显，建议优先复核。"
+                )
+            ),
+        },
+        {
+            "title": "原因分析",
+            "body": (
+                "形成上述现象的主要原因，是主干渠整体仍受上游高、下游低的水力梯度控制，"
+                "同时局部区段又叠加了分流、退水或闸门调节的影响，因此整体平稳、局部更敏感。"
+            ),
+        },
+    ]
+    if asset_status["missing"]:
+        summary_bullets[3]["body"] += f" 另外，本次报告还缺少 {'、'.join(asset_status['missing'])}，相关图表维度需按缺失范围降级解读。"
+    if runtime_config.expected_sample_count is not None and runtime_config.expected_sample_count != raw_sampled_point_count:
+        summary_bullets[3]["body"] += (
+            f" 另外，按本次设置原本应看到约 {runtime_config.expected_sample_count} 次结果输出，"
+            f"但结果文件实际仅导出 {raw_sampled_point_count} 次结果输出。"
         )
-    else:
-        summary_bullets.append(
-            f"纵剖面本次未生成。原因：{profile_error or longitudinal_profile.get('reason') or '缺少对象高程/里程数据或生成链路失败'}。"
+
+    if not longitudinal_profile["available"]:
+        summary_bullets[3]["body"] += (
+            f" 纵剖面本次未生成，原因是 {profile_error or longitudinal_profile.get('reason') or '缺少对象高程/里程数据或生成链路失败'}。"
         )
 
     recommendations = [
@@ -1021,7 +1061,7 @@ def build_report_data(
             "flow": {
                 "analysis": (
                     f"流量结果曲线以稳定输水为主，{highlight_flow_name} 的最大变化幅度为 "
-                    f"{round_number(highlight_flow_stats['range'])} m³/s；真实零值对象仍保留用于识别停流和退水状态。"
+                    f"{round_number(highlight_flow_stats['range'])} m³/s。"
                 ),
                 "placeholder_steps": placeholder_flow_steps,
             },
@@ -1160,7 +1200,7 @@ def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
 
 ### 关键发现
 
-{chr(10).join(f"{index}. {item}" for index, item in enumerate(payload['summaryBullets'], start=1))}
+{chr(10).join(f"- **{item['title']}**：{item['body']}" for item in payload['summaryBullets'])}
 
 ## 指标分布
 
