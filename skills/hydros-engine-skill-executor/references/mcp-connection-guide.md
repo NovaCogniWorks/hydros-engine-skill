@@ -12,7 +12,7 @@
   用于场景建模元数据、拓扑和 `objects.yaml` 相关前置检查。
 
 说明：
-- 本文下面的直连示例仍以 `hydros-engine-executor` 为主，因为当前任务执行链路和 `resources/read` 下载链路都落在这一侧。
+- 本文下面的直连示例仍以 `hydros-engine-executor` 为主，因为当前任务执行链路和结果文件下载链接都落在这一侧。
 - `hydros-engine-mdm` 的服务名固定为 `hydros-engine-mdm`，实际 URL 和 Header 以当前环境生效配置为准。
 - 如果场景拓扑、建模元数据或 `objects.yaml` 相关步骤报错，不要只检查 executor，也要一起检查 mdm 配置。
 
@@ -99,7 +99,7 @@ curl -X POST https://hydroos.cn/mcps/hydros-engine-executor \
 
 **原因**：这些是业务网页路径，不是 MCP 端点。
 
-**正确方式**：使用 skill 中定义的 MCP 工具，如 `biz_scenario_id_lists`、`get_scenario_events`。
+**正确方式**：使用 skill 中定义的 MCP 工具，例如 `hydros-engine-mdm` 下的 `biz_scenario_id_lists`、`get_scenario_events`，以及 `hydros-engine-executor` 下的执行类工具。
 
 ### 错误方式 3：缺少必需 Header
 

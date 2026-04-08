@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-基于京石段 objects.yaml 与仿真 CSV 生成纵剖面 HTML 页面。
+基于京石段 objects.yaml 与仿真结果文件生成纵剖面 HTML 页面。
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ import urllib.request
 from pathlib import Path
 
 import pandas as pd
+from lib.timeseries_loader import load_timeseries_dataframe
 from lib.url_utils import normalize_remote_url
 
 try:
@@ -285,7 +286,7 @@ def build_dataset(
     sections = parse_cross_sections(yaml_text)
     object_annotations = parse_object_annotations(yaml_text, sections)
 
-    df = pd.read_csv(csv_path)
+    df = load_timeseries_dataframe(csv_path)
     df["value"] = pd.to_numeric(df["value"])
     df["data_index"] = pd.to_numeric(df["data_index"])
     last_step = int(df["data_index"].max())
@@ -628,7 +629,7 @@ def build_html(dataset: dict) -> str:
         <p class="eyebrow">Hydros Longitudinal Profile</p>
         <h1>渠道纵剖面图</h1>
         <p>
-          纵剖面基于 `objects.yaml` 中的断面里程与底高程构建，并叠加相应 CSV 数据
+          纵剖面基于 `objects.yaml` 中的断面里程与底高程构建，并叠加相应结果数据
           在最后时刻（当前展示步 `__LAST_STEP__`）的水位线。这样可以同时观察沿程床面变化和当前工况下的水面线走势。
         </p>
         <div class="meta">
@@ -1149,7 +1150,7 @@ def build_html(dataset: dict) -> str:
 
 def main() -> None:
     if len(sys.argv) < 2:
-      print("用法: python build_longitudinal_profile.py <timeseries_csv> [output_html] [objects_yaml]")
+      print("用法: python build_longitudinal_profile.py <timeseries_file> [output_html] [objects_yaml]")
       raise SystemExit(1)
 
     csv_path = Path(sys.argv[1]).resolve()

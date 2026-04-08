@@ -22,6 +22,8 @@ import os
 import argparse
 from collections import defaultdict, Counter
 
+from lib.timeseries_loader import load_timeseries_records
+
 try:
     import matplotlib
     matplotlib.use('Agg')
@@ -55,19 +57,19 @@ def resolve_axis_info(records, total_steps=None, sim_step_size=None, output_step
     if total_steps and sim_step_size and output_step_size and sim_step_size > 0:
         expected_sample_count = int(total_steps // (output_step_size / sim_step_size) + 1)
 
-    label = 'CSV 采样序号'
-    note = 'CSV 时间轴字段不足，图表横轴按 CSV 采样序号展示。'
+    label = '结果输出序号'
+    note = '结果文件时间信息不足，图表横轴按结果输出顺序展示。'
     if stable_interval is not None and stable_interval > 1:
         label = '计算步'
-        note = 'CSV data_index 已表现为计算步号，图表横轴按计算步展示。'
+        note = '结果文件中的 data_index 已表现为计算步号，图表横轴按计算步展示。'
     elif expected_sample_count is not None and stable_interval == 1:
         if abs(expected_sample_count - len(indices)) <= 1:
             label = '输出序号'
-            note = 'CSV data_index 更像输出序号，图表横轴按输出序号展示。'
+            note = '结果文件中的 data_index 更像输出序号，图表横轴按输出序号展示。'
         else:
             note = (
-                f'CSV 仅有 {len(indices)} 个采样点，但按参数应约有 {expected_sample_count} 个输出点；'
-                '图表横轴仅保留 CSV 采样序号。'
+                f'结果文件目前仅有 {len(indices)} 个采样点，但按参数应约有 {expected_sample_count} 个输出点；'
+                '图表横轴仅保留结果输出顺序。'
             )
     return {
         'label': label,
@@ -77,28 +79,16 @@ def resolve_axis_info(records, total_steps=None, sim_step_size=None, output_step
 
 
 def load_data(filepath):
-    """加载并解析时序数据 JSON 或 CSV"""
-    if filepath.endswith('.csv'):
-        records = []
-        with open(filepath, 'r', encoding='utf-8') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                records.append({
-                    'data_index': int(row['data_index']),
-                    'metrics_code': row['metrics_code'],
-                    'object_name': row['object_name'],
-                    'object_type': row['object_type'],
-                    'value': float(row['value']),
-                    'object_id': row['object_id']
-                })
-        print(f"从 CSV 加载了 {len(records)} 条记录")
-        return records
-    else:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            raw = json.load(f)
-        records = raw['result']['data']
+    """加载并解析时序数据 JSON、CSV 或 XLSX"""
+    records = load_timeseries_records(filepath)
+    suffix = os.path.splitext(filepath)[1].lower()
+    if suffix == '.json':
         print(f"从 JSON 加载了 {len(records)} 条记录")
-        return records
+    elif suffix == '.csv':
+        print(f"从结果文件 CSV 加载了 {len(records)} 条记录")
+    else:
+        print(f"从结果文件 {suffix.upper().lstrip('.')} 加载了 {len(records)} 条记录")
+    return records
 
 
 def group_data(records):

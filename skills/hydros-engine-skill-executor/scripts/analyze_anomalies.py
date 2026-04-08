@@ -19,28 +19,20 @@ import sys
 import os
 from collections import defaultdict
 
+from lib.timeseries_loader import load_timeseries_records
+
 
 def load_data(filepath):
-    """加载 JSON 或 CSV 格式的时序数据"""
-    if filepath.endswith('.csv'):
-        records = []
-        with open(filepath, 'r', encoding='utf-8') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                records.append({
-                    'data_index': int(row['data_index']),
-                    'metrics_code': row['metrics_code'],
-                    'object_name': row['object_name'],
-                    'object_type': row['object_type'],
-                    'value': float(row['value']),
-                    'object_id': row['object_id']
-                })
-        print(f"从 CSV 加载了 {len(records)} 条记录")
-        return records
+    """加载 JSON、CSV 或 XLSX 格式的时序数据"""
+    records = load_timeseries_records(filepath)
+    suffix = os.path.splitext(filepath)[1].lower()
+    if suffix == '.json':
+        print(f"从 JSON 加载了 {len(records)} 条记录")
+    elif suffix == '.csv':
+        print(f"从结果文件 CSV 加载了 {len(records)} 条记录")
     else:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            raw = json.load(f)
-        return raw['result']['data']
+        print(f"从结果文件 {suffix.upper().lstrip('.')} 加载了 {len(records)} 条记录")
+    return records
 
 
 def group_by_object_metric(records):
@@ -145,7 +137,7 @@ def detect_constant_flow(groups):
 def detect_data_gaps(groups, expected_steps=None):
     """检测数据缺失。
 
-    默认把 CSV 中实际出现过的全局采样步集合视为期望步集合，
+    默认把结果文件中实际出现过的全局采样步集合视为期望步集合，
     这样稀疏输出（如每 30 个计算步输出一次）不会被误判为缺失。
     """
     if expected_steps is None:

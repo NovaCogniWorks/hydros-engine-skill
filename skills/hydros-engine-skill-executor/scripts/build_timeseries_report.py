@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-从 Hydros 时序 CSV 生成 HTML + Markdown 分析报告。
+从 Hydros 时序结果文件生成 HTML + Markdown 分析报告。
 
 用法:
-    python build_csv_report.py <timeseries_csv> [output_dir]
+    python build_timeseries_report.py <timeseries_file> [output_dir]
         [--total-steps N] [--sim-step-size SECONDS] [--output-step-size SECONDS]
 """
 
@@ -27,6 +27,7 @@ import pandas as pd
 
 from build_longitudinal_profile import build_dataset as build_longitudinal_dataset
 from build_longitudinal_profile import save_profile_png
+from lib.timeseries_loader import load_timeseries_dataframe
 from lib.url_utils import normalize_remote_url
 
 
@@ -85,7 +86,7 @@ def resolve_task_output_dir(csv_path: Path, df: pd.DataFrame, explicit_output_di
 
 
 def load_dataframe(csv_path: Path) -> pd.DataFrame:
-    df = pd.read_csv(csv_path)
+    df = load_timeseries_dataframe(csv_path)
     required_columns = {
         "biz_scenario_id",
         "data_index",
@@ -96,16 +97,16 @@ def load_dataframe(csv_path: Path) -> pd.DataFrame:
     }
     missing_columns = sorted(required_columns - set(df.columns))
     if missing_columns:
-        raise ValueError(f"CSV 缺少必需列: {', '.join(missing_columns)}")
+        raise ValueError(f"结果文件缺少必需列: {', '.join(missing_columns)}")
     if df.empty:
-        raise ValueError("CSV 不包含任何数据行")
+        raise ValueError("结果文件不包含任何数据行")
 
     df["value"] = pd.to_numeric(df["value"], errors="coerce")
     df["data_index"] = pd.to_numeric(df["data_index"], errors="coerce")
     if df["data_index"].dropna().empty:
-        raise ValueError("CSV 中 data_index 全部无效，疑似坏文件或残缺文件")
+        raise ValueError("结果文件中 data_index 全部无效，疑似坏文件或残缺文件")
     if df["value"].dropna().empty:
-        raise ValueError("CSV 中 value 全部无效，疑似坏文件或残缺文件")
+        raise ValueError("结果文件中 value 全部无效，疑似坏文件或残缺文件")
     return df
 
 
@@ -218,8 +219,8 @@ def cache_objects_yaml(data_dir: Path, scenario_meta: dict[str, Any] | None) -> 
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="从 Hydros 时序 CSV 生成 HTML + Markdown 分析报告")
-    parser.add_argument("timeseries_csv")
+    parser = argparse.ArgumentParser(description="从 Hydros 时序结果文件生成 HTML + Markdown 分析报告")
+    parser.add_argument("timeseries_file")
     parser.add_argument("output_dir", nargs="?")
     parser.add_argument("--total-steps", type=int, default=None)
     parser.add_argument("--sim-step-size", type=int, default=None, help="计算步长，单位秒")
@@ -947,7 +948,7 @@ def build_report_data(
     )
 
     payload = {
-        "csvPath": csv_path.name,
+        "resultFilePath": csv_path.name,
         "meta": {
             "report_title": report_title,
             "biz_scene_instance_id": str(df["biz_scenario_instance_id"].iloc[0]),
@@ -1310,7 +1311,7 @@ def main() -> None:
     args = parse_args(sys.argv[1:])
     llm_name = resolve_llm_name(args.llm_name)
 
-    csv_path = Path(args.timeseries_csv).resolve()
+    csv_path = Path(args.timeseries_file).resolve()
     df = load_dataframe(csv_path)
     output_dir = resolve_task_output_dir(csv_path, df, args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)

@@ -10,7 +10,7 @@
   - mapping.json:           对象映射关系
 
 用法:
-    python compare_timeseries.py <mcp_csv> <excel_file> <output_dir> \
+    python compare_timeseries.py <mcp_result_file> <excel_file> <output_dir> \
         [--mapping mapping.json] [--step-resolution 120] \
         [--hist-start 2024-01-01] [--hist-days 3]
 """
@@ -38,7 +38,13 @@ plt.rcParams['axes.unicode_minus'] = False
 # ────────────────────────── 数据加载 ──────────────────────────
 
 def load_mcp_data(csv_path):
-    df = pd.read_csv(csv_path)
+    suffix = os.path.splitext(csv_path)[1].lower()
+    if suffix == '.csv':
+        df = pd.read_csv(csv_path)
+    elif suffix in {'.xlsx', '.xls', '.xlsm'}:
+        df = pd.read_excel(csv_path, sheet_name=0, engine='openpyxl')
+    else:
+        raise ValueError(f"不支持的仿真结果文件格式: {csv_path}")
     print(f"[MCP] {len(df)} 条记录, {df['object_name'].nunique()} 对象, "
           f"指标={sorted(df['metrics_code'].unique())}, 步={df['data_index'].min()}-{df['data_index'].max()}")
     return df
@@ -462,7 +468,7 @@ if (DATA.length > 0) showDetail();
 
 def main():
     parser = argparse.ArgumentParser(description='仿真结果 vs 历史实测数据对比')
-    parser.add_argument('mcp_csv', help='MCP 仿真输出 CSV')
+    parser.add_argument('mcp_csv', help='MCP 仿真结果文件（CSV 或 XLSX）')
     parser.add_argument('excel_file', help='历史实测数据 Excel')
     parser.add_argument('output_dir', help='输出目录')
     parser.add_argument('--mapping', help='映射 JSON 文件')

@@ -1,5 +1,5 @@
 window.HYDROS_REPORT_DATA = {
-  csvPath: "/path/to/timeseries_data.csv",
+  resultFilePath: "/path/to/timeseries_data.xlsx",
   meta: {
     report_title: "Hydros 仿真分析报告",
     biz_scene_instance_id: "SIM-DEMO-001",
