@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import pandas as pd
 
@@ -35,7 +36,6 @@ ROOT = Path(__file__).resolve().parent.parent
 PROJECT_ROOT = ROOT.parent.parent
 TEMPLATE_HTML = ROOT / "assets" / "hydros-report-template" / "index.html"
 CHART_SCRIPT = ROOT / "scripts" / "generate_charts.py"
-SCENARIO_URL_TEMPLATE = "http://47.97.1.45:9000/hydros/mdm/scenarios/{scenario_id}.yaml"
 
 
 @dataclass
@@ -177,10 +177,9 @@ def parse_datetime_text(value: str | None) -> datetime | None:
         return None
 
 
-def fetch_scenario_metadata(scenario_id: str) -> dict[str, Any] | None:
-    url = SCENARIO_URL_TEMPLATE.format(scenario_id=scenario_id)
+def fetch_scenario_metadata(scenario_yaml_url: str) -> dict[str, Any] | None:
     try:
-        with urllib.request.urlopen(normalize_remote_url(url), timeout=20) as response:
+        with urllib.request.urlopen(normalize_remote_url(scenario_yaml_url), timeout=20) as response:
             text = response.read().decode("utf-8")
     except Exception:
         return None
@@ -194,8 +193,8 @@ def fetch_scenario_metadata(scenario_id: str) -> dict[str, Any] | None:
     output_step_size = extract("output_step_size")
     start_time = extract("biz_start_time")
     return {
-        "scenario_yaml_url": url,
-        "scenario_yaml_id": Path(url).name,
+        "scenario_yaml_url": scenario_yaml_url,
+        "scenario_yaml_id": Path(urlsplit(scenario_yaml_url).path).name,
         "scenario_name": extract("biz_scenario_name"),
         "waterway_id": extract("waterway_id"),
         "waterway_name": extract("waterway_name"),
@@ -207,8 +206,7 @@ def fetch_scenario_metadata(scenario_id: str) -> dict[str, Any] | None:
     }
 
 
-def cache_objects_yaml(data_dir: Path, scenario_meta: dict[str, Any] | None) -> Path | None:
-    objects_yaml_url = (scenario_meta or {}).get("objects_yaml_url")
+def cache_objects_yaml(data_dir: Path, objects_yaml_url: str | None) -> Path | None:
     if not objects_yaml_url:
         return None
 
@@ -222,6 +220,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="从 Hydros 时序结果文件生成 HTML + Markdown 分析报告")
     parser.add_argument("timeseries_file")
     parser.add_argument("output_dir", nargs="?")
+    parser.add_argument("--scenario-yaml-url", default=None, help="显式传入场景 YAML 地址")
+    parser.add_argument("--objects-yaml-url", default=None, help="显式传入 objects.yaml 地址；优先于场景 YAML 中的配置")
     parser.add_argument("--total-steps", type=int, default=None)
     parser.add_argument("--sim-step-size", type=int, default=None, help="计算步长，单位秒")
     parser.add_argument("--output-step-size", type=int, default=None, help="输出步长，单位秒")
@@ -480,6 +480,8 @@ def build_report_data(
     df: pd.DataFrame,
     csv_path: Path,
     runtime_config: RuntimeConfig,
+    scenario_meta: dict[str, Any] | None = None,
+    scenario_yaml_url: str | None = None,
     llm_name: str | None = None,
     profile_dataset: dict[str, Any] | None = None,
     asset_status: dict[str, Any] | None = None,
@@ -491,7 +493,6 @@ def build_report_data(
     raw_unique_steps = sorted(int(step) for step in df["data_index"].unique().tolist())
     step_interval = runtime_config.csv_step_interval
     scenario_id = str(df["biz_scenario_id"].iloc[0])
-    scenario_meta = fetch_scenario_metadata(scenario_id)
 
     metric_counts = {key: int(value) for key, value in df["metrics_code"].value_counts().to_dict().items()}
     object_type_counts = {key: int(value) for key, value in df["object_type"].value_counts().to_dict().items()}
@@ -961,8 +962,12 @@ def build_report_data(
             "sampled_point_count": len(unique_steps),
             "completed_at": format_datetime_text(runtime_completed_at.to_pydatetime()) or str(df["gmt_create"].max()),
             "runtime_started_at": format_datetime_text(runtime_started_at.to_pydatetime()) or str(df["gmt_create"].min()),
-            "scenario_yaml_id": scenario_meta["scenario_yaml_id"] if scenario_meta else f"{scenario_id}.yaml",
-            "scenario_yaml_url": scenario_meta["scenario_yaml_url"] if scenario_meta else SCENARIO_URL_TEMPLATE.format(scenario_id=scenario_id),
+            "scenario_yaml_id": (
+                scenario_meta["scenario_yaml_id"]
+                if scenario_meta
+                else (Path(urlsplit(scenario_yaml_url).path).name if scenario_yaml_url else None)
+            ),
+            "scenario_yaml_url": scenario_meta["scenario_yaml_url"] if scenario_meta else scenario_yaml_url,
             "simulation_start_time": format_datetime_text(simulation_start_dt),
             "simulation_end_time": format_datetime_text(simulation_end_dt),
             "simulation_duration": simulation_duration_text,
@@ -1321,7 +1326,9 @@ def main() -> None:
     if working_csv_path != csv_path:
         shutil.copy2(csv_path, working_csv_path)
 
-    scenario_meta = fetch_scenario_metadata(str(df["biz_scenario_id"].iloc[0]))
+    scenario_meta = fetch_scenario_metadata(args.scenario_yaml_url) if args.scenario_yaml_url else None
+    if args.scenario_yaml_url and scenario_meta is None:
+        print(f"场景 YAML 读取失败，已跳过场景元数据: {args.scenario_yaml_url}")
     runtime_config = resolve_runtime_config(
         sorted(int(step) for step in df["data_index"].unique().tolist()),
         scenario_meta,
@@ -1337,10 +1344,11 @@ def main() -> None:
         chart_command.extend(["--output-step-size", str(runtime_config.output_step_size)])
     run_command(chart_command)
 
+    resolved_objects_yaml_url = args.objects_yaml_url or (scenario_meta or {}).get("objects_yaml_url")
     objects_yaml_path = None
     location_map = {}
     try:
-        objects_yaml_path = cache_objects_yaml(paths["data"], scenario_meta)
+        objects_yaml_path = cache_objects_yaml(paths["data"], resolved_objects_yaml_url)
         if objects_yaml_path and objects_yaml_path.exists():
             from build_longitudinal_profile import parse_object_locations
             location_map = parse_object_locations(objects_yaml_path.read_text(encoding="utf-8"))
@@ -1350,12 +1358,16 @@ def main() -> None:
     profile_dataset = None
     profile_error = None
     try:
-        profile_dataset = build_longitudinal_dataset(
-            working_csv_path,
-            objects_yaml_path=objects_yaml_path,
-            objects_yaml_url=(scenario_meta or {}).get("objects_yaml_url"),
-        )
-        save_profile_png(profile_dataset, paths["charts"] / "chart7_longitudinal_profile.png")
+        if objects_yaml_path is not None or resolved_objects_yaml_url:
+            profile_dataset = build_longitudinal_dataset(
+                working_csv_path,
+                objects_yaml_path=objects_yaml_path,
+                objects_yaml_url=resolved_objects_yaml_url,
+            )
+            save_profile_png(profile_dataset, paths["charts"] / "chart7_longitudinal_profile.png")
+        else:
+            profile_error = "未提供 objects.yaml 来源，已跳过纵剖面生成"
+            print(f"纵剖面未生成: {profile_error}")
     except Exception as exc:
         profile_error = str(exc)
         print(f"纵剖面未生成: {profile_error}")
@@ -1370,6 +1382,8 @@ def main() -> None:
         df,
         working_csv_path,
         runtime_config,
+        scenario_meta,
+        args.scenario_yaml_url,
         llm_name,
         profile_dataset,
         asset_status,

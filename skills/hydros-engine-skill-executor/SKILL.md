@@ -41,8 +41,10 @@ description: |
 3. **使用正确的工具链**：仿真执行、进度跟踪和结果导出优先走已注册的 `hydros-engine-executor` MCP 工具。场景建模元数据、拓扑和 `objects.yaml` 相关动作开始前，先确认 `hydros-engine-mdm` 已接通；如果缺失，先报告“元数据前置条件不足”，不要静默跳过。
 
 4. **结果下载默认路径**：凡是用户要求"下载结果文件""落盘到本地""保存结果文件"，默认走标准下载链：
-    - 调用 `get_timeseries_data` 获取结果文件下载链接
-    - 使用 `scripts/download_timeseries_data.py` 或标准 HTTP GET 直接下载
+    - 调用 `get_timeseries_data` 启动结果导出任务
+    - 持续轮询 `get_export_status`，直到导出与 Excel 上传结果为 `COMPLETED`
+    - 从 `get_export_status` 的完成结果中提取 `resource_uri` 或实际下载地址
+    - 使用标准 HTTP GET 直接下载到本地文件
     - 对 `.csv` 结果可直接写盘；对 `.xlsx` 结果优先落成真实 Excel 文件
     - 不要把大段结果文本通过终端交互会话、`cat > file`、分块粘贴或聊天输出中转来落盘，这类方式容易被截断，生成坏文件。
 
@@ -76,15 +78,16 @@ description: |
   - **流式模式（可选）**：利用 Claude 的流式输出特性，在轮询循环中每次查询后立即输出进度条。通过缩短轮询间隔（2-5 秒）和连续输出，让进度更新更流畅。参考 `scripts/streamable_progress_demo.py` 查看两种模式的对比演示。
 - 在追加消息型聊天环境里，”自动显示进度条”的正确含义是：只要本轮仍在持续轮询，代理就必须主动连续发送文本进度条快照，不需要用户再次提醒；如果本轮被用户中断，则自动刷新链条随之中断，恢复后必须先说明”监测曾中断，现已恢复”。
 - 调用 `get_timeseries_data` 前先确认任务状态为 `COMPLETED`。未完成的任务可能返回不完整的数据。
-- `get_timeseries_data` 会返回结果文件下载链接。脚本消费时统一使用 `scripts/download_timeseries_data.py` 或标准 HTTP GET 落盘。
-- 当目标是“下载结果文件到本地”而不是立刻做报告时，也必须走同一条标准链路：`get_timeseries_data -> 下载链接 -> scripts/download_timeseries_data.py -> 本地一次性写盘`。不要把结果内容通过终端标准输入、交互式 `cat`、消息复制粘贴等方式中转。
+- `get_timeseries_data` 现在只负责启动结果导出任务，不保证立即可下载。后续必须轮询 `get_export_status(biz_scene_instance_id)`，直到状态为 `COMPLETED`。
+- 只有当 `get_export_status` 返回 `COMPLETED` 且给出 `resource_uri` 或下载地址时，才允许进入下载步骤。若状态为 `FAILED`，立即报告“结果导出失败”，不要继续生成任何图表或报告。
+- 当目标是“下载结果文件到本地”而不是立刻做报告时，也必须走同一条标准链路：`get_timeseries_data -> get_export_status 轮询 -> resource_uri/下载地址 -> 标准 HTTP GET 下载到本地 -> 本地一次性校验`。不要把结果内容通过终端标准输入、交互式 `cat`、消息复制粘贴等方式中转。
 - 如果本地已经存在同名结果文件，覆盖前先核对文件大小或数据行数；如发现明显偏小、数据行数异常少，优先视为“落盘被截断”，重新按标准链路完整下载，不要在坏文件基础上追加写入。
 - 如果结果文件下载、读取、写盘或完整性校验任一步失败，立即报告“结果下载失败”，并停止后续分析、图表和报告生成。不要回退到任何默认数据、历史缓存、旧结果文件或明显残缺的数据文件继续产出结果。
 - 如果用户要做 HTML 报告或其他 HTML 页面，先读 [references/hydros-html-prompt.md](references/hydros-html-prompt.md)。
 - 如果需要理解数据结构、聚合口径或指标映射，先读 [references/hydros-data-contract.md](references/hydros-data-contract.md)。
 - 如果需要快速交付一个可直接打开的页面，优先复用模板资产，而不是从零开始。
 - 需要完整版 HTML 报告、结果曲线展示或可直接打开的单文件页面时，优先复用 [assets/hydros-report-template/index.html](assets/hydros-report-template/index.html) 模板，并按当前脚本实现把真实 payload 内联到 `simulation_report.html`。
-- 当用户明确要“报告”“完整报告”“HTML 报告”“汇报页”时，不要先交付临时分析报告、手写摘要页或简版 HTML 作为最终产物；如果本地结果文件尚未就位，先完成 `下载链接 -> 落盘结果文件 -> build_timeseries_report.py`，再输出遵循模板的正式报告。
+- 当用户明确要“报告”“完整报告”“HTML 报告”“汇报页”时，不要先交付临时分析报告、手写摘要页或简版 HTML 作为最终产物；如果本地结果文件尚未就位，先完成 `get_timeseries_data -> get_export_status 轮询 -> resource_uri/下载地址 -> 落盘结果文件 -> build_timeseries_report.py`，再输出遵循模板的正式报告。
 - HTML 正式报告应尽量包含结果曲线图产物和渠道纵剖面图；若 `chart1_water_level.png`、`chart2_water_flow.png`、`chart4_gate_opening.png`、`chart5_disturbance_flow.png`、`chart6_heatmap.png`、`chart7_longitudinal_profile.png` 中有缺失，仍可交付 HTML，但必须在报告正文里显式写明缺失项、缺失原因和影响范围，不能把缺图问题只留在聊天回复里解释。
 - 正式 HTML 报告生成完成后，默认调用 `hydros-engine-executor` 的 `upload_and_fetch_report` MCP 工具上传 HTML，并把返回的在线访问地址作为交付结果的一部分；除非用户明确只要本地文件，否则不要停在“本地已生成 HTML”这一步。
 - HTML 报告上传必须走 `hydros-engine-executor` 的 MCP 工具，不要用 `curl`、手写 HTTP 请求或其他旁路方式代替正式上传链路。
@@ -302,16 +305,19 @@ INIT -> WAITING_AGENTS -> READY -> STEPPING -> COMPLETED
 
 1. **数据获取**：
     - 确认任务状态为 `COMPLETED`
-    - 调用 `get_timeseries_data(biz_scene_instance_id)` 获取结果文件下载链接
-    - 优先使用 `scripts/download_timeseries_data.py` 读取并落盘结果文件：
+    - 调用 `get_timeseries_data(biz_scene_instance_id)` 启动结果导出任务
+    - 持续轮询 `get_export_status(biz_scene_instance_id)`，直到状态为 `COMPLETED` 或 `FAILED`
+    - 当状态为 `COMPLETED` 时，提取 `resource_uri` 或实际下载地址
+    - 优先使用标准 HTTP GET 将结果文件一次性落盘到本地：
 
     ```bash
-    python3 scripts/download_timeseries_data.py \
+    curl -L \
       "https://.../SIM_xxx.xlsx" \
-      "output/SIM_xxx.xlsx"
+      -o "output/SIM_xxx.xlsx"
     ```
 
-    - 结果文件直接下载到本地；正式交付优先用脚本，不要依赖终端复制粘贴或 stdout 重定向
+    - 如果 `get_export_status` 返回 `FAILED`，直接报告阶段五失败并停止，不允许继续下载、图表生成或报告产出
+    - 结果文件只有在导出与 Excel 上传完成后才能下载；正式交付优先用脚本，不要依赖终端复制粘贴或 stdout 重定向
     - 写完后立刻校验文件大小、数据行数，必要时补充总记录数核对
     - 如果用户后续要生成 HTML 报告、Markdown 报告、拓扑页或纵剖面页，则在这一步一并基于场景 YAML 下载并缓存 `objects.yaml`；下载方式同样是"读取 `hydros_objects_modeling_url` -> 规范化 URL -> 标准 HTTP GET 下载 -> 以 UTF-8 一次性写入本地缓存文件"；若本轮前面已经缓存过，则优先复用，不要重复拉取
     - 如果结果文件下载失败、写盘失败，或校验后判断为坏文件/残缺文件，则直接报告阶段五失败并停止，不允许继续生成图表、异常分析或任何正式报告

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-基于京石段 objects.yaml 与仿真结果文件生成纵剖面 HTML 页面。
+基于 objects.yaml 与仿真结果文件生成纵剖面 HTML 页面。
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
 import sys
@@ -22,15 +23,12 @@ try:
 except ImportError:
     plt = None
 
-
-OBJECTS_URL = "http://47.97.1.45:9000/hydros/mdm/%E4%BA%AC%E7%9F%B3%E6%AE%B5/hydro_modeling/objects.yaml"
-
 if plt is not None:
     plt.rcParams["font.sans-serif"] = ["Arial Unicode MS", "PingFang SC", "Heiti TC", "SimHei"]
     plt.rcParams["axes.unicode_minus"] = False
 
 
-def fetch_objects_yaml(objects_url: str = OBJECTS_URL) -> str:
+def fetch_objects_yaml(objects_url: str) -> str:
     with urllib.request.urlopen(normalize_remote_url(objects_url), timeout=20) as response:
         return response.read().decode("utf-8")
 
@@ -41,7 +39,9 @@ def load_objects_yaml(
 ) -> str:
     if objects_yaml_path is not None:
         return objects_yaml_path.read_text(encoding="utf-8")
-    return fetch_objects_yaml(objects_yaml_url or OBJECTS_URL)
+    if objects_yaml_url:
+        return fetch_objects_yaml(objects_yaml_url)
+    raise ValueError("缺少 objects.yaml 来源，请显式传入 objects_yaml_path 或 objects_yaml_url")
 
 
 def gate_sort_key(name: str) -> tuple[str, int, str]:
@@ -1148,16 +1148,33 @@ def build_html(dataset: dict) -> str:
     )
 
 
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="根据 objects.yaml 和时序结果生成纵剖面 HTML 页面")
+    parser.add_argument("timeseries_file")
+    parser.add_argument("output_html", nargs="?")
+    parser.add_argument("objects_yaml", nargs="?")
+    parser.add_argument("--objects-yaml-url", default=None, help="显式传入远程 objects.yaml 地址")
+    return parser.parse_args(argv)
+
+
 def main() -> None:
-    if len(sys.argv) < 2:
-      print("用法: python build_longitudinal_profile.py <timeseries_file> [output_html] [objects_yaml]")
-      raise SystemExit(1)
+    args = parse_args(sys.argv[1:])
+    csv_path = Path(args.timeseries_file).resolve()
+    output_html = (
+        Path(args.output_html).resolve()
+        if args.output_html
+        else csv_path.parent / "longitudinal_profile.html"
+    )
+    objects_yaml_path = Path(args.objects_yaml).resolve() if args.objects_yaml else None
 
-    csv_path = Path(sys.argv[1]).resolve()
-    output_html = Path(sys.argv[2]).resolve() if len(sys.argv) > 2 else csv_path.parent / "waterway50_longitudinal_profile.html"
-    objects_yaml_path = Path(sys.argv[3]).resolve() if len(sys.argv) > 3 else None
-
-    dataset = build_dataset(csv_path, objects_yaml_path=objects_yaml_path)
+    try:
+        dataset = build_dataset(
+            csv_path,
+            objects_yaml_path=objects_yaml_path,
+            objects_yaml_url=args.objects_yaml_url,
+        )
+    except ValueError as exc:
+        raise SystemExit(f"ERROR: {exc}") from exc
     output_html.write_text(build_html(dataset), encoding="utf-8")
     print(f"纵剖面页面: {output_html}")
 

@@ -12,7 +12,7 @@
   用于场景建模元数据、拓扑和 `objects.yaml` 相关前置检查。
 
 说明：
-- 本文下面的直连示例仍以 `hydros-engine-executor` 为主，因为当前任务执行链路和结果文件下载链接都落在这一侧。
+- 本文下面的直连示例仍以 `hydros-engine-executor` 为主，因为当前任务执行链路、结果导出轮询和最终下载地址都落在这一侧。
 - `hydros-engine-mdm` 的服务名固定为 `hydros-engine-mdm`，实际 URL 和 Header 以当前环境生效配置为准。
 - 如果场景拓扑、建模元数据或 `objects.yaml` 相关步骤报错，不要只检查 executor，也要一起检查 mdm 配置。
 
@@ -37,7 +37,9 @@
 
 1. `initialize` - 初始化 MCP 连接
 2. `subscribe_to_simulation_events` - 订阅仿真事件
-3. 业务工具调用 - 执行具体的仿真操作
+3. `create_simulation_task` / `get_task_status` - 执行仿真并跟踪进度
+4. `get_timeseries_data` - 启动结果导出任务
+5. `get_export_status` - 轮询导出与 Excel 上传状态，拿到 `resource_uri` 或下载地址
 
 ## 连接排查
 
@@ -82,6 +84,8 @@ curl -X POST https://hydroos.cn/mcps/hydros-engine-executor \
 | 返回 HTML | URL 错误 | 使用 `/mcp` 端点，不是 `/api/xxx` |
 | 连接超时 | 使用了不兼容的客户端库 | 避免使用 SSE 客户端库做初始化，使用标准 HTTP POST |
 | 场景拓扑或 `objects.yaml` 读取失败 | `hydros-engine-mdm` 未配置或未生效 | 回到配置文件检查 `hydros-engine-mdm` 是否存在、服务名是否正确、当前环境是否已加载 |
+| `get_export_status` 一直非 `COMPLETED` | 导出或 Excel 上传尚未完成 | 持续轮询；在 `COMPLETED` 前不要尝试下载结果文件 |
+| `get_export_status` 返回 `FAILED` | 导出链路失败 | 停止后续下载和报告生成，优先报告失败原因 |
 
 ## 连接避坑指南
 

@@ -25,8 +25,9 @@
 
 **获取数据**：
 ```python
-# 调用 get_timeseries_data 获取结果文件下载链接
-# 直接下载结果文件
+# 调用 get_timeseries_data 启动结果导出任务
+# 轮询 get_export_status，直到状态为 COMPLETED
+# 通过标准 HTTP GET 从 resource_uri 或下载地址下载结果文件
 # 落盘为本地 .csv 或 .xlsx 文件
 ```
 
@@ -47,6 +48,8 @@
 - 比较期望总时长与结果文件实际覆盖时长
 - 比较期望输出点数与结果文件实际采样点数
 - 如有不一致，在报告中单列说明
+- 如果 `get_export_status` 仍未完成，不要提前下载 Excel
+- 如果 `get_export_status` 返回 `FAILED`，直接视为导出链路失败，不要继续生成报告
 - 如果结果文件下载失败或落盘后校验不通过，直接视为下载链路失败，不要继续生成报告
 
 ### 2. 生成统计摘要

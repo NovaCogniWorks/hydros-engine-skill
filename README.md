@@ -52,7 +52,8 @@
 | `create_simulation_task` | 创建仿真任务 |
 | `get_task_status` | 跟踪仿真进度、状态和异常信息 |
 | `update_task_speed` | 调整仿真运行倍速 |
-| `get_timeseries_data` | 查询并导出水网对象时序数据 |
+| `get_timeseries_data` | 启动时序数据导出任务 |
+| `get_export_status` | 轮询导出与 Excel 上传状态，完成后返回 `resource_uri` |
 | `upload_and_fetch_report` | 上传 HTML 报告并返回访问地址 |
 
 **hydros-engine-skill**（本项目）是一个 Claude Code Skill，职责是：
@@ -114,21 +115,22 @@ Skill：调用 subscribe_to_simulation_events → create_simulation_task
 **触发：** 仿真完成后，用户要求查看结果或分析数据
 
 **Skill 行为：**
-1. 调用 `get_timeseries_data` 获取结果文件下载链接，再直接下载完整结果文件（CSV 或 XLSX）
-2. **生成可视化图表：**
+1. 调用 `get_timeseries_data` 启动结果导出任务
+2. 轮询 `get_export_status`，等待导出与 Excel 上传完成，并拿到 `resource_uri` 或下载地址
+3. **生成可视化图表：**
    - 水位、流量、闸门开度时序曲线
    - 热力图、纵剖面图、场景拓扑图
    - 统计概览图和异常摘要图
-3. **数据准确性分析：**
+4. **数据准确性分析：**
    - 水位、流量、闸门开度异常检测
    - 沿程水头损失和关键断面变化分析
    - 关键事件、故障影响和运行风险提示
-4. **生成分析结论：** 汇总异常、给出调度和汇报建议
+5. **生成分析结论：** 汇总异常、给出调度和汇报建议
 
 **示例对话：**
 ```
 用户：整体分析一下这次仿真结果
-Skill：调用 get_timeseries_data → 下载结果文件 → 生成图表和分析报告
+Skill：调用 get_timeseries_data → 轮询 get_export_status → 下载结果文件 → 生成图表和分析报告
       "本次仿真共输出 N 条记录，覆盖 600 步。
        已生成水位、流量、闸门、热力图和纵剖面图，
        并汇总出异常点、关键发现和建议。"
@@ -157,6 +159,9 @@ Skill：调用 get_timeseries_data → 下载结果文件 → 生成图表和分
   │                    仿真完成后自动进入结果阶段
   │
   └─ "查看/分析结果" ──► 调用 get_timeseries_data
+                            │
+                            ▼
+                       调用 get_export_status 轮询
                             │
                        ┌────┴─────────────┐
                        │                   │
