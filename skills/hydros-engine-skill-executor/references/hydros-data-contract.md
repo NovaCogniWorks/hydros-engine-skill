@@ -34,7 +34,7 @@
 - `metrics_code`
   指标编码。决定图表类型和异常规则。
 - `data_index`
-  优先视为离散时间轴。但在部分结果文件导出里，它可能是“输出序号”而不是真实计算步号；如果用户显式给出了 `total_steps`、`sim_step_size`、`output_step_size`，必须优先使用这些参数作为时间口径，不要写死默认值。
+  优先视为离散时间轴。但在部分结果文件导出里，它可能是“输出序号”而不是真实计算步号；如果用户显式给出了 `total_steps`、`sim_step_size`、`output_step_size`，必须优先使用这些参数作为时间口径，不要写死默认值。仿真覆盖总时长固定按 `total_steps * output_step_size` 推导，不使用 `sim_step_size`。
 - `step_index`
   计算时间步。若存在且非空，优先把它视为真实计算步号。若整列为空，不要强行拿它推时间轴。
 - `source_time`
@@ -145,6 +145,7 @@ object_name + metrics_code
 - 是否先确认任务已 `COMPLETED`
 - 是否说明当前数据来源：MCP 拉取或本地文件
 - 是否优先使用用户显式提供的 `total_steps`、`sim_step_size`、`output_step_size`
+- 是否按 `total_steps * output_step_size` 推导仿真覆盖总时长，且没有误用 `sim_step_size`
 - 是否比较了“按参数推导的期望总时长 / 期望输出点数”和“结果文件实际可覆盖时长 / 实际采样点数”
 - 当结果文件中的 `data_index`、`step_index`（计算时间步）、`source_time`（源业务时间）互相矛盾时，是否明确标注“时间轴无法可靠还原”
 - 是否在图表里区分正常波动和异常点

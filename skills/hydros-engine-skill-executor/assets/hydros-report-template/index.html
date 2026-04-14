@@ -410,6 +410,159 @@
         color: rgba(16, 35, 50, 0.52);
       }
 
+      .curve-filter-panel {
+        width: 100%;
+        min-width: 0;
+      }
+
+      .curve-filter-row {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        width: 100%;
+        min-width: 0;
+      }
+
+      .curve-filter-row select {
+        width: min(240px, 36%);
+        min-width: 160px;
+      }
+
+      .curve-object-list {
+        width: 100%;
+        max-height: 220px;
+        overflow-y: auto;
+        display: grid;
+        gap: 0.55rem;
+        padding-right: 0.2rem;
+      }
+
+      .curve-object-card {
+        border: 1px solid rgba(135, 166, 179, 0.22);
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.68);
+        padding: 0.7rem;
+      }
+
+      .curve-child-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem;
+        margin-top: 0.55rem;
+      }
+
+      .curve-search-input {
+        width: 100%;
+        border: 1px solid rgba(135, 166, 179, 0.28);
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.78);
+        padding: 0.45rem 0.75rem;
+        font-size: 0.78rem;
+        color: rgba(16, 35, 50, 0.78);
+        outline: none;
+      }
+
+      .curve-search-input:focus {
+        border-color: rgba(24, 91, 117, 0.58);
+        box-shadow: 0 0 0 3px rgba(24, 91, 117, 0.1);
+      }
+
+      .curve-select-menu {
+        position: relative;
+        flex-shrink: 0;
+      }
+
+      .curve-select-all-button {
+        flex-shrink: 0;
+        border: 1px solid rgba(24, 91, 117, 0.24);
+        border-radius: 999px;
+        background: rgba(24, 91, 117, 0.08);
+        padding: 0.45rem 0.85rem;
+        font-size: 0.78rem;
+        font-weight: 650;
+        color: rgba(24, 91, 117, 0.92);
+        transition:
+          background-color 160ms ease,
+          border-color 160ms ease,
+          color 160ms ease;
+      }
+
+      .curve-select-all-button:hover {
+        border-color: rgba(24, 91, 117, 0.42);
+        background: rgba(24, 91, 117, 0.14);
+        color: rgba(16, 64, 84, 0.98);
+      }
+
+      .curve-select-options {
+        position: absolute;
+        top: calc(100% - 1px);
+        right: 0;
+        z-index: 30;
+        min-width: 180px;
+        display: none;
+        overflow: hidden;
+        border: 1px solid rgba(135, 166, 179, 0.24);
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.98);
+        box-shadow: 0 16px 38px rgba(16, 35, 50, 0.16);
+      }
+
+      .curve-select-menu:hover .curve-select-options,
+      .curve-select-menu:focus-within .curve-select-options {
+        display: grid;
+      }
+
+      .curve-select-option {
+        width: 100%;
+        padding: 0.62rem 0.8rem;
+        text-align: left;
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: rgba(16, 35, 50, 0.72);
+      }
+
+      .curve-select-option:hover {
+        background: rgba(24, 91, 117, 0.08);
+        color: rgba(16, 64, 84, 0.98);
+      }
+
+      .curve-select-option:disabled {
+        cursor: not-allowed;
+        color: rgba(16, 35, 50, 0.32);
+        background: transparent;
+      }
+
+      @media (max-width: 640px) {
+        .curve-filter-row {
+          flex-direction: column;
+          align-items: stretch;
+        }
+
+        .curve-filter-row select {
+          width: 100%;
+          min-width: 0;
+        }
+
+        .curve-select-menu,
+        .curve-select-all-button {
+          width: 100%;
+        }
+
+        .curve-select-options {
+          left: 0;
+          right: 0;
+        }
+      }
+
+      .curve-empty-state {
+        border: 1px dashed rgba(135, 166, 179, 0.42);
+        border-radius: 16px;
+        padding: 0.9rem;
+        text-align: center;
+        font-size: 0.78rem;
+        color: rgba(16, 35, 50, 0.5);
+      }
+
       @media (prefers-reduced-motion: reduce) {
         *,
         *::before,
@@ -561,7 +714,7 @@
             <article id="longitudinalSection" class="section-shell min-w-0 rounded-[30px] p-5 lg:col-span-2 lg:col-start-1 lg:row-start-2">
                 <div>
                 <h2 class="mt-2 text-2xl font-semibold">渠道纵剖面</h2>
-                <p class="mt-2 text-sm text-ink/58">叠加断面顶高程、底高程、水体填充、闸站位置、对象标注与流向</p>
+                <p class="mt-2 text-sm text-ink/58">叠加断面顶高程、底高程、水体填充、闸站位置、相关对象与流向</p>
               </div>
               <div class="soft-panel mt-4 rounded-[24px] px-4 py-4">
                 <div class="flex flex-col gap-4 lg:flex-row lg:items-center">
@@ -599,15 +752,14 @@
                 </div>
               </div>
               <div class="mt-5 space-y-5">
-                <div class="soft-panel rounded-[24px] p-4 lg:p-5">
-                  <div class="chart-legend text-sm font-medium text-ink/72">
-                    <span class="inline-flex items-center gap-2"><span class="h-0.5 w-6 border-t-2 border-dashed border-[#637487]"></span>断面顶高程</span>
-                    <span class="inline-flex items-center gap-2"><span class="h-0.5 w-6 border-t-2 border-[#87603d]"></span>断面底高程</span>
-                    <span class="inline-flex items-center gap-2"><span class="h-3 w-6 rounded-full bg-[#1c7fb5]/18"></span>当前步水体</span>
-                    <span class="inline-flex items-center gap-2"><span class="h-4 w-0 border-l-2 border-dashed border-[#a5456f]"></span>闸站位置</span>
-                    <span class="inline-flex items-center gap-2"><span class="h-2.5 w-2.5 rounded-full bg-[#176a87]"></span>对象标注</span>
-                  </div>
-                  <div class="chart-stage mt-1 rounded-[20px] border border-line/70 bg-white/42 px-1 py-1 lg:px-1.5 lg:py-1.5">
+                <div class="p-0">
+                  <div class="chart-stage relative px-0 py-0">
+                    <details id="longitudinalSectionErrorPanel" class="absolute right-4 top-4 z-20 w-[min(360px,calc(100%-2rem))] rounded-[8px] border border-red-700/20 bg-white/96 text-red-900 shadow-lg backdrop-blur" hidden>
+                      <summary class="cursor-pointer list-none px-3 py-2 text-xs font-semibold [&::-webkit-details-marker]:hidden">
+                        剖面数据错误 <span id="longitudinalSectionErrorCount">0</span>
+                      </summary>
+                      <div id="longitudinalSectionErrorList" class="max-h-56 overflow-auto border-t border-red-700/15 px-3 py-2 text-xs leading-6"></div>
+                    </details>
                     <div id="longitudinalChart" class="chart-canvas chart-canvas--wide"></div>
                   </div>
                 </div>
@@ -639,9 +791,20 @@
                 <div class="soft-panel rounded-[24px] p-4">
                   <h3 id="levelCardTitle" class="text-base font-semibold">关键断面水位时序</h3>
                   <p id="levelCardDesc" class="mt-1 text-sm text-ink/62">对比上中游代表断面，观察抬升斜率和同步性。</p>
-                  <div class="mt-2 flex gap-2 items-start">
-                    <select id="levelTypeSelect" class="shrink-0 rounded-lg border border-line px-3 py-1.5 text-xs text-ink/72 focus:outline-primary"></select>
-                    <div id="levelObjectList" class="flex flex-wrap gap-1.5 max-h-[96px] overflow-y-auto"></div>
+                  <div class="curve-filter-panel mt-2 flex flex-col gap-2">
+                    <div class="curve-filter-row">
+                      <select id="levelTypeSelect" class="shrink-0 rounded-lg border border-line px-3 py-1.5 text-xs text-ink/72 focus:outline-primary"></select>
+                      <input id="levelSearchInput" class="curve-search-input" type="search" placeholder="搜索渠道、闸站、倒虹吸、分水口、断面或设备" />
+                      <div class="curve-select-menu">
+                        <button id="levelSelectAll" type="button" class="curve-select-all-button">全选</button>
+                        <div class="curve-select-options" role="menu" aria-label="水位曲线批量选择">
+                          <button type="button" class="curve-select-option" data-select-scope="all">全选</button>
+                          <button type="button" class="curve-select-option" data-select-scope="inlet">全选入口侧断面</button>
+                          <button type="button" class="curve-select-option" data-select-scope="outlet">全选出口侧断面</button>
+                        </div>
+                      </div>
+                    </div>
+                    <div id="levelObjectList" class="curve-object-list"></div>
                   </div>
                   <div id="levelChart" class="chart-canvas chart-canvas--standard mt-2"></div>
                   <div id="levelInterpretation" class="soft-panel mt-3 rounded-[18px] px-4 py-3 text-sm leading-7 text-ink/72"></div>
@@ -649,9 +812,20 @@
                 <div class="soft-panel rounded-[24px] p-4">
                   <h3 id="flowCardTitle" class="text-base font-semibold">流量时序</h3>
                   <p id="flowCardDesc" class="mt-1 text-sm text-ink/62">保留 0 参考线，突出连续负流量区段。</p>
-                  <div class="mt-2 flex gap-2 items-start">
-                    <select id="flowTypeSelect" class="shrink-0 rounded-lg border border-line px-3 py-1.5 text-xs text-ink/72 focus:outline-primary"></select>
-                    <div id="flowObjectList" class="flex flex-wrap gap-1.5 max-h-[96px] overflow-y-auto"></div>
+                  <div class="curve-filter-panel mt-2 flex flex-col gap-2">
+                    <div class="curve-filter-row">
+                      <select id="flowTypeSelect" class="shrink-0 rounded-lg border border-line px-3 py-1.5 text-xs text-ink/72 focus:outline-primary"></select>
+                      <input id="flowSearchInput" class="curve-search-input" type="search" placeholder="搜索渠道、闸站、倒虹吸、分水口、断面或设备" />
+                      <div class="curve-select-menu">
+                        <button id="flowSelectAll" type="button" class="curve-select-all-button">全选</button>
+                        <div class="curve-select-options" role="menu" aria-label="流量曲线批量选择">
+                          <button type="button" class="curve-select-option" data-select-scope="all">全选</button>
+                          <button type="button" class="curve-select-option" data-select-scope="inlet">全选入口侧断面</button>
+                          <button type="button" class="curve-select-option" data-select-scope="outlet">全选出口侧断面</button>
+                        </div>
+                      </div>
+                    </div>
+                    <div id="flowObjectList" class="curve-object-list"></div>
                   </div>
                   <div id="flowChart" class="chart-canvas chart-canvas--standard mt-2"></div>
                   <div id="flowInterpretation" class="soft-panel mt-3 rounded-[18px] px-4 py-3 text-sm leading-7 text-ink/72"></div>
@@ -659,7 +833,22 @@
                 <div class="soft-panel rounded-[24px] p-4">
                   <h3 id="gateCardTitle" class="text-base font-semibold">闸门开度响应</h3>
                   <p id="gateCardDesc" class="mt-1 text-sm text-ink/62">查看闸门控制策略是否存在滞后或平台期。</p>
-                  <div id="gateChart" class="chart-canvas chart-canvas--compact mt-4"></div>
+                  <div class="curve-filter-panel mt-2 flex flex-col gap-2">
+                    <div class="curve-filter-row">
+                      <select id="gateTypeSelect" class="shrink-0 rounded-lg border border-line px-3 py-1.5 text-xs text-ink/72 focus:outline-primary"></select>
+                      <input id="gateSearchInput" class="curve-search-input" type="search" placeholder="搜索闸站、闸门设备或编号" />
+                      <div class="curve-select-menu">
+                        <button id="gateSelectAll" type="button" class="curve-select-all-button">全选</button>
+                        <div class="curve-select-options" role="menu" aria-label="闸门曲线批量选择">
+                          <button type="button" class="curve-select-option" data-select-scope="all">全选</button>
+                          <button type="button" class="curve-select-option" data-select-scope="inlet">全选入口侧断面</button>
+                          <button type="button" class="curve-select-option" data-select-scope="outlet">全选出口侧断面</button>
+                        </div>
+                      </div>
+                    </div>
+                    <div id="gateObjectList" class="curve-object-list"></div>
+                  </div>
+                  <div id="gateChart" class="chart-canvas chart-canvas--compact mt-2"></div>
                   <div id="gateInterpretation" class="soft-panel mt-3 rounded-[18px] px-4 py-3 text-sm leading-7 text-ink/72"></div>
                 </div>
               </div>
@@ -771,7 +960,7 @@
 
       function formatStepLabel(step) {
         const totalSteps = reportData.meta?.total_steps ?? "-";
-        return step == null ? `-/${totalSteps}` : `${step}/${totalSteps}`;
+        return step == null ? `步长 -/${totalSteps}` : `步长 ${step}/${totalSteps}`;
       }
 
       function collectNumericValues(items) {
@@ -817,6 +1006,45 @@
         return match ? Number(match[0]) : null;
       }
 
+      function parseReportDateTime(value) {
+        if (!value) return null;
+        const normalized = String(value).trim().replace(" ", "T");
+        const timestamp = Date.parse(normalized);
+        return Number.isFinite(timestamp) ? new Date(timestamp) : null;
+      }
+
+      function formatDateTimeValue(date) {
+        if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
+        const pad = (value) => String(value).padStart(2, "0");
+        return [
+          date.getFullYear(),
+          pad(date.getMonth() + 1),
+          pad(date.getDate()),
+        ].join("-") + ` ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+      }
+
+      function formatAxisTooltipTitle(axisValue) {
+        const step = normalizeStepValue(axisValue);
+        const startTime = parseReportDateTime(reportData.meta?.simulation_start_time);
+        const outputStepSeconds = Number(reportData.meta?.output_step_size);
+        if (!Number.isFinite(step)) return `步长 ${axisValue ?? "-"}`;
+        if (!startTime || !Number.isFinite(outputStepSeconds)) return `步长 ${step}`;
+        const currentTime = new Date(startTime.getTime() + step * outputStepSeconds * 1000);
+        return `步长 ${step}｜${formatDateTimeValue(currentTime)}`;
+      }
+
+      function formatStepTimeLabel(step) {
+        const stepLabel = formatStepLabel(step);
+        const startTime = parseReportDateTime(reportData.meta?.simulation_start_time);
+        const outputStepSeconds = Number(reportData.meta?.output_step_size);
+        const numericStep = normalizeStepValue(step);
+        if (!startTime || !Number.isFinite(outputStepSeconds) || !Number.isFinite(numericStep)) {
+          return stepLabel;
+        }
+        const currentTime = new Date(startTime.getTime() + numericStep * outputStepSeconds * 1000);
+        return `${stepLabel}｜${formatDateTimeValue(currentTime)}`;
+      }
+
       const chartTheme = {
         text: "#486581",
         textSoft: "#6f8798",
@@ -858,6 +1086,46 @@
           .replaceAll(">", "&gt;")
           .replaceAll('"', "&quot;")
           .replaceAll("'", "&#39;");
+      }
+
+      function formatLongitudinalProfileErrorDetail(item) {
+        if (item.section_name) {
+          return `里程 ${Number(item.location).toFixed(3)} km，顶高程 ${escapeHtml(item.top_elevation)} m，底高程 ${escapeHtml(item.bottom_elevation)} m`;
+        }
+        if (item.inlet_section_name || item.outlet_section_name) {
+          const inletLocation = item.inlet_location == null ? "无" : `${Number(item.inlet_location).toFixed(3)} km`;
+          const outletLocation = item.outlet_location == null ? "无" : `${Number(item.outlet_location).toFixed(3)} km`;
+          return `闸前 ${escapeHtml(item.inlet_section_name || "-")}，里程 ${inletLocation}；闸后 ${escapeHtml(item.outlet_section_name || "-")}，里程 ${outletLocation}`;
+        }
+        const startLocation = item.start_location == null ? "无" : `${Number(item.start_location).toFixed(3)} km`;
+        const endLocation = item.end_location == null ? "无" : `${Number(item.end_location).toFixed(3)} km`;
+        return `范围 ${escapeHtml(item.start_section_name || "-")} → ${escapeHtml(item.end_section_name || "-")}，起点里程 ${startLocation}，终点里程 ${endLocation}`;
+      }
+
+      function renderLongitudinalSectionErrors(errors = []) {
+        const panel = document.getElementById("longitudinalSectionErrorPanel");
+        const count = document.getElementById("longitudinalSectionErrorCount");
+        const list = document.getElementById("longitudinalSectionErrorList");
+        if (!panel || !count || !list) return;
+        if (!errors.length) {
+          panel.hidden = true;
+          count.textContent = "0";
+          list.innerHTML = "";
+          return;
+        }
+        panel.hidden = false;
+        count.textContent = String(errors.length);
+        list.innerHTML = errors
+          .map(
+            (item) => `
+              <div class="py-1">
+                <strong>${escapeHtml(item.section_name || item.object_name)}</strong><br>
+                ${formatLongitudinalProfileErrorDetail(item)}<br>
+                ${escapeHtml(item.message)}
+              </div>
+            `
+          )
+          .join("");
       }
 
       function localizedTermLabel(term) {
@@ -982,7 +1250,8 @@
           slider.value = String(currentIndex);
         }
         if (currentLabel) {
-          currentLabel.textContent = formatStepLabel(interactionState.currentStep);
+          currentLabel.textContent = formatStepTimeLabel(interactionState.currentStep);
+          currentLabel.title = "步长按 simulation_start_time + 步长 * output_step_size 折算";
         }
         const currentMeta = document.getElementById("timelineCurrentMeta");
         if (currentMeta && !currentMeta.textContent.trim()) {
@@ -1265,6 +1534,7 @@
         }
 
         const chart = registerChart(createChart("longitudinalChart"), "longitudinalChart");
+        renderLongitudinalSectionErrors(profile.profileErrors || profile.sectionErrors || []);
         const longitudinalZoomState = { start: 0, end: 100 };
         const frameMap = new Map((profile.frames || []).map((frame) => [Number(frame.step), frame]));
         const allFramePoints = (profile.frames || []).flatMap((frame) => frame.points || []);
@@ -1296,13 +1566,13 @@
         };
         const annotationTypeColors = {
           UnifiedCanal: "#176a87",
-          Pipe: "#8b623d",
+          Pipe: "#d12f2f",
           GateStation: "#a5456f",
           DisturbanceNode: "#2b8a57",
         };
         const getAnnotationColor = (type) => annotationTypeColors[type] || "#4c6476";
         const annotationTypeLabels = {
-          UnifiedCanal: "渠道",
+          UnifiedCanal: "水面线",
           Pipe: "倒虹吸/管道",
           GateStation: "闸站",
           DisturbanceNode: "分水口/退水闸",
@@ -1320,9 +1590,25 @@
           t_bottom_width: "底宽",
           t_side_slope_ratio: "边坡系数",
         };
+        const annotationParamUnits = {
+          length: "m",
+          single_orifice_height: "m",
+          single_orifice_width: "m",
+        };
+        const profilePointRadius = 1.5;
+        const buildProfilePointStyle = (strokeColor) => ({ fill: "#ffffff", stroke: strokeColor, lineWidth: 1 });
+        const buildProfileSeriesPointStyle = (strokeColor) => ({
+          color: "#ffffff",
+          borderColor: strokeColor,
+          borderWidth: 1,
+        });
         const localizeAnnotationType = (type) => annotationTypeLabels[type] || type;
+        const formatAnnotationParamValue = (item) => {
+          const unit = annotationParamUnits[item.key];
+          return unit ? `${item.value} ${unit}` : item.value;
+        };
         const localizeAnnotationParams = (params) =>
-          (params || []).map((item) => `${annotationParamLabels[item.key] || item.key}=${item.value}`).join("，");
+          (params || []).map((item) => `${annotationParamLabels[item.key] || item.key}=${formatAnnotationParamValue(item)}`).join("，");
         const positionFloatingTooltip = (point, params, dom, rect, size) => {
           const [mouseX, mouseY] = point;
           const viewWidth = size.viewSize[0];
@@ -1350,6 +1636,11 @@
               : `位置: ${Number(item.location).toFixed(3)} km`,
             item.params?.length ? `参数: ${escapeHtml(localizeAnnotationParams(item.params))}` : "参数: 无",
           ].join("<br>");
+        const annotationLegendPrefix = "相关对象: ";
+        const annotationTypeOrder = ["UnifiedCanal", "Pipe", "GateStation", "DisturbanceNode"];
+        const buildAnnotationLegendName = (type) => `${annotationLegendPrefix}${localizeAnnotationType(type)}`;
+        const formatAnnotationLegendName = (name) =>
+          name.startsWith(annotationLegendPrefix) ? name.slice(annotationLegendPrefix.length) : name;
         const interpolateWaterLevel = (profilePoints, location) => {
           if (!profilePoints.length) return null;
           if (location <= profilePoints[0].location) return profilePoints[0].water_level;
@@ -1367,6 +1658,23 @@
           }
           return null;
         };
+        const interpolateProfileValue = (profilePoints, location, key) => {
+          if (!profilePoints.length) return null;
+          if (location <= profilePoints[0].location) return profilePoints[0][key];
+          if (location >= profilePoints[profilePoints.length - 1].location) {
+            return profilePoints[profilePoints.length - 1][key];
+          }
+          for (let index = 0; index < profilePoints.length - 1; index += 1) {
+            const left = profilePoints[index];
+            const right = profilePoints[index + 1];
+            if (location < left.location || location > right.location) continue;
+            const span = right.location - left.location;
+            if (!span) return left[key];
+            const ratio = (location - left.location) / span;
+            return left[key] + (right[key] - left[key]) * ratio;
+          }
+          return null;
+        };
         const buildRangeObjectAnnotations = (profilePoints) =>
           (profile.objectAnnotations || [])
             .filter((item) => item.mode === "range")
@@ -1379,6 +1687,10 @@
                 index,
                 start_water_level: startPoint.water_level,
                 end_water_level: endPoint.water_level,
+                start_top_elevation: startPoint.top_elevation,
+                start_bottom_elevation: startPoint.bottom_elevation,
+                end_top_elevation: endPoint.top_elevation,
+                end_bottom_elevation: endPoint.bottom_elevation,
               };
             })
             .filter(Boolean);
@@ -1409,6 +1721,7 @@
           type: "custom",
           silent: true,
           animation: false,
+          itemStyle: { color: chartTheme.gate },
           tooltip: { show: false },
           z: 7,
           renderItem: (params, api) => {
@@ -1420,19 +1733,25 @@
             if (!clippedLine) {
               return null;
             }
+            const textY = Math.max(clippedLine.clipRect.y + 12, clippedLine.y2 + 14);
+            const lineTopY = Math.max(clippedLine.y2, textY + 8);
+            const lineBottomY = clippedLine.y1;
+            const lineShape = lineTopY < lineBottomY
+              ? { x1: clippedLine.x, y1: lineBottomY, x2: clippedLine.x, y2: lineTopY }
+              : null;
             return {
               type: "group",
               children: [
-                {
+                lineShape ? {
                   type: "line",
-                  shape: { x1: clippedLine.x, y1: clippedLine.y1, x2: clippedLine.x, y2: clippedLine.y2 },
+                  shape: lineShape,
                   style: { stroke: chartTheme.gate, lineWidth: 1.4, lineDash: [6, 4], opacity: 0.92 },
-                },
+                } : null,
                 {
                   type: "text",
                   style: {
                     x: clippedLine.x,
-                    y: Math.max(clippedLine.clipRect.y + 10, clippedLine.y2 - 8),
+                    y: textY,
                     text: stationKey,
                     fill: chartTheme.gate,
                     textAlign: "center",
@@ -1440,119 +1759,172 @@
                     font: "600 12px 'Noto Sans SC', sans-serif",
                   },
                 },
-              ],
+              ].filter(Boolean),
             };
           },
           data: gateLineSegments,
         });
-        const buildObjectRangeSeries = (items) => ({
-          name: "对象范围",
-          type: "custom",
-          silent: false,
-          animation: false,
-          tooltip: {
-            show: true,
-            trigger: "item",
-            confine: true,
-            enterable: false,
-            transitionDuration: 0,
-            extraCssText: "pointer-events:none;",
-            position: positionFloatingTooltip,
-            formatter: (params) => formatAnnotationTooltip(params.data.meta),
-          },
-          z: 6.6,
-          renderItem: (params, api) => {
-            const clippedPolyline = clipPolylineToCoordSys(
-              [
-                api.coord([api.value(0), api.value(1)]),
-                api.coord([api.value(2), api.value(3)]),
-              ],
-              params
-            );
-            if (!clippedPolyline?.length || clippedPolyline.length < 2) {
-              return null;
-            }
-            const color = getAnnotationColor(api.value(5));
-            const startPoint = clippedPolyline[0];
-            const endPoint = clippedPolyline[clippedPolyline.length - 1];
-            return {
-              type: "group",
-              children: [
-                {
-                  type: "line",
-                  shape: { x1: startPoint[0], y1: startPoint[1], x2: endPoint[0], y2: endPoint[1] },
-                  style: { stroke: color, lineWidth: 2.4, opacity: 0.78 },
-                },
-                {
-                  type: "circle",
-                  shape: { cx: startPoint[0], cy: startPoint[1], r: 3.2 },
-                  style: { fill: color, stroke: "#ffffff", lineWidth: 1.2 },
-                },
-                {
-                  type: "circle",
-                  shape: { cx: endPoint[0], cy: endPoint[1], r: 3.2 },
-                  style: { fill: color, stroke: "#ffffff", lineWidth: 1.2 },
-                },
-              ],
-            };
-          },
-          data: items.map((item) => ({
+        const buildObjectAnnotationDataItem = (item) => {
+          const isRange = item.mode === "range";
+          return {
             value: [
-              item.start_location,
-              item.start_water_level,
-              item.end_location,
-              item.end_water_level,
+              isRange ? item.start_location : item.location,
+              isRange ? item.start_water_level : item.water_level,
+              isRange ? item.end_location : item.location,
+              isRange ? item.end_water_level : item.water_level,
               item.name,
               item.type,
               item.index,
+              item.mode,
+              isRange ? item.start_top_elevation : item.water_level,
+              isRange ? item.start_bottom_elevation : item.water_level,
+              isRange ? item.end_top_elevation : item.water_level,
+              isRange ? item.end_bottom_elevation : item.water_level,
             ],
             meta: item,
-          })),
-        });
-        const buildObjectPointSeries = (items) => ({
-          name: "对象节点",
-          type: "custom",
-          silent: false,
-          animation: false,
-          tooltip: {
-            show: true,
-            trigger: "item",
-            confine: true,
-            enterable: false,
-            transitionDuration: 0,
-            extraCssText: "pointer-events:none;",
-            position: positionFloatingTooltip,
-            formatter: (params) => formatAnnotationTooltip(params.data.meta),
-          },
-          z: 6.7,
-          renderItem: (params, api) => {
-            const clipRect = getCoordClipRect(params);
-            const point = api.coord([api.value(0), api.value(1)]);
-            if (
-              point[0] < clipRect.x ||
-              point[0] > clipRect.x + clipRect.width ||
-              point[1] < clipRect.y ||
-              point[1] > clipRect.y + clipRect.height
-            ) {
-              return null;
-            }
-            const color = getAnnotationColor(api.value(3));
-            return {
-              type: "group",
-              children: [
-                {
-                  type: "circle",
-                  shape: { cx: point[0], cy: point[1], r: 4.2 },
-                  style: { fill: color, stroke: "#ffffff", lineWidth: 1.4 },
-                },
-              ],
-            };
-          },
-          data: items.map((item) => ({
-            value: [item.location, item.water_level, item.name, item.type, item.index],
-            meta: item,
-          })),
-        });
+          };
+        };
+        const buildObjectAnnotationSeries = (rangeItems, pointItems) => {
+          const grouped = new Map();
+          [...rangeItems, ...pointItems].forEach((item) => {
+            if (!grouped.has(item.type)) grouped.set(item.type, []);
+            grouped.get(item.type).push(item);
+          });
+          const sortedTypes = [...grouped.keys()].sort((left, right) => {
+            const leftIndex = annotationTypeOrder.indexOf(left);
+            const rightIndex = annotationTypeOrder.indexOf(right);
+            return (leftIndex === -1 ? 99 : leftIndex) - (rightIndex === -1 ? 99 : rightIndex);
+          });
+          return sortedTypes.map((annotationType) => ({
+            id: `object-type-${annotationType}`,
+            name: buildAnnotationLegendName(annotationType),
+            type: "custom",
+            silent: false,
+            animation: false,
+            itemStyle: { color: getAnnotationColor(annotationType) },
+            tooltip: {
+              show: true,
+              trigger: "item",
+              confine: true,
+              enterable: false,
+              transitionDuration: 0,
+              extraCssText: "pointer-events:none;",
+              position: positionFloatingTooltip,
+              formatter: (params) => formatAnnotationTooltip(params.data.meta),
+            },
+            z: 6.7,
+            renderItem: (params, api) => {
+              const mode = api.value(7);
+              const annotationType = api.value(5);
+              const color = getAnnotationColor(annotationType);
+              if (mode === "range") {
+                if (annotationType === "Pipe") {
+                  const polygon = [
+                    api.coord([api.value(0), api.value(8)]),
+                    api.coord([api.value(2), api.value(10)]),
+                    api.coord([api.value(2), api.value(11)]),
+                    api.coord([api.value(0), api.value(9)]),
+                  ];
+                  const clippedPolygon = clipPolygonToCoordSys(polygon, params);
+                  const topLine = clipPolylineToCoordSys([polygon[0], polygon[1]], params);
+                  const endLine = clipPolylineToCoordSys([polygon[1], polygon[2]], params);
+                  const bottomLine = clipPolylineToCoordSys([polygon[3], polygon[2]], params);
+                  const startLine = clipPolylineToCoordSys([polygon[0], polygon[3]], params);
+                  if (!clippedPolygon?.length) {
+                    return null;
+                  }
+                  const lineStyle = { stroke: color, lineWidth: 2.2, opacity: 0.86 };
+                  return {
+                    type: "group",
+                    children: [
+                      {
+                        type: "polygon",
+                        shape: { points: clippedPolygon },
+                        style: { fill: color, opacity: 0.12, stroke: "none" },
+                      },
+                      topLine?.length >= 2 ? {
+                        type: "line",
+                        shape: { x1: topLine[0][0], y1: topLine[0][1], x2: topLine[topLine.length - 1][0], y2: topLine[topLine.length - 1][1] },
+                        style: lineStyle,
+                      } : null,
+                      bottomLine?.length >= 2 ? {
+                        type: "line",
+                        shape: { x1: bottomLine[0][0], y1: bottomLine[0][1], x2: bottomLine[bottomLine.length - 1][0], y2: bottomLine[bottomLine.length - 1][1] },
+                        style: lineStyle,
+                      } : null,
+                      startLine?.length >= 2 ? {
+                        type: "line",
+                        shape: { x1: startLine[0][0], y1: startLine[0][1], x2: startLine[startLine.length - 1][0], y2: startLine[startLine.length - 1][1] },
+                        style: { ...lineStyle, lineWidth: 1.6 },
+                      } : null,
+                      endLine?.length >= 2 ? {
+                        type: "line",
+                        shape: { x1: endLine[0][0], y1: endLine[0][1], x2: endLine[endLine.length - 1][0], y2: endLine[endLine.length - 1][1] },
+                        style: { ...lineStyle, lineWidth: 1.6 },
+                      } : null,
+                    ].filter(Boolean),
+                  };
+                }
+                const clippedPolyline = clipPolylineToCoordSys(
+                  [
+                    api.coord([api.value(0), api.value(1)]),
+                    api.coord([api.value(2), api.value(3)]),
+                  ],
+                  params
+                );
+                if (!clippedPolyline?.length || clippedPolyline.length < 2) {
+                  return null;
+                }
+                const startPoint = clippedPolyline[0];
+                const endPoint = clippedPolyline[clippedPolyline.length - 1];
+                return {
+                  type: "group",
+                  children: [
+                    {
+                      type: "line",
+                      shape: { x1: startPoint[0], y1: startPoint[1], x2: endPoint[0], y2: endPoint[1] },
+                      style: { stroke: color, lineWidth: 2.4, opacity: 0.78 },
+                    },
+                    {
+                      type: "circle",
+                      shape: { cx: startPoint[0], cy: startPoint[1], r: profilePointRadius },
+                      style: buildProfilePointStyle(color),
+                    },
+                    {
+                      type: "circle",
+                      shape: { cx: endPoint[0], cy: endPoint[1], r: profilePointRadius },
+                      style: buildProfilePointStyle(color),
+                    },
+                  ],
+                };
+              }
+              const clipRect = getCoordClipRect(params);
+              const point = api.coord([api.value(0), api.value(1)]);
+              if (
+                point[0] < clipRect.x ||
+                point[0] > clipRect.x + clipRect.width ||
+                point[1] < clipRect.y ||
+                point[1] > clipRect.y + clipRect.height
+              ) {
+                return null;
+              }
+              return {
+                type: "group",
+                children: [
+                  {
+                    type: "circle",
+                    shape: { cx: point[0], cy: point[1], r: profilePointRadius },
+                    style: buildProfilePointStyle(color),
+                  },
+                ],
+              };
+            },
+            data: grouped.get(annotationType).map(buildObjectAnnotationDataItem),
+          }));
+        };
+        const objectLegendSelected = {};
+        const profileLineLegendNames = ["断面顶高程", "断面底高程", "闸站位置"];
+        const profileLineLegendSelected = Object.fromEntries(profileLineLegendNames.map((name) => [name, true]));
 
         chart.on("dataZoom", (event) => {
           const zoomPayload = Array.isArray(event?.batch) ? event.batch[0] : event;
@@ -1564,28 +1936,115 @@
             longitudinalZoomState.end = Number(zoomPayload.end);
           }
         });
+        chart.on("legendselectchanged", (event) => {
+          const name = event?.name || "";
+          if (name.startsWith(annotationLegendPrefix)) {
+            objectLegendSelected[name] = event?.selected?.[name] ?? true;
+          } else if (profileLineLegendNames.includes(name)) {
+            profileLineLegendSelected[name] = event?.selected?.[name] ?? true;
+          }
+        });
+
+        const formatProfileNumber = (value, digits = 2) => {
+          const numeric = Number(value);
+          return Number.isFinite(numeric) ? numeric.toFixed(digits) : "-";
+        };
+        const formatProfilePointValue = (point, key, digits = 2) =>
+          point ? `${point.name}（${formatProfileNumber(point[key], digits)} m）` : "-";
+        const buildLongitudinalNarrative = (points, step, headLossValue) => {
+          const startPoint = points[0];
+          const endPoint = points[points.length - 1];
+          const distanceKm =
+            Math.abs(Number(endPoint.location) - Number(startPoint.location)) ||
+            Number(profile.meta?.distance_km) ||
+            0;
+          const waterSlope = distanceKm > 0 ? headLossValue / distanceKm : null;
+          const bottomDrop = Number(startPoint.bottom_elevation) - Number(endPoint.bottom_elevation);
+          const depths = points.map((item) => Number(item.depth)).filter(Number.isFinite);
+          const avgDepth = depths.length ? depths.reduce((sum, value) => sum + value, 0) / depths.length : null;
+          const deepest = points.reduce((best, item) => (item.depth > best.depth ? item : best), points[0]);
+          const shallowRank = [...points]
+            .filter((item) => Number.isFinite(Number(item.depth)))
+            .sort((left, right) => Number(left.depth) - Number(right.depth));
+          const shallowest = shallowRank[0];
+          const freeboardRank = points
+            .map((item) => ({
+              ...item,
+              freeboard: Number(item.top_elevation) - Number(item.water_level),
+            }))
+            .filter((item) => Number.isFinite(item.freeboard))
+            .sort((left, right) => left.freeboard - right.freeboard);
+          const minFreeboard = freeboardRank[0];
+          const overtoppedCount = freeboardRank.filter((item) => item.freeboard < 0).length;
+          const lowFreeboardCount = freeboardRank.filter((item) => item.freeboard >= 0 && item.freeboard <= 0.5).length;
+          const segments = points.slice(0, -1)
+            .map((item, index) => {
+              const next = points[index + 1];
+              const dx = Number(next.location) - Number(item.location);
+              const loss = Number(item.water_level) - Number(next.water_level);
+              return {
+                from: item.name,
+                to: next.name,
+                dx,
+                loss,
+                slope: dx > 0 ? loss / dx : null,
+              };
+            })
+            .filter((item) => Number.isFinite(item.slope));
+          const steepestDrop =
+            segments.filter((item) => item.slope > 0).sort((left, right) => right.slope - left.slope)[0] ||
+            segments.sort((left, right) => Math.abs(right.slope) - Math.abs(left.slope))[0];
+          const objectAnnotations = profile.objectAnnotations || [];
+          const gateStationCount = profile.meta?.gate_station_count ?? objectAnnotations.filter((item) => item.type === "GateStation").length;
+          const pipeCount = objectAnnotations.filter((item) => item.type === "Pipe").length;
+          const disturbanceCount = objectAnnotations.filter((item) => item.type === "DisturbanceNode").length;
+          const sectionErrorCount = (profile.profileErrors || profile.sectionErrors || []).length;
+          const lowDepthText = shallowRank
+            .slice(0, 3)
+            .map((item) => `${item.name} ${formatProfileNumber(item.depth)} m`)
+            .join("、");
+
+          return {
+            summary:
+              `当前展示 ${formatStepTimeLabel(step)}，纵剖面覆盖 ${startPoint.name} 至 ${endPoint.name}，` +
+              `共 ${points.length} 个有效断面、约 ${formatProfileNumber(distanceKm, 2)} km。` +
+              `水面线由 ${formatProfileNumber(startPoint.water_level)} m 降至 ${formatProfileNumber(endPoint.water_level)} m，` +
+              `沿程水头损失 ${formatProfileNumber(headLossValue)} m，平均水面坡降 ${waterSlope == null ? "-" : formatProfileNumber(waterSlope, 3)} m/km；` +
+              `同期渠底高程沿程变化 ${formatProfileNumber(bottomDrop)} m，平均水深 ${avgDepth == null ? "-" : formatProfileNumber(avgDepth)} m。`,
+            highlights: [
+              `水面线趋势：整体从上游向下游递减；局部变化最明显区间为 ${steepestDrop ? `${steepestDrop.from} → ${steepestDrop.to}，坡降约 ${formatProfileNumber(steepestDrop.slope, 3)} m/km` : "暂未识别到有效相邻断面区间"}。`,
+              `过水深度：最大水深断面为 ${formatProfilePointValue(deepest, "depth")}，最小水深断面为 ${formatProfilePointValue(shallowest, "depth")}；低水深优先关注 ${lowDepthText || "无"}。`,
+              `顶高程余量：最小余量位于 ${minFreeboard ? `${minFreeboard.name}（${formatProfileNumber(minFreeboard.freeboard)} m）` : "-"}；${overtoppedCount ? `有 ${overtoppedCount} 个断面水位超过断面顶高程` : "未发现水位超过断面顶高程"}，${lowFreeboardCount ? `${lowFreeboardCount} 个断面余量不超过 0.50 m` : "未发现余量小于等于 0.50 m 的断面"}。`,
+              `控制对象：已叠加 ${gateStationCount} 个闸站位置、${pipeCount} 个倒虹吸/管道、${disturbanceCount} 个分水口/退水闸，图中可按类型隐藏或恢复，用于判断水位突变是否与控制建筑物位置一致。`,
+              `数据质量：本次时间轴有 ${profile.meta?.timeline_step_count || profile.frames?.length || 0} 个可播放时刻；${sectionErrorCount ? `存在 ${sectionErrorCount} 个剖面数据错误，需优先查看右上角错误清单` : "未发现需要在图中单独提示的剖面数据错误"}。`,
+            ],
+          };
+        };
 
         interactionState.api.updateLongitudinal = (step) => {
           const frame = frameMap.get(Number(step)) || profile.frames?.at(-1);
           if (!frame) return;
 
           const points = frame.points || [];
+          if (!points.length) return;
           const startPoint = points[0];
           const endPoint = points[points.length - 1];
-          const deepest = points.reduce((best, item) => (item.depth > best.depth ? item : best), points[0]);
-          const shallowest = points.reduce((best, item) => (item.depth < best.depth ? item : best), points[0]);
-          const headLoss = (startPoint.water_level - endPoint.water_level).toFixed(2);
+          const headLossValue = Number(startPoint.water_level) - Number(endPoint.water_level);
+          const headLoss = headLossValue.toFixed(2);
           const currentYBounds = computeAxisBounds([
             points.map((item) => item.top_elevation),
             points.map((item) => item.bottom_elevation),
             points.map((item) => item.water_level),
           ], { paddingRatio: 0.08, minPadding: 0.18 });
-          const currentGateLineSegments = (profile.gateMarkers || []).map((item) => [
-            item.location,
-            currentYBounds.min,
-            currentYBounds.max,
-            item.short_name || item.name,
-          ]);
+          const currentGateLineSegments = (profile.gateMarkers || []).map((item) => {
+            const bottomElevation = interpolateProfileValue(points, item.location, "bottom_elevation");
+            return [
+              item.location,
+              bottomElevation ?? currentYBounds.min,
+              currentYBounds.max,
+              item.short_name || item.name,
+            ];
+          });
           const yMin = currentYBounds.min;
           const bedFillSegments = points.slice(0, -1).map((item, index) => [
             item.location,
@@ -1604,26 +2063,30 @@
           ]);
           const objectRangeAnnotations = buildRangeObjectAnnotations(points);
           const objectPointAnnotations = buildPointObjectAnnotations(points);
+          const objectAnnotationSeries = buildObjectAnnotationSeries(objectRangeAnnotations, objectPointAnnotations);
+          const objectLegendNames = objectAnnotationSeries.map((item) => item.name);
+          const objectLegendSelection = Object.fromEntries(
+            objectLegendNames.map((name) => [name, objectLegendSelected[name] ?? true])
+          );
+          const legendNames = [...profileLineLegendNames, ...objectLegendNames];
+          const legendSelection = {
+            ...profileLineLegendSelected,
+            ...objectLegendSelection,
+          };
 
-          document.getElementById("longitudinalSummary").textContent =
-            `当前展示步 ${formatStepLabel(step)}，水面线从 ${startPoint.name} 的 ${startPoint.water_level} m 下降到 ` +
-            `${endPoint.name} 的 ${endPoint.water_level} m，沿程水头损失 ${headLoss} m。`;
+          const narrative = buildLongitudinalNarrative(points, step, headLossValue);
+          document.getElementById("longitudinalSummary").textContent = narrative.summary;
           document.getElementById("timelineCurrentMeta").textContent = `沿程水头损失 ${headLoss} m`;
 
-          document.getElementById("longitudinalHighlights").innerHTML = [
-            `主干渠当前展示时刻沿程水头损失约 ${headLoss} m，整体保持稳定下泄。`,
-            `共匹配 ${points.length} 个断面，线路总长约 ${profile.meta.distance_km} km。`,
-            `已叠加 ${profile.meta.gate_station_count} 个闸站位置，流向为 ${profile.meta.flow_direction}。`,
-            `额外叠加 ${profile.objectAnnotations?.length || 0} 个对象标注，显示名称、类型和关键参数。`,
-            `最大水深断面为 ${deepest.name}，最小水深断面为 ${shallowest.name}。`,
-          ]
-            .map((text) => `<div class="soft-panel rounded-[18px] px-4 py-3">${text}</div>`)
+          document.getElementById("longitudinalHighlights").innerHTML = narrative.highlights
+            .filter(Boolean)
+            .map((text) => `<div class="soft-panel rounded-[18px] px-4 py-3">${localizeTermText(text)}</div>`)
             .join("");
 
           chart.setOption({
             animationDuration: 350,
             animationDurationUpdate: 350,
-            grid: { left: 38, right: 34, top: 28, bottom: 96, containLabel: true },
+            grid: { left: 38, right: 34, top: legendNames.length ? 68 : 28, bottom: 96, containLabel: true },
             graphic: [
               {
                 type: "rect",
@@ -1652,6 +2115,7 @@
                 const row = points[params[0]?.dataIndex ?? 0];
                 return [
                   `<strong>${row.name}</strong>`,
+                  formatStepTimeLabel(step),
                   `里程: ${row.location} km`,
                   `顶高程: ${row.top_elevation} m`,
                   `底高程: ${row.bottom_elevation} m`,
@@ -1660,7 +2124,22 @@
                 ].join("<br>");
               },
             },
-            legend: { show: false },
+            legend: {
+              show: legendNames.length > 0,
+              type: "scroll",
+              top: 10,
+              left: 42,
+              right: 42,
+              itemWidth: 12,
+              itemHeight: 8,
+              data: legendNames,
+              selected: legendSelection,
+              formatter: formatAnnotationLegendName,
+              textStyle: { color: chartTheme.textSoft, fontSize: 11 },
+              pageTextStyle: { color: chartTheme.textSoft },
+              pageIconColor: chartTheme.water,
+              pageIconInactiveColor: "rgba(91, 115, 133, 0.28)",
+            },
             dataZoom: [
               {
                 type: "inside",
@@ -1696,9 +2175,9 @@
               axisLine: { lineStyle: { color: chartTheme.grid } },
               axisTick: { inside: true, lineStyle: { color: chartTheme.grid } },
               axisLabel: { color: chartTheme.text, margin: 8 },
-              splitLine: { lineStyle: { color: chartTheme.grid, opacity: 0.9 } },
+              splitLine: { show: false },
               splitArea: {
-                show: true,
+                show: false,
                 areaStyle: { color: ["rgba(255,255,255,0.08)", "rgba(24, 91, 117, 0.018)"] },
               },
             },
@@ -1719,7 +2198,7 @@
               axisLine: { lineStyle: { color: chartTheme.grid } },
               axisTick: { inside: true, lineStyle: { color: chartTheme.grid } },
               axisLabel: { color: chartTheme.text, margin: 8 },
-              splitLine: { lineStyle: { color: chartTheme.grid, opacity: 0.9 } },
+              splitLine: { show: false },
             },
             series: [
               {
@@ -1774,10 +2253,12 @@
                 name: "断面顶高程",
                 type: "line",
                 showSymbol: true,
-                symbolSize: 5,
+                symbol: "circle",
+                symbolSize: 3,
                 clip: true,
-                lineStyle: { color: chartTheme.crest, width: 2, type: "dashed" },
-                itemStyle: { color: chartTheme.crest },
+                lineStyle: { color: chartTheme.crest, width: 2 },
+                itemStyle: buildProfileSeriesPointStyle(chartTheme.crest),
+                emphasis: { disabled: true },
                 z: 4,
                 data: points.map((item) => [item.location, item.top_elevation]),
               },
@@ -1785,19 +2266,20 @@
                 name: "断面底高程",
                 type: "line",
                 showSymbol: true,
-                symbolSize: 6,
+                symbol: "circle",
+                symbolSize: 3,
                 clip: true,
                 lineStyle: { color: chartTheme.bed, width: 2.2 },
-                itemStyle: { color: chartTheme.bed },
+                itemStyle: buildProfileSeriesPointStyle(chartTheme.bed),
+                emphasis: { disabled: true },
                 z: 5,
                 data: points.map((item) => [item.location, item.bottom_elevation]),
               },
-              buildObjectRangeSeries(objectRangeAnnotations),
-              buildObjectPointSeries(objectPointAnnotations),
+              ...objectAnnotationSeries,
               {
                 name: "起点/终点",
                 type: "scatter",
-                symbolSize: 10,
+                symbolSize: 3,
                 clip: true,
                 z: 8,
                 tooltip: { show: false },
@@ -1858,18 +2340,19 @@
 
         document.getElementById("levelCardTitle").textContent = `${localizedTermLabel("water_level")}结果曲线`;
         document.getElementById("levelCardTitle").title = "water_level";
-        document.getElementById("levelCardDesc").textContent = `共 ${levelSeries.length} 条序列，支持按对象类型筛选后多选查看。`;
+        document.getElementById("levelCardDesc").textContent = `共 ${levelSeries.length} 条序列，支持按渠道、闸站、倒虹吸、分水口累积多选展示。`;
         document.getElementById("levelCardDesc").title = "water_level";
         document.getElementById("flowCardTitle").textContent = `${localizedTermLabel("water_flow")}结果曲线`;
         document.getElementById("flowCardTitle").title = "water_flow";
-        document.getElementById("flowCardDesc").textContent = `共 ${flowSeries.length} 条序列，支持按对象类型筛选后多选查看。`;
+        document.getElementById("flowCardDesc").textContent = `共 ${flowSeries.length} 条序列，支持跨多个对象累积多选展示。`;
         document.getElementById("flowCardDesc").title = "water_flow";
         document.getElementById("gateCardTitle").textContent = `${localizedTermLabel("gate_opening")}结果曲线`;
         document.getElementById("gateCardTitle").title = "gate_opening";
-        document.getElementById("gateCardDesc").textContent = `共 ${gateSeries.length} 条序列，压缩重复平台段后展示全部闸门变化。`;
+        document.getElementById("gateCardDesc").textContent = `共 ${gateSeries.length} 条序列，支持多闸站、多闸门设备同时展示。`;
         document.getElementById("gateCardDesc").title = "gate_opening";
 
         const typeLabels = { CrossSection: '断面', DisturbanceNode: '分水口/退水闸', Gate: '闸门' };
+        const categoryOrder = ["渠道", "闸站", "倒虹吸", "分水口", "其他"];
         const chartInterpretations = reportData.chartInterpretations || {};
 
         function renderCurveInterpretation(elementId, interpretation, selectedSeries, selectedType) {
@@ -1881,67 +2364,363 @@
             .join("");
         }
 
-        // Helper: build two-level filter (type dropdown + checkbox list)
-        function buildFilter(seriesArr, typeSelectEl, objectListEl, defaultType) {
-          // Group by objectType
-          const byType = {};
-          seriesArr.forEach((item, index) => {
-            const t = item.objectType || 'Unknown';
-            if (!byType[t]) byType[t] = [];
-            byType[t].push({ name: item.name, index });
+        function getSeriesId(item, index) {
+          return item.seriesId || `${item.objectType || "Unknown"}|${item.name}|${index}`;
+        }
+
+        function getSeriesDisplayName(item) {
+          return item.legendName || item.displayName || item.name;
+        }
+
+        function shortenText(value, maxLength = 22) {
+          const text = String(value || "");
+          return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
+        }
+
+        function buildAdaptiveChartLayout(seriesCount, legendSelected = {}) {
+          const showLegend = seriesCount > 1;
+          const legendRows = seriesCount > 12 ? 2 : 1;
+          return {
+            grid: {
+              left: 56,
+              right: 18,
+              top: showLegend ? 42 + legendRows * 22 : 32,
+              bottom: 96,
+              containLabel: true,
+            },
+            legend: {
+              show: showLegend,
+              type: "scroll",
+              top: 6,
+              left: 18,
+              right: 18,
+              height: legendRows * 24,
+              itemWidth: 16,
+              itemHeight: 8,
+              textStyle: { color: chartTheme.textSoft, fontSize: 11 },
+              pageTextStyle: { color: chartTheme.textSoft },
+              formatter: (name) => shortenText(name, 24),
+              selected: legendSelected,
+            },
+          };
+        }
+
+        function bindLegendSelection(chart, legendSelected) {
+          chart.on("legendselectchanged", (event) => {
+            Object.assign(legendSelected, event?.selected || {});
+          });
+        }
+
+        function syncLegendSelection(chart, legendSelected) {
+          const selected = chart.getOption()?.legend?.[0]?.selected || {};
+          Object.assign(legendSelected, selected);
+        }
+
+        function buildTooltipFormatter(unit) {
+          return (params) => {
+            const list = Array.isArray(params) ? params : [params];
+            const title = formatAxisTooltipTitle(list[0]?.axisValue ?? list[0]?.axisValueLabel ?? list[0]?.name);
+            const lines = list
+              .map((item) => {
+                const value = Array.isArray(item.value) ? item.value[1] : item.value;
+                return `${item.marker}${item.seriesName}: ${value}${unit}`;
+              })
+              .join("<br/>");
+            return `<div style="max-width:520px;white-space:normal;line-height:1.65"><strong>${title}</strong><br/>${lines}</div>`;
+          };
+        }
+
+        function buildBusinessFilter(seriesArr, typeSelectEl, objectListEl, preferredCategory) {
+          const filterPanel = objectListEl.closest(".curve-filter-panel");
+          const searchInputEl = filterPanel?.querySelector(".curve-search-input");
+          const selectAllButtonEl = filterPanel?.querySelector(".curve-select-all-button");
+          const selectOptionEls = Array.from(filterPanel?.querySelectorAll(".curve-select-option") || []);
+          const normalized = seriesArr.map((item, index) => ({
+            ...item,
+            _index: index,
+            _seriesId: getSeriesId(item, index),
+            _category: item.businessCategory || item.filterType || item.objectType || "其他",
+            _objectKey: `${item.businessCategory || item.filterType || item.objectType || "其他"}|${item.businessObjectId ?? item.businessObjectName ?? item.name}`,
+            _objectLabel: item.businessObjectLabel || item.businessObjectName || item.filterTypeLabel || typeLabels[item.objectType] || item.name,
+            _searchText: [
+              item.businessCategory,
+              item.businessObjectLabel,
+              item.businessObjectName,
+              item.businessObjectId,
+              item.childRole,
+              item.displayName,
+              item.legendName,
+              item.sourceName,
+              item.sourceObjectId,
+              item.name,
+              item.objectType,
+            ]
+              .filter((value) => value != null)
+              .join(" ")
+              .toLowerCase(),
+          }));
+          const selectedIds = new Set();
+          const byCategory = new Map();
+
+          normalized.forEach((item) => {
+            if (!byCategory.has(item._category)) byCategory.set(item._category, new Map());
+            const objectMap = byCategory.get(item._category);
+            if (!objectMap.has(item._objectKey)) {
+              objectMap.set(item._objectKey, {
+                key: item._objectKey,
+                label: item._objectLabel,
+                order: Number(item.businessObjectOrder ?? 999999),
+                searchText: item._objectLabel.toLowerCase(),
+                children: [],
+              });
+            }
+            const objectItem = objectMap.get(item._objectKey);
+            objectItem.children.push(item);
+            objectItem.searchText = `${objectItem.searchText} ${item._searchText}`;
           });
 
-          // Populate type dropdown
-          typeSelectEl.innerHTML = '';
-          Object.entries(byType).forEach(([type, items]) => {
-            const opt = document.createElement("option");
-            opt.value = type;
-            opt.textContent = `${typeLabels[type] || type} (${items.length})`;
-            if (type === defaultType) opt.selected = true;
-            typeSelectEl.appendChild(opt);
-          });
+          const categories = Array.from(byCategory.keys()).sort(
+            (a, b) => (categoryOrder.indexOf(a) === -1 ? 99 : categoryOrder.indexOf(a)) - (categoryOrder.indexOf(b) === -1 ? 99 : categoryOrder.indexOf(b))
+          );
+          const initialCategory = categories.includes(preferredCategory) ? preferredCategory : categories[0];
 
-          // Populate checkbox list based on selected type
-          function refreshObjects() {
-            const selectedType = typeSelectEl.value;
-            const items = byType[selectedType] || [];
-            objectListEl.innerHTML = '';
-            items.forEach((item, i) => {
-              const label = document.createElement("label");
-              label.className = "filter-chip cursor-pointer px-3 py-2 text-xs";
+          function sortedObjects(category) {
+            return Array.from(byCategory.get(category)?.values() || []).sort((a, b) => a.order - b.order || a.label.localeCompare(b.label, "zh-Hans-CN"));
+          }
 
-              const checkbox = document.createElement("input");
-              checkbox.type = "checkbox";
-              checkbox.value = item.index;
-              checkbox.checked = i < 5;
-              checkbox.addEventListener("change", () => typeSelectEl.dispatchEvent(new Event("filter-changed")));
+          function defaultChildren(objectItem) {
+            const defaults = objectItem.children.filter((child) => child.defaultSelected);
+            return defaults.length ? defaults : objectItem.children.slice(0, Math.min(3, objectItem.children.length));
+          }
 
-              const span = document.createElement("span");
-              span.textContent = item.name;
+          function visibleObjects() {
+            const selectedCategory = typeSelectEl.value || initialCategory;
+            const searchText = String(searchInputEl?.value || "").trim().toLowerCase();
+            return sortedObjects(selectedCategory).filter((objectItem) => !searchText || objectItem.searchText.includes(searchText));
+          }
 
-              label.appendChild(checkbox);
-              label.appendChild(span);
-              objectListEl.appendChild(label);
+          function countVisibleSelection(objects) {
+            const visibleSeriesCount = objects.reduce((count, objectItem) => count + objectItem.children.length, 0);
+            const selectedVisibleCount = objects.reduce(
+              (count, objectItem) => count + objectItem.children.filter((child) => selectedIds.has(child._seriesId)).length,
+              0
+            );
+            return { visibleSeriesCount, selectedVisibleCount };
+          }
+
+          function childMatchesScope(child, scope) {
+            if (scope === "all") return true;
+            const role = String(child.childRole || "");
+            if (scope === "inlet") {
+              return ["首断面", "进口断面", "闸前断面"].includes(role);
+            }
+            if (scope === "outlet") {
+              return ["尾断面", "出口断面", "闸后断面"].includes(role);
+            }
+            return false;
+          }
+
+          function scopedRoleLabel(objects, scope) {
+            if (scope === "all") return "全选";
+            const roles = scopedChildren(objects, scope)
+              .map((child) => String(child.childRole || ""))
+              .filter(Boolean);
+            const uniqueRoles = Array.from(new Set(roles));
+            if (uniqueRoles.length === 1) return `全选${uniqueRoles[0]}`;
+            const preferredRoles =
+              scope === "inlet"
+                ? ["首断面", "进口断面", "闸前断面"]
+                : ["尾断面", "出口断面", "闸后断面"];
+            const matchedPreferredRoles = preferredRoles.filter((role) => uniqueRoles.includes(role));
+            return matchedPreferredRoles.length
+              ? `全选${matchedPreferredRoles.map((role) => role.replace("断面", "")).join("/")}断面`
+              : scope === "inlet"
+                ? "全选入口侧断面"
+                : "全选出口侧断面";
+          }
+
+          function scopedChildren(objects, scope) {
+            return objects.flatMap((objectItem) => objectItem.children.filter((child) => childMatchesScope(child, scope)));
+          }
+
+          function countScopedSelection(objects, scope) {
+            const children = scopedChildren(objects, scope);
+            const selectedCount = children.filter((child) => selectedIds.has(child._seriesId)).length;
+            return { totalCount: children.length, selectedCount };
+          }
+
+          function toggleScopedSelection(scope) {
+            const objects = visibleObjects();
+            const children = scopedChildren(objects, scope);
+            const shouldClear = children.length > 0 && children.every((child) => selectedIds.has(child._seriesId));
+            children.forEach((child) => {
+              if (shouldClear) selectedIds.delete(child._seriesId);
+              else selectedIds.add(child._seriesId);
+            });
+            renderObjects();
+            emitChanged();
+          }
+
+          const firstObject = sortedObjects(initialCategory)[0];
+          if (firstObject) {
+            defaultChildren(firstObject).forEach((child) => selectedIds.add(child._seriesId));
+          }
+
+          function emitChanged() {
+            typeSelectEl.dispatchEvent(new Event("filter-changed"));
+          }
+
+          function updateCategoryOptions() {
+            const current = typeSelectEl.value || initialCategory;
+            typeSelectEl.innerHTML = "";
+            categories.forEach((category) => {
+              const objects = sortedObjects(category);
+              const selectedCount = objects.reduce(
+                (count, objectItem) => count + objectItem.children.filter((child) => selectedIds.has(child._seriesId)).length,
+                0
+              );
+              const opt = document.createElement("option");
+              opt.value = category;
+              opt.textContent = `${category}（${objects.length} 个对象，已选 ${selectedCount} 条）`;
+              opt.selected = category === current;
+              typeSelectEl.appendChild(opt);
+            });
+            if (!typeSelectEl.value && initialCategory) typeSelectEl.value = initialCategory;
+          }
+
+          function renderObjects() {
+            updateCategoryOptions();
+            const searchText = String(searchInputEl?.value || "").trim().toLowerCase();
+            const objects = visibleObjects();
+            objectListEl.innerHTML = "";
+            if (selectAllButtonEl) {
+              const { visibleSeriesCount, selectedVisibleCount } = countVisibleSelection(objects);
+              const isAllVisibleSelected = visibleSeriesCount > 0 && selectedVisibleCount === visibleSeriesCount;
+              selectAllButtonEl.disabled = visibleSeriesCount === 0;
+              selectAllButtonEl.textContent = visibleSeriesCount
+                ? `${isAllVisibleSelected ? "取消全选" : "全选"}（${selectedVisibleCount}/${visibleSeriesCount}）`
+                : "全选";
+            }
+            selectOptionEls.forEach((optionEl) => {
+              const scope = optionEl.dataset.selectScope || "all";
+              const { totalCount, selectedCount } = countScopedSelection(objects, scope);
+              const allSelected = totalCount > 0 && selectedCount === totalCount;
+              const baseLabel = scopedRoleLabel(objects, scope);
+              optionEl.disabled = totalCount === 0;
+              optionEl.textContent = totalCount
+                ? `${allSelected ? "取消" : ""}${baseLabel}（${selectedCount}/${totalCount}）`
+                : `${baseLabel}（0）`;
+            });
+            if (!objects.length) {
+              const empty = document.createElement("div");
+              empty.className = "curve-empty-state";
+              empty.textContent = searchText ? "没有匹配的对象、断面或设备" : "当前分类暂无可展示曲线";
+              objectListEl.appendChild(empty);
+              return;
+            }
+            objects.forEach((objectItem) => {
+              const selectedChildren = objectItem.children.filter((child) => selectedIds.has(child._seriesId));
+              const card = document.createElement("div");
+              card.className = "curve-object-card";
+
+              const header = document.createElement("label");
+              header.className = "flex cursor-pointer items-center gap-2 text-xs font-semibold text-ink/78";
+              const objectCheckbox = document.createElement("input");
+              objectCheckbox.type = "checkbox";
+              objectCheckbox.checked = selectedChildren.length === objectItem.children.length && objectItem.children.length > 0;
+              objectCheckbox.indeterminate = selectedChildren.length > 0 && selectedChildren.length < objectItem.children.length;
+              objectCheckbox.addEventListener("change", () => {
+                if (objectCheckbox.checked) {
+                  const targetChildren = selectedChildren.length ? objectItem.children : defaultChildren(objectItem);
+                  targetChildren.forEach((child) => selectedIds.add(child._seriesId));
+                } else {
+                  objectItem.children.forEach((child) => selectedIds.delete(child._seriesId));
+                }
+                renderObjects();
+                emitChanged();
+              });
+              const title = document.createElement("span");
+              title.className = "min-w-0 flex-1 truncate";
+              title.textContent = objectItem.label;
+              title.title = objectItem.label;
+              const count = document.createElement("span");
+              count.className = "shrink-0 text-[11px] font-medium text-ink/48";
+              count.textContent = `${selectedChildren.length}/${objectItem.children.length}`;
+              header.appendChild(objectCheckbox);
+              header.appendChild(title);
+              header.appendChild(count);
+              card.appendChild(header);
+
+              const childList = document.createElement("div");
+              childList.className = "curve-child-list";
+              objectItem.children.forEach((child) => {
+                const childLabel = document.createElement("label");
+                childLabel.className = "filter-chip cursor-pointer px-3 py-2 text-xs";
+                childLabel.title = `${objectItem.label} / ${child.displayName || child.name}`;
+
+                const checkbox = document.createElement("input");
+                checkbox.type = "checkbox";
+                checkbox.value = child._seriesId;
+                checkbox.checked = selectedIds.has(child._seriesId);
+                checkbox.addEventListener("change", () => {
+                  if (checkbox.checked) selectedIds.add(child._seriesId);
+                  else selectedIds.delete(child._seriesId);
+                  renderObjects();
+                  emitChanged();
+                });
+
+                const span = document.createElement("span");
+                span.textContent = shortenText(child.displayName || child.name, 30);
+                childLabel.appendChild(checkbox);
+                childLabel.appendChild(span);
+                childList.appendChild(childLabel);
+              });
+              card.appendChild(childList);
+              objectListEl.appendChild(card);
             });
           }
 
-          typeSelectEl.addEventListener("change", () => { refreshObjects(); typeSelectEl.dispatchEvent(new Event("filter-changed")); });
-          refreshObjects();
-          return () => Array.from(objectListEl.querySelectorAll('input[type="checkbox"]:checked')).map(cb => parseInt(cb.value));
+          typeSelectEl.addEventListener("change", () => {
+            if (searchInputEl) searchInputEl.value = "";
+            renderObjects();
+            emitChanged();
+          });
+          searchInputEl?.addEventListener("input", renderObjects);
+          selectAllButtonEl?.addEventListener("click", () => {
+            toggleScopedSelection("all");
+          });
+          selectOptionEls.forEach((optionEl) => {
+            optionEl.addEventListener("click", () => {
+              toggleScopedSelection(optionEl.dataset.selectScope || "all");
+            });
+          });
+          renderObjects();
+
+          return () => normalized.filter((item) => selectedIds.has(item._seriesId)).map((item) => item._index);
         }
 
         const levelTypeSelect = document.getElementById("levelTypeSelect");
         const levelObjectList = document.getElementById("levelObjectList");
-        const getSelectedLevel = buildFilter(levelSeries, levelTypeSelect, levelObjectList, 'CrossSection');
+        const getSelectedLevel = buildBusinessFilter(levelSeries, levelTypeSelect, levelObjectList, '渠道');
+        const levelLegendSelected = {};
+        bindLegendSelection(levelChart, levelLegendSelected);
 
         const flowTypeSelect = document.getElementById("flowTypeSelect");
         const flowObjectList = document.getElementById("flowObjectList");
-        const getSelectedFlow = buildFilter(flowSeries, flowTypeSelect, flowObjectList, 'CrossSection');
+        const getSelectedFlow = buildBusinessFilter(flowSeries, flowTypeSelect, flowObjectList, '渠道');
+        const flowLegendSelected = {};
+        bindLegendSelection(flowChart, flowLegendSelected);
+
+        const gateTypeSelect = document.getElementById("gateTypeSelect");
+        const gateObjectList = document.getElementById("gateObjectList");
+        const getSelectedGate = buildBusinessFilter(gateSeries, gateTypeSelect, gateObjectList, '闸站');
+        const gateLegendSelected = {};
+        bindLegendSelection(gateChart, gateLegendSelected);
 
         function updateLevelChart(step = interactionState.currentStep) {
           const selectedIndices = getSelectedLevel();
           const selectedSeriesMeta = selectedIndices.map((index) => levelSeries[index]);
-          const selectedSeries = selectedSeriesMeta.map((item, index) => buildLineSeries(item.name, item.data, index, { hueOffset: 210 }));
+          const selectedSeries = selectedSeriesMeta.map((item, index) => buildLineSeries(getSeriesDisplayName(item), item.data, index, { hueOffset: 210 }));
           const bounds = computeAxisBounds(
             selectedSeriesMeta.map((item) => item.data.map((point) => point[1])),
             { paddingRatio: 0.12, minPadding: 0.03 }
@@ -1956,26 +2735,29 @@
               markLine: buildStepMarkLine(step),
             };
           }
+          syncLegendSelection(levelChart, levelLegendSelected);
+          const layout = buildAdaptiveChartLayout(selectedSeriesMeta.length, levelLegendSelected);
 
           levelChart.setOption({
             animationDuration: 500,
-            grid: { left: 56, right: 18, top: 32, bottom: 96, containLabel: true },
+            grid: layout.grid,
             tooltip: {
               trigger: "axis",
               axisPointer: { type: "line", lineStyle: { color: chartTheme.crosshair, type: "dashed" } },
+              formatter: buildTooltipFormatter(" m"),
             },
-            legend: { show: false },
+            legend: layout.legend,
             dataZoom: [
               { type: "inside", xAxisIndex: 0, filterMode: "none" },
-              { type: "slider", xAxisIndex: 0, height: 22, bottom: 22, borderColor: "transparent", fillerColor: "rgba(28, 127, 181, 0.14)" },
+              { type: "slider", xAxisIndex: 0, height: 18, bottom: 6, borderColor: "transparent", fillerColor: "rgba(28, 127, 181, 0.14)" },
             ],
             xAxis: {
               type: "value",
-              name: reportData.meta?.axis_label || "采样时间步",
+              name: reportData.meta?.axis_label || "步长",
               min: stepBounds.min,
               max: stepBounds.max,
               nameLocation: "middle",
-              nameGap: 48,
+              nameGap: 40,
               nameTextStyle: {
                 color: "rgba(16, 35, 50, 0.78)",
                 fontSize: 13,
@@ -2013,7 +2795,7 @@
           const selectedIndices = getSelectedFlow();
           const selectedSeriesMeta = selectedIndices.map((index) => flowSeries[index]);
           const selectedSeries = selectedSeriesMeta.map((item, index) =>
-            buildLineSeries(item.name, item.data, index, {
+            buildLineSeries(getSeriesDisplayName(item), item.data, index, {
               hueOffset: item.minValue < 0 ? 0 : 150,
               lineWidth: item.minValue < 0 ? 2.5 : 1.8,
             })
@@ -2032,26 +2814,29 @@
               markLine: buildStepMarkLine(step, { includeZeroBaseline: true }),
             };
           }
+          syncLegendSelection(flowChart, flowLegendSelected);
+          const layout = buildAdaptiveChartLayout(selectedSeriesMeta.length, flowLegendSelected);
 
           flowChart.setOption({
             animationDuration: 500,
-            grid: { left: 56, right: 18, top: 32, bottom: 96, containLabel: true },
+            grid: layout.grid,
             tooltip: {
               trigger: "axis",
               axisPointer: { type: "line", lineStyle: { color: chartTheme.crosshair, type: "dashed" } },
+              formatter: buildTooltipFormatter(" m³/s"),
             },
-            legend: { show: false },
+            legend: layout.legend,
             dataZoom: [
               { type: "inside", xAxisIndex: 0, filterMode: "none" },
-              { type: "slider", xAxisIndex: 0, height: 22, bottom: 22, borderColor: "transparent", fillerColor: "rgba(28, 127, 181, 0.14)" },
+              { type: "slider", xAxisIndex: 0, height: 18, bottom: 6, borderColor: "transparent", fillerColor: "rgba(28, 127, 181, 0.14)" },
             ],
             xAxis: {
               type: "value",
-              name: reportData.meta?.axis_label || "采样时间步",
+              name: reportData.meta?.axis_label || "步长",
               min: stepBounds.min,
               max: stepBounds.max,
               nameLocation: "middle",
-              nameGap: 48,
+              nameGap: 40,
               nameTextStyle: {
                 color: "rgba(16, 35, 50, 0.78)",
                 fontSize: 13,
@@ -2087,12 +2872,15 @@
 
         levelTypeSelect.addEventListener("filter-changed", updateLevelChart);
         flowTypeSelect.addEventListener("filter-changed", updateFlowChart);
+        gateTypeSelect.addEventListener("filter-changed", updateGateChart);
 
         function updateGateChart(step = interactionState.currentStep) {
-          renderCurveInterpretation("gateInterpretation", chartInterpretations.gate, gateSeries, "Gate");
-          const gateChartSeries = gateSeries.map((item, index) =>
+          const selectedIndices = getSelectedGate();
+          const selectedSeriesMeta = selectedIndices.map((index) => gateSeries[index]);
+          renderCurveInterpretation("gateInterpretation", chartInterpretations.gate, selectedSeriesMeta, gateTypeSelect.value);
+          const gateChartSeries = selectedSeriesMeta.map((item, index) =>
             buildLineSeries(
-              item.name,
+              getSeriesDisplayName(item),
               item.data
                 .map((point) => [normalizeStepValue(point[0]), point[1]])
                 .filter((point) => Number.isFinite(point[0])),
@@ -2101,11 +2889,11 @@
             )
           );
           const bounds = computeAxisBounds(
-            gateSeries.map((series) => series.data.map((point) => point[1])),
+            selectedSeriesMeta.map((series) => series.data.map((point) => point[1])),
             { paddingRatio: 0.12, minPadding: 0.02 }
           );
           const stepBounds = computeAxisExtent(
-            gateSeries.map((series) => series.data.map((point) => normalizeStepValue(point[0]) ?? point[0]))
+            selectedSeriesMeta.map((series) => series.data.map((point) => normalizeStepValue(point[0]) ?? point[0]))
           );
           if (gateChartSeries[0] && step != null) {
             gateChartSeries[0] = {
@@ -2113,26 +2901,29 @@
               markLine: buildStepMarkLine(step),
             };
           }
+          syncLegendSelection(gateChart, gateLegendSelected);
+          const layout = buildAdaptiveChartLayout(selectedSeriesMeta.length, gateLegendSelected);
 
           gateChart.setOption({
             animationDuration: 500,
-            grid: { left: 56, right: 18, top: 48, bottom: 110, containLabel: true },
+            grid: layout.grid,
             tooltip: {
               trigger: "axis",
               axisPointer: { type: "line", lineStyle: { color: chartTheme.crosshair, type: "dashed" } },
+              formatter: buildTooltipFormatter(""),
             },
-            legend: { top: 0, textStyle: { color: chartTheme.text } },
+            legend: layout.legend,
             dataZoom: [
               { type: "inside", xAxisIndex: 0, filterMode: "none" },
-              { type: "slider", xAxisIndex: 0, height: 22, bottom: 22, borderColor: "transparent", fillerColor: "rgba(28, 127, 181, 0.14)" },
+              { type: "slider", xAxisIndex: 0, height: 18, bottom: 6, borderColor: "transparent", fillerColor: "rgba(28, 127, 181, 0.14)" },
             ],
             xAxis: {
               type: "value",
-              name: reportData.meta?.axis_label || "采样时间步",
+              name: reportData.meta?.axis_label || "步长",
               min: stepBounds.min,
               max: stepBounds.max,
               nameLocation: "middle",
-              nameGap: 52,
+              nameGap: 40,
               nameTextStyle: {
                 color: "rgba(16, 35, 50, 0.78)",
                 fontSize: 13,

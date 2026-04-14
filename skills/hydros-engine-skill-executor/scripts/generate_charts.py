@@ -53,9 +53,15 @@ def resolve_axis_info(records, total_steps=None, sim_step_size=None, output_step
     indices = sorted(set(r['data_index'] for r in records))
     intervals = sorted(set(b - a for a, b in zip(indices, indices[1:])))
     stable_interval = intervals[0] if len(intervals) == 1 else None
-    expected_sample_count = None
-    if total_steps and sim_step_size and output_step_size and sim_step_size > 0:
-        expected_sample_count = int(total_steps // (output_step_size / sim_step_size) + 1)
+    if total_steps:
+        expected_sample_count = total_steps + 1 if indices and min(indices) == 0 else total_steps
+    else:
+        expected_sample_count = None
+    duration_note = (
+        f'按参数推导的仿真覆盖总时长为 {total_steps * output_step_size} 秒'
+        if total_steps is not None and output_step_size is not None
+        else None
+    )
 
     label = '结果输出序号'
     note = '结果文件时间信息不足，图表横轴按结果输出顺序展示。'
@@ -66,6 +72,8 @@ def resolve_axis_info(records, total_steps=None, sim_step_size=None, output_step
         if abs(expected_sample_count - len(indices)) <= 1:
             label = '输出序号'
             note = '结果文件中的 data_index 更像输出序号，图表横轴按输出序号展示。'
+            if duration_note:
+                note += duration_note + '；sim_step_size 仅表示内部计算步长。'
         else:
             note = (
                 f'结果文件目前仅有 {len(indices)} 个采样点，但按参数应约有 {expected_sample_count} 个输出点；'

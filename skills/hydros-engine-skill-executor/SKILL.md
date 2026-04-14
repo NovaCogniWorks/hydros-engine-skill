@@ -89,8 +89,19 @@ description: |
 - 需要完整版 HTML 报告、结果曲线展示或可直接打开的单文件页面时，优先复用 [assets/hydros-report-template/index.html](assets/hydros-report-template/index.html) 模板，并按当前脚本实现把真实 payload 内联到 `simulation_report.html`。
 - 当用户明确要“报告”“完整报告”“HTML 报告”“汇报页”时，不要先交付临时分析报告、手写摘要页或简版 HTML 作为最终产物；如果本地结果文件尚未就位，先完成 `get_timeseries_data -> get_export_status 轮询 -> resource_uri/下载地址 -> 落盘结果文件 -> build_timeseries_report.py`，再输出遵循模板的正式报告。
 - HTML 正式报告应尽量包含结果曲线图产物和渠道纵剖面图；若 `chart1_water_level.png`、`chart2_water_flow.png`、`chart4_gate_opening.png`、`chart5_disturbance_flow.png`、`chart6_heatmap.png`、`chart7_longitudinal_profile.png` 中有缺失，仍可交付 HTML，但必须在报告正文里显式写明缺失项、缺失原因和影响范围，不能把缺图问题只留在聊天回复里解释。
-- 正式 HTML 报告生成完成后，默认调用 `hydros-engine-executor` 的 `upload_and_fetch_report` MCP 工具上传 HTML，并把返回的在线访问地址作为交付结果的一部分；除非用户明确只要本地文件，否则不要停在“本地已生成 HTML”这一步。
-- HTML 报告上传必须走 `hydros-engine-executor` 的 MCP 工具，不要用 `curl`、手写 HTTP 请求或其他旁路方式代替正式上传链路。
+- 正式 HTML 报告生成完成后，默认通过 Hydros OpenAPI 匿名文件上传接口直接上传本地 `simulation_report.html`，并把接口返回结果作为交付结果的一部分；除非用户明确只要本地文件，否则不要停在“本地已生成 HTML”这一步。
+- HTML 报告上传统一使用 `curl --form` 直传到 `https://hydroos.cn/openapi/engine/api/v1/file/anonymous/upload/<biz_scene_instance_id>`；如果接口返回 `ACCESS_UNAUTHORIZED` 或其他失败响应，明确报告“远端上传失败”和接口错误，不要伪装成本地报告失败。
+- 直传命令模板如下。`Content-Type: multipart/form-data; boundary=...` 由 `curl --form` 自动生成，通常不要手写固定 boundary，避免请求头与 multipart 请求体不一致：
+
+    ```bash
+    curl --location --request POST \
+      "https://hydroos.cn/openapi/engine/api/v1/file/anonymous/upload/<biz_scene_instance_id>" \
+      --header "User-Agent: Apifox/1.0.0 (https://apifox.com)" \
+      --header "Accept: */*" \
+      --header "Host: hydroos.cn" \
+      --header "Connection: keep-alive" \
+      --form "file=@\"output/<biz_scene_instance_id>/report/simulation_report.html\""
+    ```
 
 ## 资源导航
 
@@ -113,6 +124,7 @@ description: |
 - `assets/hydros-report-template/report.data.js`
   作为兼容产物保留，用于调试或外部二次接线；正式交付默认以内联数据的 `simulation_report.html` 为准。
 - 以上 Python 脚本涉及时间轴、总步数、时长或输出频率计算时，优先使用用户显式提供的 `total_steps`、`sim_step_size`、`output_step_size`，其次再用场景 YAML。避免写死默认步长，确保计算准确性。
+- 仿真覆盖总时长的硬规则：`simulation_duration_seconds = total_steps * output_step_size`。`sim_step_size` 是内部计算步长，只能用于解释数值求解粒度或计算步信息，不能用来计算总仿真时长。
 - 报告应同时识别两类信息：用户输入的仿真参数和结果文件实际导出的数据。两者不一致时，在报告的”异常与建议”或”数据质量”区块显式说明，避免用户误解数据质量。
 
 ## 五阶段工作流
@@ -266,7 +278,7 @@ description: |
    - `实际速度 = 步数增量 / 墙钟耗时`
    - `预计剩余时间 = (total_steps - current_step) / 实际速度`
 4. 如果样本过少、步数没有推进、或速度波动过大，必须明确写“当前样本不足，暂不提供可靠 ETA”，不要编造剩余时间。
-5. `sim_step_size` 只用于解释仿真时间轴、仿真覆盖时长和输出时间口径，不用于估算任务还要运行多少分钟。
+5. `sim_step_size` 只用于解释内部计算步长；仿真覆盖总时长按 `total_steps * output_step_size` 计算。二者都不能用于估算任务还要运行多少分钟。
 6. 只有当 ETA 来自刚刚完成的真实轮询样本时，才允许写“预计 X 分钟内完成”或“预计 HH:MM 完成”。
 
 状态播报规则：
@@ -335,8 +347,20 @@ INIT -> WAITING_AGENTS -> READY -> STEPPING -> COMPLETED
    - **Markdown 报告**：图文并茂，每张图表配套文字分析
    - **目录结构**：统一落盘到 `output/<biz_scene_instance_id>/`；其中 `report/` 存放报告，`charts/` 存放图表，`data/` 存放结果文件、`objects.yaml` 和分析中间文件
    - **数据验证**：比较期望与实际的时长/点数，不一致时在报告中说明
-   - **上传交付**：当 HTML 正式报告生成完成后，调用 `hydros-engine-executor` 的 `upload_and_fetch_report` 上传本地 `simulation_report.html` 文件；优先把返回的报告地址交付给用户，同时保留本地 `simulation_report.html`
-   - **上传约束**：报告上传禁止改用 `curl` 或手写 HTTP 请求旁路实现；若 MCP 工具不可用，应明确报告“上传链路受阻”，不要悄悄切换上传方式
+   - **上传交付**：当 HTML 正式报告生成完成后，使用 Hydros OpenAPI 匿名上传接口直传本地 `simulation_report.html` 文件；优先把接口返回的报告地址或资源信息交付给用户，同时保留本地 `simulation_report.html`
+   - **上传命令**：
+
+     ```bash
+     curl --location --request POST \
+       "https://hydroos.cn/openapi/engine/api/v1/file/anonymous/upload/<biz_scene_instance_id>" \
+       --header "User-Agent: Apifox/1.0.0 (https://apifox.com)" \
+       --header "Accept: */*" \
+       --header "Host: hydroos.cn" \
+       --header "Connection: keep-alive" \
+       --form "file=@\"output/<biz_scene_instance_id>/report/simulation_report.html\""
+     ```
+
+   - **上传约束**：如果 OpenAPI 返回 `ACCESS_UNAUTHORIZED`、网络错误或其他失败响应，应明确报告“本地报告生成成功，远端上传失败”，并给出接口返回错误
    - **失败处理**：如果 HTML 已生成但上传失败，要明确区分“本地报告生成成功”和“远端上传失败”，并把失败原因单独报告；不要伪装成整份报告都失败
 
 6. **模板选择**：

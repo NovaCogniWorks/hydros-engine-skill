@@ -27,7 +27,12 @@ from urllib.parse import urlsplit
 import pandas as pd
 
 from build_longitudinal_profile import build_dataset as build_longitudinal_dataset
+from build_longitudinal_profile import extract_block_value
+from build_longitudinal_profile import extract_nested_block
+from build_longitudinal_profile import parse_cross_section_children
+from build_longitudinal_profile import parse_cross_sections
 from build_longitudinal_profile import save_profile_png
+from build_longitudinal_profile import split_object_blocks
 from lib.timeseries_loader import load_timeseries_dataframe
 from lib.url_utils import normalize_remote_url
 
@@ -211,6 +216,11 @@ def cache_objects_yaml(data_dir: Path, objects_yaml_url: str | None) -> Path | N
         return None
 
     target_path = data_dir / "objects.yaml"
+    local_path = Path(objects_yaml_url).expanduser()
+    if local_path.exists():
+        if local_path.resolve() != target_path.resolve():
+            shutil.copyfile(local_path, target_path)
+        return target_path
     with urllib.request.urlopen(normalize_remote_url(objects_yaml_url), timeout=20) as response:
         target_path.write_text(response.read().decode("utf-8"), encoding="utf-8")
     return target_path
@@ -251,16 +261,14 @@ def resolve_runtime_config(
         args.output_step_size if args.output_step_size is not None else (scenario_meta or {}).get("output_step_size")
     )
 
-    expected_sample_count = None
-    output_ratio = None
-    if sim_step_size and output_step_size and sim_step_size > 0 and output_step_size > 0:
-        output_ratio = output_step_size / sim_step_size
-        if total_steps is not None:
-            expected_sample_count = math.floor(total_steps / output_ratio) + 1
+    if total_steps is not None:
+        expected_sample_count = total_steps + 1 if unique_steps and min(unique_steps) == 0 else total_steps
+    else:
+        expected_sample_count = None
 
     has_unreliable_time_axis = False
     axis_mode = "csv_index"
-    axis_label = "输出顺序"
+    axis_label = "步长"
     axis_note = "结果文件里的时间信息不够完整，图表横轴按结果输出先后顺序显示。"
     sample_step_note = f"第 {unique_steps[0]} 次 ~ 第 {unique_steps[-1]} 次输出"
 
@@ -269,10 +277,10 @@ def resolve_runtime_config(
         axis_label = "仿真步"
         axis_note = "结果文件里的序号可以对应到仿真推进过程，图表横轴显示仿真进行到第几步。"
         sample_step_note = f"仿真第 {unique_steps[0]} 步 ~ 第 {unique_steps[-1]} 步"
-    elif output_ratio is not None and stable_csv_interval == 1 and expected_sample_count is not None:
+    elif output_step_size is not None and stable_csv_interval == 1 and expected_sample_count is not None:
         if abs(expected_sample_count - len(unique_steps)) <= 1:
             axis_mode = "output_ordinal"
-            axis_label = "输出顺序"
+            axis_label = "步长"
             axis_note = (
                 "结果文件里的序号更接近结果输出顺序，图表横轴按结果输出先后顺序显示，"
                 "并结合本次仿真设置做时长判断。"
@@ -281,7 +289,7 @@ def resolve_runtime_config(
         else:
             has_unreliable_time_axis = True
             axis_mode = "csv_index_unreliable"
-            axis_label = "输出顺序"
+            axis_label = "步长"
             axis_note = (
                 f"结果文件目前只看到 {len(unique_steps)} 次结果输出，但按本次设置原本应有约 {expected_sample_count} 次结果输出；"
                 "结果文件的时间信息可能不完整，因此图表横轴仅按结果输出先后顺序显示。"
@@ -367,10 +375,13 @@ def build_gate_series(df: pd.DataFrame, excluded_steps: set[int] | None = None, 
         last_step, last_value = values[-1]
         if compressed[-1][0] != f"Step {last_step}":
             compressed.append([f"Step {last_step}", round_number(last_value)])
+        gate_group = re.sub(r"\d+#?$", "", object_name).rstrip("-#") or "闸门"
         series.append(
             {
                 "name": object_name,
                 "objectType": "Gate",
+                "filterType": gate_group,
+                "filterTypeLabel": gate_group,
                 "range": round_number(ordered["value"].max() - ordered["value"].min()),
                 "data": compressed,
             }
@@ -381,6 +392,409 @@ def build_gate_series(df: pd.DataFrame, excluded_steps: set[int] | None = None, 
     else:
         series.sort(key=lambda item: item["name"])
     return series
+
+
+BUSINESS_CATEGORY_ORDER = {"渠道": 0, "闸站": 1, "倒虹吸": 2, "分水口": 3, "其他": 9}
+
+
+def parse_child_refs(block: str) -> list[dict[str, Any]]:
+    refs: list[dict[str, Any]] = []
+    for child_block in re.split(r"(?m)^\s+-\s*$", block):
+        if not child_block.strip():
+            continue
+        id_match = re.search(r"(?m)^\s+id:\s*(\d+)\s*$", child_block)
+        type_match = re.search(r"(?m)^\s+type:\s*(.+?)\s*$", child_block)
+        name_match = re.search(r"(?m)^\s+name:\s*(.+?)\s*$", child_block)
+        alias_match = re.search(r"(?m)^\s+alias_name:\s*(.+?)\s*$", child_block)
+        if not id_match and not name_match:
+            continue
+        refs.append(
+            {
+                "id": int(id_match.group(1)) if id_match else None,
+                "type": type_match.group(1).strip() if type_match else "",
+                "name": name_match.group(1).strip() if name_match else "",
+                "aliasName": alias_match.group(1).strip() if alias_match else "",
+            }
+        )
+    return refs
+
+
+def parse_business_objects(objects_yaml_text: str | None) -> dict[str, Any] | None:
+    if not objects_yaml_text:
+        return None
+
+    sections = parse_cross_sections(objects_yaml_text)
+    sections_by_name = {item["name"]: item for item in sections}
+    sections_by_id = {int(item["id"]): item for item in sections if item.get("id") is not None}
+    objects: list[dict[str, Any]] = []
+
+    for source_index, block in enumerate(split_object_blocks(objects_yaml_text)):
+        object_type = extract_block_value(block, "type")
+        object_name = extract_block_value(block, "name")
+        object_id = extract_block_value(block, "id")
+        if not object_type or not object_name or not object_id:
+            continue
+
+        parameters = extract_nested_block(block, "parameters")
+        location_match = re.search(r"\n\s*location:\s*([-\d.]+)", parameters)
+        objects.append(
+            {
+                "id": int(object_id),
+                "type": object_type,
+                "name": object_name,
+                "aliasName": extract_block_value(block, "alias_name") or "",
+                "location": float(location_match.group(1)) if location_match else None,
+                "sectionRefs": parse_cross_section_children(extract_nested_block(block, "cross_section_children")),
+                "deviceRefs": parse_child_refs(extract_nested_block(block, "device_children")),
+                "sourceIndex": source_index,
+            }
+        )
+
+    return {
+        "objects": objects,
+        "sections": sections,
+        "sectionsByName": sections_by_name,
+        "sectionsById": sections_by_id,
+    }
+
+
+def resolve_section_ref(ref: dict[str, Any], catalog: dict[str, Any]) -> dict[str, Any] | None:
+    if ref.get("id") is not None and int(ref["id"]) in catalog["sectionsById"]:
+        return catalog["sectionsById"][int(ref["id"])]
+    if ref.get("name") and ref["name"] in catalog["sectionsByName"]:
+        return catalog["sectionsByName"][ref["name"]]
+    return None
+
+
+def get_object_location(item: dict[str, Any], catalog: dict[str, Any]) -> float:
+    if item.get("location") is not None:
+        return float(item["location"])
+    section_locations = [
+        float(section["location"])
+        for ref in item.get("sectionRefs", [])
+        for section in [resolve_section_ref(ref, catalog)]
+        if section is not None and section.get("location") is not None
+    ]
+    if section_locations:
+        return sum(section_locations) / len(section_locations)
+    return float("inf")
+
+
+def collect_channel_sections(item: dict[str, Any], catalog: dict[str, Any]) -> list[dict[str, Any]]:
+    endpoint_sections = [
+        section
+        for ref in item.get("sectionRefs", [])
+        for section in [resolve_section_ref(ref, catalog)]
+        if section is not None
+    ]
+    if len(endpoint_sections) >= 2:
+        low, high = sorted([float(endpoint_sections[0]["location"]), float(endpoint_sections[-1]["location"])])
+        candidates = [
+            section
+            for section in catalog["sections"]
+            if low - 1e-6 <= float(section["location"]) <= high + 1e-6
+        ]
+    else:
+        candidates = endpoint_sections
+
+    unique: dict[str, dict[str, Any]] = {}
+    for section in candidates:
+        if abs(float(section.get("top_elevation", 0)) - float(section.get("bottom_elevation", 0))) < 1e-6:
+            continue
+        unique[section["name"]] = section
+    return sorted(unique.values(), key=lambda section: (float(section["location"]), int(section.get("source_index", 0))))
+
+
+def build_business_children(catalog: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not catalog:
+        return []
+
+    type_to_category = {
+        "UnifiedCanal": "渠道",
+        "GateStation": "闸站",
+        "Pipe": "倒虹吸",
+        "DisturbanceNode": "分水口",
+    }
+    children: list[dict[str, Any]] = []
+    objects = sorted(
+        catalog["objects"],
+        key=lambda item: (
+            BUSINESS_CATEGORY_ORDER.get(type_to_category.get(item["type"], "其他"), 9),
+            get_object_location(item, catalog),
+            item["sourceIndex"],
+        ),
+    )
+
+    for object_order, item in enumerate(objects):
+        object_type = item["type"]
+        if object_type not in type_to_category:
+            continue
+        category = type_to_category[object_type]
+        object_label = f"{item['name']}（{item['id']}）"
+
+        if object_type == "UnifiedCanal":
+            channel_sections = collect_channel_sections(item, catalog)
+            last_index = len(channel_sections) - 1
+            for section_index, section in enumerate(channel_sections):
+                if section_index == 0:
+                    role = "首断面"
+                elif section_index == last_index:
+                    role = "尾断面"
+                else:
+                    role = f"中间断面 {section_index}"
+                children.append(
+                    {
+                        "sourceObjectType": "CrossSection",
+                        "sourceObjectName": section["name"],
+                        "sourceObjectId": section["id"],
+                        "businessCategory": category,
+                        "businessObjectName": item["name"],
+                        "businessObjectId": item["id"],
+                        "businessObjectLabel": object_label,
+                        "businessObjectOrder": object_order,
+                        "childRole": role,
+                        "childOrder": section_index,
+                        "defaultSelected": role in {"首断面", "尾断面"},
+                    }
+                )
+            continue
+
+        if object_type == "GateStation":
+            for section_index, ref in enumerate(item.get("sectionRefs", [])):
+                section = resolve_section_ref(ref, catalog)
+                if not section:
+                    continue
+                role = "闸前断面" if ref.get("role") == "INLET" or section_index == 0 else "闸后断面"
+                children.append(
+                    {
+                        "sourceObjectType": "CrossSection",
+                        "sourceObjectName": section["name"],
+                        "sourceObjectId": section["id"],
+                        "businessCategory": category,
+                        "businessObjectName": item["name"],
+                        "businessObjectId": item["id"],
+                        "businessObjectLabel": object_label,
+                        "businessObjectOrder": object_order,
+                        "childRole": role,
+                        "childOrder": section_index,
+                        "defaultSelected": True,
+                    }
+                )
+            for gate_index, gate in enumerate(item.get("deviceRefs", [])):
+                if gate.get("type") != "Gate" or not gate.get("name"):
+                    continue
+                children.append(
+                    {
+                        "sourceObjectType": "Gate",
+                        "sourceObjectName": gate["name"],
+                        "sourceObjectId": gate.get("id"),
+                        "businessCategory": category,
+                        "businessObjectName": item["name"],
+                        "businessObjectId": item["id"],
+                        "businessObjectLabel": object_label,
+                        "businessObjectOrder": object_order,
+                        "childRole": "闸门设备",
+                        "childOrder": 1000 + gate_index,
+                        "defaultSelected": True,
+                    }
+                )
+            continue
+
+        if object_type == "Pipe":
+            children.append(
+                {
+                    "sourceObjectType": "Pipe",
+                    "sourceObjectName": item["name"],
+                    "sourceObjectId": item["id"],
+                    "businessCategory": category,
+                    "businessObjectName": item["name"],
+                    "businessObjectId": item["id"],
+                    "businessObjectLabel": object_label,
+                    "businessObjectOrder": object_order,
+                    "childRole": "倒虹吸本体",
+                    "childOrder": 0,
+                    "defaultSelected": True,
+                }
+            )
+            for section_index, ref in enumerate(item.get("sectionRefs", [])):
+                section = resolve_section_ref(ref, catalog)
+                if not section:
+                    continue
+                role = "进口断面" if ref.get("role") == "INLET" or section_index == 0 else "出口断面"
+                children.append(
+                    {
+                        "sourceObjectType": "CrossSection",
+                        "sourceObjectName": section["name"],
+                        "sourceObjectId": section["id"],
+                        "businessCategory": category,
+                        "businessObjectName": item["name"],
+                        "businessObjectId": item["id"],
+                        "businessObjectLabel": object_label,
+                        "businessObjectOrder": object_order,
+                        "childRole": role,
+                        "childOrder": section_index + 1,
+                        "defaultSelected": True,
+                    }
+                )
+            continue
+
+        children.append(
+            {
+                "sourceObjectType": "DisturbanceNode",
+                "sourceObjectName": item["name"],
+                "sourceObjectId": item["id"],
+                "businessCategory": category,
+                "businessObjectName": item["name"],
+                "businessObjectId": item["id"],
+                "businessObjectLabel": object_label,
+                "businessObjectOrder": object_order,
+                "childRole": "节点本体",
+                "childOrder": 0,
+                "defaultSelected": True,
+            }
+        )
+
+    return children
+
+
+def clone_series_with_business_meta(base_item: dict[str, Any], child: dict[str, Any], metric: str) -> dict[str, Any]:
+    series_id = (
+        f"{metric}|{child['businessCategory']}|{child['businessObjectId']}|"
+        f"{child['sourceObjectType']}|{child['sourceObjectId'] or child['sourceObjectName']}|{child['childRole']}"
+    )
+    source_label = (
+        f"{child['sourceObjectName']}（{child['sourceObjectId']}）"
+        if child.get("sourceObjectId")
+        else child["sourceObjectName"]
+    )
+    item = dict(base_item)
+    item.update(
+        {
+            "seriesId": series_id,
+            "sourceName": child["sourceObjectName"],
+            "sourceObjectType": child["sourceObjectType"],
+            "sourceObjectId": child.get("sourceObjectId"),
+            "businessCategory": child["businessCategory"],
+            "businessObjectName": child["businessObjectName"],
+            "businessObjectId": child["businessObjectId"],
+            "businessObjectLabel": child["businessObjectLabel"],
+            "businessObjectOrder": child["businessObjectOrder"],
+            "childRole": child["childRole"],
+            "childOrder": child["childOrder"],
+            "displayName": f"{child['childRole']}：{source_label}",
+            "legendName": f"{child['businessObjectName']} / {child['childRole']}",
+            "defaultSelected": bool(child.get("defaultSelected")),
+        }
+    )
+    return item
+
+
+def sort_business_series(series: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(
+        series,
+        key=lambda item: (
+            BUSINESS_CATEGORY_ORDER.get(item.get("businessCategory", "其他"), 9),
+            int(item.get("businessObjectOrder", 999999)),
+            int(item.get("childOrder", 999999)),
+            item.get("displayName") or item.get("name", ""),
+        ),
+    )
+
+
+def build_business_metric_series(
+    df: pd.DataFrame,
+    metric: str,
+    business_children: list[dict[str, Any]] | None = None,
+    excluded_steps: set[int] | None = None,
+    sort_key_func=None,
+) -> list[dict[str, Any]]:
+    base_series = build_metric_series(df, metric, excluded_steps, sort_key_func)
+    if not business_children:
+        return base_series
+
+    by_source = {(item["objectType"], item["name"]): item for item in base_series}
+    series: list[dict[str, Any]] = []
+    mapped_keys: set[tuple[str, str]] = set()
+
+    for child in business_children:
+        key = (child["sourceObjectType"], child["sourceObjectName"])
+        base_item = by_source.get(key)
+        if not base_item:
+            continue
+        series.append(clone_series_with_business_meta(base_item, child, metric))
+        mapped_keys.add(key)
+
+    for base_item in base_series:
+        key = (base_item["objectType"], base_item["name"])
+        if key in mapped_keys:
+            continue
+        series.append(
+            {
+                **base_item,
+                "seriesId": f"{metric}|fallback|{base_item['objectType']}|{base_item['name']}",
+                "sourceName": base_item["name"],
+                "sourceObjectType": base_item["objectType"],
+                "businessCategory": "其他",
+                "businessObjectName": "未归属对象",
+                "businessObjectId": "fallback",
+                "businessObjectLabel": "未归属对象",
+                "businessObjectOrder": 999999,
+                "childRole": base_item["objectType"],
+                "childOrder": 999999,
+                "displayName": base_item["name"],
+                "legendName": base_item["name"],
+                "defaultSelected": False,
+            }
+        )
+
+    return sort_business_series(series)
+
+
+def build_business_gate_series(
+    df: pd.DataFrame,
+    business_children: list[dict[str, Any]] | None = None,
+    excluded_steps: set[int] | None = None,
+    sort_key_func=None,
+) -> list[dict[str, Any]]:
+    base_series = build_gate_series(df, excluded_steps, sort_key_func)
+    if not business_children:
+        return base_series
+
+    by_name = {item["name"]: item for item in base_series}
+    series: list[dict[str, Any]] = []
+    mapped_names: set[str] = set()
+    for child in business_children:
+        if child["sourceObjectType"] != "Gate":
+            continue
+        base_item = by_name.get(child["sourceObjectName"])
+        if not base_item:
+            continue
+        series.append(clone_series_with_business_meta(base_item, child, "gate_opening"))
+        mapped_names.add(child["sourceObjectName"])
+
+    for base_item in base_series:
+        if base_item["name"] in mapped_names:
+            continue
+        series.append(
+            {
+                **base_item,
+                "seriesId": f"gate_opening|fallback|Gate|{base_item['name']}",
+                "sourceName": base_item["name"],
+                "sourceObjectType": "Gate",
+                "businessCategory": "其他",
+                "businessObjectName": base_item.get("filterType") or "未归属闸门",
+                "businessObjectId": base_item.get("filterType") or "fallback",
+                "businessObjectLabel": base_item.get("filterType") or "未归属闸门",
+                "businessObjectOrder": 999999,
+                "childRole": "闸门设备",
+                "childOrder": 999999,
+                "displayName": base_item["name"],
+                "legendName": base_item["name"],
+                "defaultSelected": False,
+            }
+        )
+
+    return sort_business_series(series)
 
 
 def build_longitudinal_profile_payload(
@@ -439,6 +853,23 @@ def build_longitudinal_profile_payload(
     end_point = current_frame["points"][-1]
     deepest = max(current_frame["points"], key=lambda item: item["depth"])
     shallowest = min(current_frame["points"], key=lambda item: item["depth"])
+    head_loss = round_number(start_point["water_level"] - end_point["water_level"], 3)
+    distance_km = abs(end_point["location"] - start_point["location"]) or float(profile_dataset["meta"].get("distance_km") or 0)
+    water_slope = round_number(head_loss / distance_km, 3) if distance_km else None
+    avg_depth = round_number(
+        sum(point["depth"] for point in current_frame["points"]) / len(current_frame["points"]),
+        3,
+    )
+    freeboard_points = [
+        {
+            **point,
+            "freeboard": round_number(point["top_elevation"] - point["water_level"], 3),
+        }
+        for point in current_frame["points"]
+    ]
+    min_freeboard = min(freeboard_points, key=lambda item: item["freeboard"])
+    overtopped_count = sum(1 for point in freeboard_points if point["freeboard"] < 0)
+    low_freeboard_count = sum(1 for point in freeboard_points if 0 <= point["freeboard"] <= 0.5)
 
     meta = dict(profile_dataset["meta"])
     meta["max_water_level_all"] = round_number(max_water_level_all, 3)
@@ -450,6 +881,10 @@ def build_longitudinal_profile_payload(
         "meta": meta,
         "gateMarkers": profile_dataset["gate_markers"],
         "objectAnnotations": profile_dataset.get("object_annotations", []),
+        "sectionErrors": profile_dataset.get("profile_errors", profile_dataset.get("section_errors", [])),
+        "objectErrors": profile_dataset.get("object_errors", []),
+        "gateErrors": profile_dataset.get("gate_errors", []),
+        "profileErrors": profile_dataset.get("profile_errors", []),
         "points": current_frame["points"],
         "frames": frames,
         "stepValues": [frame["step"] for frame in frames],
@@ -458,11 +893,23 @@ def build_longitudinal_profile_payload(
             "end": end_point,
             "deepest": deepest,
             "shallowest": shallowest,
+            "avg_depth": avg_depth,
+            "water_slope": water_slope,
+            "min_freeboard": min_freeboard,
+            "overtopped_count": overtopped_count,
+            "low_freeboard_count": low_freeboard_count,
         },
         "summary": (
-            f"纵剖面显示最后时刻水面线从 {start_point['name']} 的 {start_point['water_level']} m "
-            f"下降到 {end_point['name']} 的 {end_point['water_level']} m，沿程水头损失 "
-            f"{round_number(start_point['water_level'] - end_point['water_level'], 3)} m。"
+            f"纵剖面最后时刻覆盖 {start_point['name']} 至 {end_point['name']}，共 "
+            f"{len(current_frame['points'])} 个有效断面、约 {round_number(distance_km, 3)} km。"
+            f"水面线从 {start_point['water_level']} m 降至 {end_point['water_level']} m，"
+            f"沿程水头损失 {head_loss} m"
+            f"{f'，平均水面坡降 {water_slope} m/km' if water_slope is not None else ''}。"
+            f"平均水深 {avg_depth} m，最大水深断面为 {deepest['name']}（{deepest['depth']} m），"
+            f"最小水深断面为 {shallowest['name']}（{shallowest['depth']} m）；"
+            f"最小顶高程余量位于 {min_freeboard['name']}（{min_freeboard['freeboard']} m），"
+            f"{'存在 ' + str(overtopped_count) + ' 个超顶断面' if overtopped_count else '未发现超顶断面'}，"
+            f"{low_freeboard_count} 个断面余量不超过 0.50 m。"
         ),
     }
 
@@ -487,9 +934,12 @@ def build_report_data(
     asset_status: dict[str, Any] | None = None,
     profile_error: str | None = None,
     location_map: dict[str, float] | None = None,
+    objects_yaml_text: str | None = None,
 ) -> dict[str, Any]:
     location_map = location_map or {}
     sort_key_func = create_object_sort_key(location_map)
+    business_catalog = parse_business_objects(objects_yaml_text)
+    business_children = build_business_children(business_catalog)
     raw_unique_steps = sorted(int(step) for step in df["data_index"].unique().tolist())
     step_interval = runtime_config.csv_step_interval
     scenario_id = str(df["biz_scenario_id"].iloc[0])
@@ -671,21 +1121,25 @@ def build_report_data(
         scenario_meta["total_steps"] if scenario_meta and scenario_meta.get("total_steps") is not None else None
     )
     step_resolution_seconds = runtime_config.sim_step_size
-    last_calculation_step = (
+    total_runtime_steps = (
         runtime_config.total_steps
         if runtime_config.total_steps is not None
         else unique_steps[-1]
     )
     simulation_start_dt = parse_datetime_text(scenario_meta["biz_start_time"]) if scenario_meta else None
+    output_interval_seconds = runtime_config.output_step_size
+    # Hydros total duration is counted in output intervals; sim_step_size is only
+    # the internal calculation step and must not be used for coverage duration.
     simulation_end_dt = (
-        simulation_start_dt + timedelta(seconds=last_calculation_step * step_resolution_seconds)
-        if simulation_start_dt and step_resolution_seconds is not None
+        simulation_start_dt + timedelta(seconds=total_runtime_steps * output_interval_seconds)
+        if simulation_start_dt and output_interval_seconds is not None
         else None
     )
     simulation_duration_seconds = (
-        last_calculation_step * step_resolution_seconds if step_resolution_seconds is not None else None
+        total_runtime_steps * output_interval_seconds
+        if total_runtime_steps is not None and output_interval_seconds is not None
+        else None
     )
-    output_interval_seconds = runtime_config.output_step_size
     sampled_duration_seconds = (
         (len(raw_unique_steps) - 1) * output_interval_seconds
         if output_interval_seconds is not None and len(raw_unique_steps) > 1
@@ -697,22 +1151,22 @@ def build_report_data(
         else None
     )
     sim_step_size_text = (
-        f"{step_resolution_seconds} 秒/步（{format_duration_text(step_resolution_seconds)}）"
+        f"{step_resolution_seconds} 秒/计算步（{format_duration_text(step_resolution_seconds)}）"
         if step_resolution_seconds is not None
         else "未提供，无法可靠推导"
     )
     output_step_text = (
-        f"{output_interval_seconds} 秒/次（{format_duration_text(output_interval_seconds)}）"
+        f"{output_interval_seconds} 秒/输出步（{format_duration_text(output_interval_seconds)}）"
         if output_interval_seconds is not None
         else (
             f"结果序号间隔 {step_interval}" if step_interval is not None else "无法可靠推导"
         )
     )
     simulation_duration_text = (
-        f"{format_duration_text(simulation_duration_seconds)}（共 {last_calculation_step} 个计算步）"
-        if simulation_duration_seconds is not None and step_resolution_seconds is not None
+        f"{format_duration_text(simulation_duration_seconds)}（total_steps {total_runtime_steps} * output_step_size {output_interval_seconds} 秒）"
+        if simulation_duration_seconds is not None and total_runtime_steps is not None
         else (
-            f"{last_calculation_step} 个计算步"
+            f"{total_runtime_steps} 个输出步长"
             if runtime_config.total_steps is not None
             else "根据当前结果文件无法可靠推导"
         )
@@ -973,6 +1427,8 @@ def build_report_data(
             "simulation_duration": simulation_duration_text,
             "sampled_duration": format_seconds_text(sampled_duration_seconds) or "无法推导",
             "duration_gap": format_seconds_text(duration_gap_seconds) or "无法推导",
+            "sim_step_size": step_resolution_seconds,
+            "output_step_size": runtime_config.output_step_size,
             "sim_step_size_text": sim_step_size_text,
             "output_step_text": output_step_text,
             "time_axis_note": runtime_config.axis_note,
@@ -1042,19 +1498,23 @@ def build_report_data(
             {"label": "场景 ID", "value": scenario_id},
             {"label": "开始时间", "value": format_datetime_text(simulation_start_dt) or "场景 YAML 未提供"},
             {"label": "结束时间", "value": format_datetime_text(simulation_end_dt) or "根据显式参数与场景信息无法推导"},
-            {"label": "时间步长", "value": sim_step_size_text},
+            {"label": "计算步长", "value": sim_step_size_text},
             {"label": "输出步长", "value": output_step_text},
             {"label": "仿真时长", "value": simulation_duration_text},
             {"label": "结果文件覆盖时长", "value": format_seconds_text(sampled_duration_seconds) or "无法推导"},
             {"label": "时长差值", "value": format_seconds_text(duration_gap_seconds) or "无法推导"},
-            {"label": "结果覆盖步段", "value": f"仿真第 {unique_steps[0]} 步至第 {unique_steps[-1]} 步（共输出 {display_sampled_point_count} 次结果）"},
+            {"label": "结果覆盖步段", "value": f"{runtime_config.sample_step_note}（共输出 {display_sampled_point_count} 次结果）"},
             {"label": "结果导出时间", "value": format_datetime_text(runtime_completed_at.to_pydatetime()) or str(df["gmt_create"].max())},
         ],
         "miniTable": mini_table,
         "charts": {
-            "levelSeries": build_metric_series(df, "water_level", set(placeholder_level_steps), sort_key_func),
-            "flowSeries": build_metric_series(df, "water_flow", set(placeholder_flow_steps), sort_key_func),
-            "gateSeries": build_gate_series(df, set(display_excluded_steps), sort_key_func),
+            "levelSeries": build_business_metric_series(
+                df, "water_level", business_children, set(placeholder_level_steps), sort_key_func
+            ),
+            "flowSeries": build_business_metric_series(
+                df, "water_flow", business_children, set(placeholder_flow_steps), sort_key_func
+            ),
+            "gateSeries": build_business_gate_series(df, business_children, set(display_excluded_steps), sort_key_func),
         },
         "chartInterpretations": {
             "level": {
@@ -1087,7 +1547,9 @@ def build_report_data(
             "sim_step_size": step_resolution_seconds,
             "output_step_size": runtime_config.output_step_size,
             "step_resolution_seconds": step_resolution_seconds,
-            "last_calculation_step": last_calculation_step,
+            "total_output_steps": total_runtime_steps,
+            # Backward-compatible field name for older templates.
+            "last_calculation_step": total_runtime_steps,
             "simulation_start_time": format_datetime_text(simulation_start_dt),
             "simulation_end_time": format_datetime_text(simulation_end_dt),
             "simulation_duration": simulation_duration_text,
@@ -1097,6 +1559,7 @@ def build_report_data(
             "axis_mode": runtime_config.axis_mode,
             "axis_label": runtime_config.axis_label,
             "axis_note": runtime_config.axis_note,
+            "sample_step_note": runtime_config.sample_step_note,
             "expected_sample_count": runtime_config.expected_sample_count,
             "raw_sampled_point_count": raw_sampled_point_count,
             "display_sampled_point_count": display_sampled_point_count,
@@ -1189,7 +1652,7 @@ def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
 - 任务状态：`{payload['meta']['task_status']}`
 - 开始时间：`{payload['meta']['simulation_start_time'] or '场景 YAML 未提供'}`
 - 结束时间：`{payload['meta']['simulation_end_time'] or '根据结果文件无法推导'}`
-- 时间步长：`{payload['meta']['sim_step_size_text']}`
+- 计算步长：`{payload['meta']['sim_step_size_text']}`
 - 输出步长：`{payload['meta']['output_step_text']}`
 - 仿真时长：`{payload['meta']['simulation_duration']}`
 - 结果文件覆盖时长：`{payload['meta']['sampled_duration']}`
@@ -1197,8 +1660,8 @@ def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
 - 记录数：`{payload['meta']['record_count']}`
 - 对象数：`{payload['meta']['object_count']}`
 - 指标数：`{payload['meta']['metric_count']}`
-- 结果覆盖步段：仿真第 `{analysis['step_values'][0]}` 步至第 `{analysis['step_values'][-1]}` 步，共输出 `{payload['meta']['sampled_point_count']}` 次结果
-- 配置总计算步：`{payload['meta']['total_steps']}`
+- 结果覆盖步段：{payload['meta'].get('sample_step_note') or f"第 `{analysis['step_values'][0]}` 次至第 `{analysis['step_values'][-1]}` 次输出"}，共输出 `{payload['meta']['sampled_point_count']}` 次结果
+- 配置总输出步数：`{payload['meta']['total_steps']}`
 
 ## 执行摘要
 
@@ -1347,11 +1810,13 @@ def main() -> None:
     resolved_objects_yaml_url = args.objects_yaml_url or (scenario_meta or {}).get("objects_yaml_url")
     objects_yaml_path = None
     location_map = {}
+    objects_yaml_text = None
     try:
         objects_yaml_path = cache_objects_yaml(paths["data"], resolved_objects_yaml_url)
         if objects_yaml_path and objects_yaml_path.exists():
             from build_longitudinal_profile import parse_object_locations
-            location_map = parse_object_locations(objects_yaml_path.read_text(encoding="utf-8"))
+            objects_yaml_text = objects_yaml_path.read_text(encoding="utf-8")
+            location_map = parse_object_locations(objects_yaml_text)
     except Exception as exc:
         print(f"objects.yaml 预取失败或解析 location 失败: {exc}")
 
@@ -1389,6 +1854,7 @@ def main() -> None:
         asset_status,
         profile_error,
         location_map,
+        objects_yaml_text,
     )
     write_html_assets(paths["report"], paths["data"], payload)
     write_markdown_report(paths["report"], payload)

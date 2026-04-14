@@ -51,17 +51,49 @@ def gate_sort_key(name: str) -> tuple[str, int, str]:
     return (station, gate_number, name)
 
 
+def parse_cross_section_children(block: str) -> list[dict]:
+    refs = []
+    for child_block in re.split(r"(?m)^\s+-\s*$", block):
+        if not child_block.strip():
+            continue
+        role_match = re.search(r"(?m)^\s+role:\s*(.+?)\s*$", child_block)
+        id_match = re.search(r"(?m)^\s+id:\s*(\d+)\s*$", child_block)
+        name_match = re.search(r"(?m)^\s+name:\s*(.+?)\s*$", child_block)
+        if not id_match and not name_match:
+            continue
+        refs.append(
+            {
+                "role": role_match.group(1).strip().upper() if role_match else "",
+                "id": int(id_match.group(1)) if id_match else None,
+                "name": name_match.group(1).strip() if name_match else "",
+            }
+        )
+    return refs
+
+
+def pick_role_ref(refs: list[dict], role: str, fallback_index: int) -> dict | None:
+    role = role.upper()
+    for item in refs:
+        if item.get("role") == role:
+            return item
+    if not refs:
+        return None
+    try:
+        return refs[fallback_index]
+    except IndexError:
+        return refs[-1]
+
+
 def parse_object_locations(text: str) -> dict[str, float]:
     locations = {}
-    blocks = re.split(r'\n -\n  id:\s*\d+', '\n' + text)
+    blocks = split_object_blocks(text)
     for block in blocks:
         if not block.strip():
             continue
-        name_match = re.search(r'\n  name:\s*(.+?)\n', block)
-        if not name_match:
+        name = extract_block_value(block, "name")
+        if not name:
             continue
-        name = name_match.group(1).strip()
-        location_match = re.search(r'\n    location:\s*([-\d.]+)', block)
+        location_match = re.search(r'\n    location:\s*([-\d.]+)', extract_nested_block(block, "parameters"))
         if location_match:
             locations[name] = float(location_match.group(1))
     return locations
@@ -69,42 +101,38 @@ def parse_object_locations(text: str) -> dict[str, float]:
 
 def parse_gate_stations(text: str) -> list[dict]:
     stations = []
-    blocks = re.split(r'\n -\n  id:\s*\d+', '\n' + text)
+    blocks = split_object_blocks(text)
     for block in blocks:
         if not block.strip():
             continue
-        type_match = re.search(r'\n  type:\s*(.+?)\n', block)
-        if not type_match or type_match.group(1).strip() != 'GateStation':
+        if extract_block_value(block, "type") != "GateStation":
             continue
-        
-        name_match = re.search(r'\n  name:\s*(.+?)\n', block)
-        if not name_match:
+
+        name = extract_block_value(block, "name")
+        if not name:
             continue
-        name = name_match.group(1).strip()
         short_name = name.split('-')[0] if '-' in name else name
 
-        location_match = re.search(r'\n    location:\s*([-\d.]+)', block)
-        location = float(location_match.group(1)) if location_match else 0.0
-        
-        inlet_section = ""
-        cross_section_children_match = re.search(r'\n  cross_section_children:(.*?)(?=\n  [a-z_]+:|$)', block, re.S)
-        if cross_section_children_match:
-            child_blocks = cross_section_children_match.group(1)
-            first_child_name_match = re.search(r'\n    name:\s*(.+?)\n', child_blocks)
-            if first_child_name_match:
-                inlet_section = first_child_name_match.group(1).strip()
-                
+        child_blocks = extract_nested_block(block, "cross_section_children")
+        section_refs = parse_cross_section_children(child_blocks)
+        inlet_ref = pick_role_ref(section_refs, "INLET", 0) or {}
+        outlet_ref = pick_role_ref(section_refs, "OUTLET", -1) or {}
+        section_names = [item["name"] for item in section_refs if item.get("name")]
+
         gates = []
-        device_children_match = re.search(r'\n  device_children:(.*?)(?=\n  [a-z_]+:|$)', block, re.S)
-        if device_children_match:
-            child_blocks = device_children_match.group(1)
-            gates = [gn.strip() for gn in re.findall(r'\n    name:\s*(.+?)\n', child_blocks)]
-        
+        device_blocks = extract_nested_block(block, "device_children")
+        if device_blocks:
+            gates = [gn.strip() for gn in re.findall(r'(?m)^\s+name:\s*(.+?)\s*$', device_blocks)]
+
         stations.append({
             "name": name,
             "short_name": short_name,
-            "location": round(location / 1000, 3),
-            "inlet_section": inlet_section,
+            "inlet_section": inlet_ref.get("name", ""),
+            "outlet_section": outlet_ref.get("name", ""),
+            "inlet_section_id": inlet_ref.get("id"),
+            "outlet_section_id": outlet_ref.get("id"),
+            "section_names": section_names,
+            "section_refs": section_refs,
             "gates": gates,
             "role": f"{name}控制点"
         })
@@ -113,12 +141,14 @@ def parse_gate_stations(text: str) -> list[dict]:
 
 def parse_cross_sections(text: str) -> list[dict]:
     sections = []
-    block_pattern = re.compile(
-        r"\n -\n  id:\s*(?P<id>\d+)\n  type:\s*CrossSection\n  name:\s*(?P<name>.+?)\n(?P<body>.*?)(?=\n -\n  id:|\Z)",
-        re.S,
-    )
-    for match in block_pattern.finditer("\n" + text):
-        body = match.group("body")
+    for source_index, block in enumerate(split_cross_section_blocks(text)):
+        if extract_block_value(block, "type") != "CrossSection":
+            continue
+        object_id = extract_block_value(block, "id")
+        object_name = extract_block_value(block, "name")
+        if not object_id or not object_name:
+            continue
+        body = extract_nested_block(block, "parameters")
         top_match = re.search(r"\n    (?:t_top_elevation|top_elevation):\s*(?P<value>[-\d.]+)", body)
         bottom_match = re.search(r"\n    bottom_elevation:\s*(?P<value>[-\d.]+)", body)
         location_match = re.search(r"\n    location:\s*(?P<value>[-\d.]+)", body)
@@ -140,22 +170,51 @@ def parse_cross_sections(text: str) -> list[dict]:
             top_elevation = bottom_elevation
         sections.append(
             {
-                "id": int(match.group("id")),
-                "name": match.group("name").strip(),
+                "id": int(object_id),
+                "name": object_name,
                 "bottom_elevation": bottom_elevation,
                 "top_elevation": top_elevation,
                 "location": float(location_match.group("value")),
+                "source_index": source_index,
             }
         )
-    sections.sort(key=lambda item: item["location"])
     return sections
 
 
-def extract_objects_section(text: str) -> str:
-    marker = "\nobjects:\n"
+def normalize_section_locations(sections: list[dict]) -> list[dict]:
+    normalized = [dict(item) for item in sections]
+
+    normalized.sort(key=lambda item: (float(item["location"]), int(item.get("source_index", 0))))
+    return normalized
+
+
+def collect_section_errors(sections: list[dict]) -> list[dict]:
+    errors = []
+    for item in sections:
+        top_elevation = float(item["top_elevation"])
+        bottom_elevation = float(item["bottom_elevation"])
+        if abs(top_elevation - bottom_elevation) >= 1e-6:
+            continue
+        errors.append(
+            {
+                "type": "equal_top_bottom_elevation",
+                "severity": "error",
+                "section_id": item["id"],
+                "section_name": item["name"],
+                "location": round(float(item["location"]) / 1000, 3),
+                "top_elevation": round(top_elevation, 3),
+                "bottom_elevation": round(bottom_elevation, 3),
+                "message": "断面顶高程与底高程相等，不符合断面数据约束；该断面未参与剖面线绘制",
+            }
+        )
+    return errors
+
+
+def extract_section(text: str, section_name: str) -> str:
+    marker = f"\n{section_name}:\n"
     start = text.find(marker)
     if start == -1:
-        marker = "objects:\n"
+        marker = f"{section_name}:\n"
         start = text.find(marker)
     if start == -1:
         return ""
@@ -163,7 +222,14 @@ def extract_objects_section(text: str) -> str:
 
 
 def split_object_blocks(text: str) -> list[str]:
-    section = extract_objects_section(text)
+    section = extract_section(text, "objects")
+    if not section:
+        return []
+    return [block for block in re.split(r"(?m)^ -\s*$", section) if block.strip()]
+
+
+def split_cross_section_blocks(text: str) -> list[str]:
+    section = extract_section(text, "cross_sections")
     if not section:
         return []
     return [block for block in re.split(r"(?m)^ -\s*$", section) if block.strip()]
@@ -203,10 +269,18 @@ def parse_scalar_parameters(block: str) -> list[dict[str, str]]:
     return parameters
 
 
-def parse_object_annotations(text: str, sections: list[dict]) -> list[dict]:
+def parse_object_annotations(
+    text: str,
+    sections: list[dict],
+    invalid_section_ids: set[int] | None = None,
+    invalid_section_names: set[str] | None = None,
+) -> tuple[list[dict], list[dict]]:
+    invalid_section_ids = invalid_section_ids or set()
+    invalid_section_names = invalid_section_names or set()
     sections_by_id = {item["id"]: item for item in sections}
     sections_by_name = {item["name"]: item for item in sections}
     annotations: list[dict] = []
+    object_errors: list[dict] = []
 
     for block in split_object_blocks(text):
         object_type = extract_block_value(block, "type")
@@ -234,33 +308,99 @@ def parse_object_annotations(text: str, sections: list[dict]) -> list[dict]:
             continue
 
         child_block = extract_nested_block(block, "cross_section_children")
-        child_ids = [int(value) for value in re.findall(r"(?m)^\s+id:\s*(\d+)\s*$", child_block)]
-        child_names = [value.strip() for value in re.findall(r"(?m)^\s+name:\s*(.+?)\s*$", child_block)]
-        if not child_ids or not child_names:
+        child_refs = parse_cross_section_children(child_block)
+        child_ids = [item["id"] for item in child_refs if item.get("id") is not None]
+        child_names = [item["name"] for item in child_refs if item.get("name")]
+        if not child_refs or (not child_ids and not child_names):
+            if object_type == "Pipe":
+                object_errors.append(
+                    {
+                        "type": "invalid_pipe_range",
+                        "severity": "error",
+                        "object_name": object_name,
+                        "object_type": object_type,
+                        "message": "倒虹吸/管道缺少首尾断面，未参与剖面对象绘制",
+                    }
+                )
             continue
 
-        start_section = sections_by_id.get(child_ids[0]) or sections_by_name.get(child_names[0])
-        end_section = sections_by_id.get(child_ids[-1]) or sections_by_name.get(child_names[-1])
-        if not start_section or not end_section:
+        start_ref = pick_role_ref(child_refs, "INLET", 0) or {}
+        end_ref = pick_role_ref(child_refs, "OUTLET", -1) or {}
+        start_section_id = start_ref.get("id")
+        end_section_id = end_ref.get("id")
+        start_section_name = start_ref.get("name", "")
+        end_section_name = end_ref.get("name", "")
+        start_section = (
+            sections_by_id.get(start_section_id)
+            if start_section_id is not None
+            else None
+        ) or sections_by_name.get(start_section_name)
+        end_section = (
+            sections_by_id.get(end_section_id)
+            if end_section_id is not None
+            else None
+        ) or sections_by_name.get(end_section_name)
+        if object_type == "Pipe":
+            invalid_reasons = []
+            if not start_section:
+                reason = "起点断面无效或缺失"
+                if start_section_id in invalid_section_ids or start_section_name in invalid_section_names:
+                    reason = "起点断面存在数据错误"
+                invalid_reasons.append(reason)
+            if not end_section:
+                reason = "终点断面无效或缺失"
+                if end_section_id in invalid_section_ids or end_section_name in invalid_section_names:
+                    reason = "终点断面存在数据错误"
+                invalid_reasons.append(reason)
+            if start_section and end_section:
+                start_location = round(start_section["location"] / 1000, 3)
+                end_location = round(end_section["location"] / 1000, 3)
+                if abs(start_location) < 1e-6:
+                    invalid_reasons.append("起点断面里程为0")
+                if abs(end_location) < 1e-6:
+                    invalid_reasons.append("终点断面里程为0")
+                if abs(start_location - end_location) < 1e-6:
+                    invalid_reasons.append("首尾断面里程相同")
+            if invalid_reasons:
+                object_errors.append(
+                    {
+                        "type": "invalid_pipe_range",
+                        "severity": "error",
+                        "object_name": object_name,
+                        "object_type": object_type,
+                        "start_section_id": start_section_id,
+                        "end_section_id": end_section_id,
+                        "start_section_name": start_section_name,
+                        "end_section_name": end_section_name,
+                        "start_location": round(start_section["location"] / 1000, 3) if start_section else None,
+                        "end_location": round(end_section["location"] / 1000, 3) if end_section else None,
+                        "message": f"倒虹吸/管道范围无效（{'、'.join(invalid_reasons)}），未参与剖面对象绘制",
+                    }
+                )
+                continue
+        elif not start_section or not end_section:
             continue
+
+        start_location = round(start_section["location"] / 1000, 3)
+        end_location = round(end_section["location"] / 1000, 3)
 
         mode = "range"
         location = None
         if start_section["name"] == end_section["name"]:
             mode = "point"
-            location = round(start_section["location"] / 1000, 3)
+            location = start_location
 
         annotations.append(
             {
                 "mode": mode,
                 "name": object_name,
                 "type": object_type,
-                "start_section_id": child_ids[0],
-                "end_section_id": child_ids[-1],
+                "start_section_id": start_section_id,
+                "end_section_id": end_section_id,
                 "start_section_name": start_section["name"],
                 "end_section_name": end_section["name"],
-                "start_location": round(start_section["location"] / 1000, 3),
-                "end_location": round(end_section["location"] / 1000, 3),
+                "start_location": start_location,
+                "end_location": end_location,
                 "location": location,
                 "params": params,
                 "param_summary": param_summary,
@@ -271,10 +411,10 @@ def parse_object_annotations(text: str, sections: list[dict]) -> list[dict]:
         key=lambda item: (
             item.get("location")
             if item.get("location") is not None
-            else item.get("start_location", 0.0)
+            else min(item.get("start_location", 0.0), item.get("end_location", 0.0))
         )
     )
-    return annotations
+    return annotations, object_errors
 
 
 def build_dataset(
@@ -283,8 +423,21 @@ def build_dataset(
     objects_yaml_url: str | None = None,
 ) -> dict:
     yaml_text = load_objects_yaml(objects_yaml_path=objects_yaml_path, objects_yaml_url=objects_yaml_url)
-    sections = parse_cross_sections(yaml_text)
-    object_annotations = parse_object_annotations(yaml_text, sections)
+    all_sections = normalize_section_locations(parse_cross_sections(yaml_text))
+    all_sections_by_id = {item["id"]: item for item in all_sections}
+    all_sections_by_name = {item["name"]: item for item in all_sections}
+    section_errors = collect_section_errors(all_sections)
+    invalid_section_ids = {item["section_id"] for item in section_errors}
+    invalid_section_names = {item["section_name"] for item in section_errors}
+    sections = [item for item in all_sections if item["id"] not in invalid_section_ids]
+    sections_by_id = {item["id"]: item for item in sections}
+    sections_by_name = {item["name"]: item for item in sections}
+    object_annotations, object_errors = parse_object_annotations(
+        yaml_text,
+        sections,
+        invalid_section_ids=invalid_section_ids,
+        invalid_section_names=invalid_section_names,
+    )
 
     df = load_timeseries_dataframe(csv_path)
     df["value"] = pd.to_numeric(df["value"])
@@ -321,14 +474,50 @@ def build_dataset(
     raw_gate_stations = parse_gate_stations(yaml_text)
     csv_gate_names = set(gate_df["object_name"].dropna().unique().tolist())
     
+    gate_errors = []
     gate_stations = []
     gate_markers = []
     for gs in raw_gate_stations:
-        st_location = gs["location"]
-        if gs["inlet_section"]:
-            matching_points = [p["location"] for p in profile_points if p["name"] == gs["inlet_section"]]
-            if matching_points:
-                st_location = matching_points[0]
+        inlet_section = (
+            all_sections_by_id.get(gs.get("inlet_section_id"))
+            if gs.get("inlet_section_id") is not None
+            else None
+        ) or all_sections_by_name.get(gs.get("inlet_section", ""))
+        outlet_section = (
+            all_sections_by_id.get(gs.get("outlet_section_id"))
+            if gs.get("outlet_section_id") is not None
+            else None
+        ) or all_sections_by_name.get(gs.get("outlet_section", ""))
+        inlet_location = round(inlet_section["location"] / 1000, 3) if inlet_section else None
+        outlet_location = round(outlet_section["location"] / 1000, 3) if outlet_section else None
+        invalid_reasons = []
+        if inlet_section is None:
+            invalid_reasons.append("INLET断面缺失")
+        if outlet_section is None:
+            invalid_reasons.append("OUTLET断面缺失")
+        if inlet_location is not None and abs(inlet_location) < 1e-6:
+            invalid_reasons.append("INLET断面里程为0")
+        if outlet_location is not None and abs(outlet_location) < 1e-6:
+            invalid_reasons.append("OUTLET断面里程为0")
+        if invalid_reasons:
+            gate_errors.append(
+                {
+                    "type": "invalid_gate_station_location",
+                    "severity": "error",
+                    "object_name": gs["name"],
+                    "object_type": "GateStation",
+                    "inlet_section_id": gs["inlet_section_id"],
+                    "outlet_section_id": gs["outlet_section_id"],
+                    "inlet_section_name": gs["inlet_section"],
+                    "outlet_section_name": gs["outlet_section"],
+                    "inlet_location": inlet_location,
+                    "outlet_location": outlet_location,
+                    "message": f"闸站位置无效（{'、'.join(invalid_reasons)}），未参与剖面闸站位置绘制",
+                }
+            )
+            continue
+        st_location = round((inlet_location + outlet_location) / 2, 3)
+        location_source = "inlet_outlet_midpoint"
         
         valid_gates = [g for g in gs["gates"] if g in csv_gate_names]
         if not valid_gates:
@@ -339,15 +528,35 @@ def build_dataset(
             "name": gs["name"],
             "location": st_location,
             "inlet_section": gs["inlet_section"],
+            "outlet_section": gs["outlet_section"],
+            "inlet_section_id": gs["inlet_section_id"],
+            "outlet_section_id": gs["outlet_section_id"],
+            "inlet_location": inlet_location,
+            "outlet_location": outlet_location,
+            "location_source": location_source,
             "gates": valid_gates,
             "role": gs["role"]
         })
         
         gate_markers.append({
-            "name": gs["inlet_section"] or gs["name"],
+            "name": gs["name"],
             "short_name": gs["short_name"],
             "location": st_location,
+            "inlet_section": gs["inlet_section"],
+            "outlet_section": gs["outlet_section"],
+            "inlet_location": inlet_location,
+            "outlet_location": outlet_location,
+            "location_source": location_source,
         })
+
+    invalid_gate_names = {item["object_name"] for item in gate_errors}
+    if invalid_gate_names:
+        object_annotations = [
+            item
+            for item in object_annotations
+            if not (item.get("type") == "GateStation" and item.get("name") in invalid_gate_names)
+        ]
+    profile_errors = [*section_errors, *object_errors, *gate_errors]
 
     return {
         "meta": {
@@ -362,11 +571,19 @@ def build_dataset(
             "max_top_elevation": round(max_top, 3),
             "flow_direction": f"左侧上游（{start['name']}） → 右侧下游（{end['name']}）",
             "gate_station_count": len(gate_stations),
+            "section_error_count": len(section_errors),
+            "object_error_count": len(object_errors),
+            "gate_error_count": len(gate_errors),
+            "profile_error_count": len(profile_errors),
         },
         "profile_points": profile_points,
         "gate_markers": gate_markers,
         "gate_stations": gate_stations,
         "object_annotations": object_annotations,
+        "section_errors": section_errors,
+        "object_errors": object_errors,
+        "gate_errors": gate_errors,
+        "profile_errors": profile_errors,
         "highlights": {
             "start": start,
             "end": end,
@@ -374,6 +591,26 @@ def build_dataset(
             "shallowest": min(matched, key=lambda item: item["depth"]),
         },
     }
+
+
+def interpolate_sequence_value(x_values: list[float], y_values: list[float], x: float) -> float:
+    if not x_values:
+        return 0.0
+    if x <= x_values[0]:
+        return y_values[0]
+    if x >= x_values[-1]:
+        return y_values[-1]
+    for index in range(len(x_values) - 1):
+        left_x = x_values[index]
+        right_x = x_values[index + 1]
+        if x < left_x or x > right_x:
+            continue
+        span = right_x - left_x
+        if span == 0:
+            return y_values[index]
+        ratio = (x - left_x) / span
+        return y_values[index] + (y_values[index + 1] - y_values[index]) * ratio
+    return y_values[-1]
 
 
 def save_profile_png(dataset: dict, output_png: Path) -> None:
@@ -394,12 +631,35 @@ def save_profile_png(dataset: dict, output_png: Path) -> None:
 
     fig, ax = plt.subplots(figsize=(14, 6.4))
     ax.fill_between(x_data, y_bottom, bed_data, color="#87603d", alpha=0.16)
-    ax.plot(x_data, top_data, color="#637487", linewidth=2, linestyle="--", label="断面顶高程")
-    ax.plot(x_data, bed_data, color="#87603d", linewidth=2.4, label="断面底高程")
+    point_style = {
+        "marker": "o",
+        "markersize": 2,
+        "markerfacecolor": "#ffffff",
+        "markeredgecolor": "#87603d",
+        "markeredgewidth": 1.0,
+    }
+    ax.plot(
+        x_data,
+        top_data,
+        color="#637487",
+        linewidth=2,
+        label="断面顶高程",
+        **{**point_style, "markeredgecolor": "#637487"},
+    )
+    ax.plot(x_data, bed_data, color="#87603d", linewidth=2.4, label="断面底高程", **point_style)
     ax.fill_between(x_data, bed_data, water_data, color="#1c7fb5", alpha=0.12)
 
     for station in dataset["gate_stations"]:
-        ax.axvline(station["location"], color="#a5456f", linestyle="--", linewidth=1.4, alpha=0.82)
+        station_bed = interpolate_sequence_value(x_data, bed_data, station["location"])
+        ax.vlines(
+            station["location"],
+            station_bed,
+            y_top - 0.45,
+            color="#a5456f",
+            linestyle="--",
+            linewidth=1.4,
+            alpha=0.82,
+        )
         ax.text(
             station["location"],
             y_top - 0.02,
@@ -516,6 +776,37 @@ def build_html(dataset: dict) -> str:
       .panel h2 {{ margin: 0 0 8px; font-size: 24px; }}
       .subtle {{ margin: 0; color: var(--muted); line-height: 1.7; }}
       #chart {{ margin-top: 18px; height: 620px; }}
+      .chart-wrap {{ position: relative; }}
+      .section-error-panel {{
+        position: absolute;
+        top: 16px;
+        right: 16px;
+        z-index: 20;
+        width: min(360px, calc(100% - 32px));
+        border: 1px solid rgba(185, 28, 28, 0.2);
+        border-radius: 8px;
+        background: rgba(255,255,255,0.96);
+        box-shadow: 0 18px 40px rgba(17, 41, 59, 0.14);
+        color: #7f1d1d;
+      }}
+      .section-error-panel[hidden] {{ display: none; }}
+      .section-error-panel summary {{
+        cursor: pointer;
+        padding: 8px 12px;
+        font-size: 13px;
+        font-weight: 700;
+        list-style: none;
+      }}
+      .section-error-panel summary::-webkit-details-marker {{ display: none; }}
+      .section-error-list {{
+        max-height: 220px;
+        overflow: auto;
+        border-top: 1px solid rgba(185, 28, 28, 0.14);
+        padding: 8px 12px 12px;
+        font-size: 12px;
+        line-height: 1.6;
+      }}
+      .section-error-list div + div {{ margin-top: 8px; }}
       .legend {{
         display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px;
       }}
@@ -646,7 +937,7 @@ def build_html(dataset: dict) -> str:
         <section class="panel">
           <h2>床面线与水面线</h2>
           <p class="subtle">
-            灰色虚线表示断面顶高程，棕色线表示断面底高程，蓝色阴影表示当前展示水体范围，
+            灰色实线表示断面顶高程，棕色线表示断面底高程，蓝色阴影表示当前展示水体范围，
             棕色阴影填充到坐标轴底部，用来同时表达过水断面和床面起伏。
             图中额外用竖线标出各闸站入口位置。
           </p>
@@ -661,7 +952,13 @@ def build_html(dataset: dict) -> str:
             <div class="arrow-line"></div>
             <span>下游</span>
           </div>
-          <div id="chart"></div>
+          <div class="chart-wrap">
+            <details id="sectionErrorPanel" class="section-error-panel" hidden>
+              <summary>剖面数据错误 <span id="sectionErrorCount">0</span></summary>
+              <div id="sectionErrorList" class="section-error-list"></div>
+            </details>
+            <div id="chart"></div>
+          </div>
           <div class="note">
             这张图主要服务工程理解：如果水面线整体高于床面线且沿程平滑下降，通常说明渠道主流方向正常、工况稳定。
             如果某段水面突然抬升或贴近床面，就值得重点复核该段的边界条件、闸门动作或局部阻力变化。
@@ -723,6 +1020,46 @@ def build_html(dataset: dict) -> str:
     <script>
       const dataset = __DATA_JSON__;
       const chart = echarts.init(document.getElementById("chart"));
+      const escapeHtml = (value) => String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+      const formatProfileErrorDetail = (item) => {{
+        if (item.section_name) {{
+          return `里程 ${{Number(item.location).toFixed(3)}} km，顶高程 ${{item.top_elevation}} m，底高程 ${{item.bottom_elevation}} m`;
+        }}
+        if (item.inlet_section_name || item.outlet_section_name) {{
+          const inletLocation = item.inlet_location == null ? '无' : `${{Number(item.inlet_location).toFixed(3)}} km`;
+          const outletLocation = item.outlet_location == null ? '无' : `${{Number(item.outlet_location).toFixed(3)}} km`;
+          return `闸前 ${{escapeHtml(item.inlet_section_name || '-')}}，里程 ${{inletLocation}}；闸后 ${{escapeHtml(item.outlet_section_name || '-')}}，里程 ${{outletLocation}}`;
+        }}
+        const startLocation = item.start_location == null ? '无' : `${{Number(item.start_location).toFixed(3)}} km`;
+        const endLocation = item.end_location == null ? '无' : `${{Number(item.end_location).toFixed(3)}} km`;
+        return `范围 ${{escapeHtml(item.start_section_name || '-')}} → ${{escapeHtml(item.end_section_name || '-')}}，起点里程 ${{startLocation}}，终点里程 ${{endLocation}}`;
+      }};
+      const renderSectionErrors = () => {{
+        const errors = dataset.profile_errors || dataset.section_errors || [];
+        const panel = document.getElementById('sectionErrorPanel');
+        const count = document.getElementById('sectionErrorCount');
+        const list = document.getElementById('sectionErrorList');
+        if (!panel || !count || !list) return;
+        if (!errors.length) {{
+          panel.hidden = true;
+          return;
+        }}
+        panel.hidden = false;
+        count.textContent = String(errors.length);
+        list.innerHTML = errors.map((item) => `
+          <div>
+            <strong>${{escapeHtml(item.section_name || item.object_name)}}</strong><br>
+            ${{formatProfileErrorDetail(item)}}<br>
+            ${{escapeHtml(item.message)}}
+          </div>
+        `).join('');
+      }};
+      renderSectionErrors();
 
       const points = dataset.profile_points;
       const matched = points.filter((item) => item.water_level !== null);
@@ -753,13 +1090,13 @@ def build_html(dataset: dict) -> str:
       ]);
       const annotationTypeColors = {{
         UnifiedCanal: '#176a87',
-        Pipe: '#8b623d',
+        Pipe: '#d12f2f',
         GateStation: '#a5456f',
         DisturbanceNode: '#2b8a57'
       }};
       const getAnnotationColor = (type) => annotationTypeColors[type] || '#4c6476';
       const annotationTypeLabels = {{
-        UnifiedCanal: '渠道',
+        UnifiedCanal: '水面线',
         Pipe: '倒虹吸/管道',
         GateStation: '闸站',
         DisturbanceNode: '分水口/退水闸'
@@ -777,9 +1114,18 @@ def build_html(dataset: dict) -> str:
         t_bottom_width: '底宽',
         t_side_slope_ratio: '边坡系数'
       }};
+      const annotationParamUnits = {{
+        length: 'm',
+        single_orifice_height: 'm',
+        single_orifice_width: 'm'
+      }};
       const localizeAnnotationType = (type) => annotationTypeLabels[type] || type;
+      const formatAnnotationParamValue = (item) => {{
+        const unit = annotationParamUnits[item.key];
+        return unit ? `${{item.value}} ${{unit}}` : item.value;
+      }};
       const localizeAnnotationParams = (params) =>
-        (params || []).map((item) => `${{annotationParamLabels[item.key] || item.key}}=${{item.value}}`).join('，');
+        (params || []).map((item) => `${{annotationParamLabels[item.key] || item.key}}=${{formatAnnotationParamValue(item)}}`).join('，');
       const positionFloatingTooltip = (point, params, dom, rect, size) => {{
         const [mouseX, mouseY] = point;
         const viewWidth = size.viewSize[0];
@@ -821,6 +1167,21 @@ def build_html(dataset: dict) -> str:
         }}
         return null;
       }};
+      const interpolateProfileValue = (location, key) => {{
+        if (!matched.length) return null;
+        if (location <= matched[0].location) return matched[0][key];
+        if (location >= matched[matched.length - 1].location) return matched[matched.length - 1][key];
+        for (let index = 0; index < matched.length - 1; index += 1) {{
+          const left = matched[index];
+          const right = matched[index + 1];
+          if (location < left.location || location > right.location) continue;
+          const span = right.location - left.location;
+          if (!span) return left[key];
+          const ratio = (location - left.location) / span;
+          return left[key] + (right[key] - left[key]) * ratio;
+        }}
+        return null;
+      }};
       const objectRangeAnnotations = (dataset.object_annotations || [])
         .filter((item) => item.mode === 'range')
         .map((item, index) => {{
@@ -832,6 +1193,10 @@ def build_html(dataset: dict) -> str:
             index,
             start_water_level: startPoint.water_level,
             end_water_level: endPoint.water_level,
+            start_top_elevation: startPoint.top_elevation,
+            start_bottom_elevation: startPoint.bottom_elevation,
+            end_top_elevation: endPoint.top_elevation,
+            end_bottom_elevation: endPoint.bottom_elevation,
           }};
         }})
         .filter(Boolean);
@@ -855,117 +1220,228 @@ def build_html(dataset: dict) -> str:
         width: params.coordSys.width,
         height: params.coordSys.height,
       }});
+      const clipPolygon = (polygon, params) => echarts.graphic.clipPointsByRect(polygon, clipRect(params));
       const clipPolyline = (polyline, params) => echarts.graphic.clipPointsByRect(polyline, clipRect(params));
-      const buildObjectRangeSeries = () => ({{
-        name: '对象标注',
-        type: 'custom',
-        silent: false,
-        animation: false,
-        tooltip: {{
-          show: true,
-          trigger: 'item',
-          confine: true,
-          enterable: false,
-          transitionDuration: 0,
-          extraCssText: 'pointer-events:none;',
-          position: positionFloatingTooltip,
-          formatter: (params) => formatAnnotationTooltip(params.data.meta)
-        }},
-        z: 6.6,
-        renderItem: (params, api) => {{
-          const clippedPolyline = clipPolyline([
-            api.coord([api.value(0), api.value(1)]),
-            api.coord([api.value(2), api.value(3)])
-          ], params);
-          if (!clippedPolyline?.length || clippedPolyline.length < 2) return null;
-          const color = getAnnotationColor(api.value(5));
-          const startPoint = clippedPolyline[0];
-          const endPoint = clippedPolyline[clippedPolyline.length - 1];
-          return {{
-            type: 'group',
-            children: [
-              {{
-                type: 'line',
-                shape: {{ x1: startPoint[0], y1: startPoint[1], x2: endPoint[0], y2: endPoint[1] }},
-                style: {{ stroke: color, lineWidth: 2.4, opacity: 0.78 }}
-              }},
-              {{
-                type: 'circle',
-                shape: {{ cx: startPoint[0], cy: startPoint[1], r: 3.2 }},
-                style: {{ fill: color, stroke: '#ffffff', lineWidth: 1.2 }}
-              }},
-              {{
-                type: 'circle',
-                shape: {{ cx: endPoint[0], cy: endPoint[1], r: 3.2 }},
-                style: {{ fill: color, stroke: '#ffffff', lineWidth: 1.2 }}
-              }}
-            ]
-          }};
-        }},
-        data: objectRangeAnnotations.map((item) => ({{
+      const profilePointRadius = 1.5;
+      const buildProfilePointStyle = (strokeColor) => ({{ fill: '#ffffff', stroke: strokeColor, lineWidth: 1 }});
+      const buildProfileSeriesPointStyle = (strokeColor) => ({{
+        color: '#ffffff',
+        borderColor: strokeColor,
+        borderWidth: 1
+      }});
+      const annotationLegendPrefix = '相关对象: ';
+      const annotationTypeOrder = ['UnifiedCanal', 'Pipe', 'GateStation', 'DisturbanceNode'];
+      const buildAnnotationLegendName = (type) => `${{annotationLegendPrefix}}${{localizeAnnotationType(type)}}`;
+      const formatAnnotationLegendName = (name) =>
+        name.startsWith(annotationLegendPrefix) ? name.slice(annotationLegendPrefix.length) : name;
+      const buildObjectAnnotationDataItem = (item) => {{
+        const isRange = item.mode === 'range';
+        return {{
           value: [
-            item.start_location,
-            item.start_water_level,
-            item.end_location,
-            item.end_water_level,
+            isRange ? item.start_location : item.location,
+            isRange ? item.start_water_level : item.water_level,
+            isRange ? item.end_location : item.location,
+            isRange ? item.end_water_level : item.water_level,
             item.name,
             item.type,
-            item.index
+            item.index,
+            item.mode,
+            isRange ? item.start_top_elevation : item.water_level,
+            isRange ? item.start_bottom_elevation : item.water_level,
+            isRange ? item.end_top_elevation : item.water_level,
+            isRange ? item.end_bottom_elevation : item.water_level
           ],
           meta: item
-        }}))
-      }});
-      const buildObjectPointSeries = () => ({{
-        name: '对象标注',
+        }};
+      }};
+      const buildObjectAnnotationSeries = (rangeItems, pointItems) => {{
+        const grouped = new Map();
+        [...rangeItems, ...pointItems].forEach((item) => {{
+          if (!grouped.has(item.type)) grouped.set(item.type, []);
+          grouped.get(item.type).push(item);
+        }});
+        const sortedTypes = [...grouped.keys()].sort((left, right) => {{
+          const leftIndex = annotationTypeOrder.indexOf(left);
+          const rightIndex = annotationTypeOrder.indexOf(right);
+          return (leftIndex === -1 ? 99 : leftIndex) - (rightIndex === -1 ? 99 : rightIndex);
+        }});
+        return sortedTypes.map((annotationType) => ({{
+          id: `object-type-${{annotationType}}`,
+          name: buildAnnotationLegendName(annotationType),
+          type: 'custom',
+          silent: false,
+          animation: false,
+          itemStyle: {{ color: getAnnotationColor(annotationType) }},
+          tooltip: {{
+            show: true,
+            trigger: 'item',
+            confine: true,
+            enterable: false,
+            transitionDuration: 0,
+            extraCssText: 'pointer-events:none;',
+            position: positionFloatingTooltip,
+            formatter: (params) => formatAnnotationTooltip(params.data.meta)
+          }},
+          z: 6.7,
+          renderItem: (params, api) => {{
+            const mode = api.value(7);
+            const annotationType = api.value(5);
+            const color = getAnnotationColor(annotationType);
+            if (mode === 'range') {{
+              if (annotationType === 'Pipe') {{
+                const polygon = [
+                  api.coord([api.value(0), api.value(8)]),
+                  api.coord([api.value(2), api.value(10)]),
+                  api.coord([api.value(2), api.value(11)]),
+                  api.coord([api.value(0), api.value(9)])
+                ];
+                const clippedPolygon = clipPolygon(polygon, params);
+                const topLine = clipPolyline([polygon[0], polygon[1]], params);
+                const endLine = clipPolyline([polygon[1], polygon[2]], params);
+                const bottomLine = clipPolyline([polygon[3], polygon[2]], params);
+                const startLine = clipPolyline([polygon[0], polygon[3]], params);
+                if (!clippedPolygon?.length) return null;
+                const lineStyle = {{ stroke: color, lineWidth: 2.2, opacity: 0.86 }};
+                return {{
+                  type: 'group',
+                  children: [
+                    {{
+                      type: 'polygon',
+                      shape: {{ points: clippedPolygon }},
+                      style: {{ fill: color, opacity: 0.12, stroke: 'none' }}
+                    }},
+                    topLine?.length >= 2 ? {{
+                      type: 'line',
+                      shape: {{ x1: topLine[0][0], y1: topLine[0][1], x2: topLine[topLine.length - 1][0], y2: topLine[topLine.length - 1][1] }},
+                      style: lineStyle
+                    }} : null,
+                    bottomLine?.length >= 2 ? {{
+                      type: 'line',
+                      shape: {{ x1: bottomLine[0][0], y1: bottomLine[0][1], x2: bottomLine[bottomLine.length - 1][0], y2: bottomLine[bottomLine.length - 1][1] }},
+                      style: lineStyle
+                    }} : null,
+                    startLine?.length >= 2 ? {{
+                      type: 'line',
+                      shape: {{ x1: startLine[0][0], y1: startLine[0][1], x2: startLine[startLine.length - 1][0], y2: startLine[startLine.length - 1][1] }},
+                      style: {{ ...lineStyle, lineWidth: 1.6 }}
+                    }} : null,
+                    endLine?.length >= 2 ? {{
+                      type: 'line',
+                      shape: {{ x1: endLine[0][0], y1: endLine[0][1], x2: endLine[endLine.length - 1][0], y2: endLine[endLine.length - 1][1] }},
+                      style: {{ ...lineStyle, lineWidth: 1.6 }}
+                    }} : null
+                  ].filter(Boolean)
+                }};
+              }}
+              const clippedPolyline = clipPolyline([
+                api.coord([api.value(0), api.value(1)]),
+                api.coord([api.value(2), api.value(3)])
+              ], params);
+              if (!clippedPolyline?.length || clippedPolyline.length < 2) return null;
+              const startPoint = clippedPolyline[0];
+              const endPoint = clippedPolyline[clippedPolyline.length - 1];
+              return {{
+                type: 'group',
+                children: [
+                  {{
+                    type: 'line',
+                    shape: {{ x1: startPoint[0], y1: startPoint[1], x2: endPoint[0], y2: endPoint[1] }},
+                    style: {{ stroke: color, lineWidth: 2.4, opacity: 0.78 }}
+                  }},
+                  {{
+                    type: 'circle',
+                    shape: {{ cx: startPoint[0], cy: startPoint[1], r: profilePointRadius }},
+                    style: buildProfilePointStyle(color)
+                  }},
+                  {{
+                    type: 'circle',
+                    shape: {{ cx: endPoint[0], cy: endPoint[1], r: profilePointRadius }},
+                    style: buildProfilePointStyle(color)
+                  }}
+                ]
+              }};
+            }}
+            const bounds = clipRect(params);
+            const point = api.coord([api.value(0), api.value(1)]);
+            if (
+              point[0] < bounds.x ||
+              point[0] > bounds.x + bounds.width ||
+              point[1] < bounds.y ||
+              point[1] > bounds.y + bounds.height
+            ) {{
+              return null;
+            }}
+            return {{
+              type: 'group',
+              children: [
+                {{
+                  type: 'circle',
+                  shape: {{ cx: point[0], cy: point[1], r: profilePointRadius }},
+                  style: buildProfilePointStyle(color)
+                }}
+              ]
+            }};
+          }},
+          data: grouped.get(annotationType).map(buildObjectAnnotationDataItem)
+        }}));
+      }};
+      const objectAnnotationSeries = buildObjectAnnotationSeries(objectRangeAnnotations, objectPointAnnotations);
+      const objectLegendNames = objectAnnotationSeries.map((item) => item.name);
+      const profileLineLegendNames = ['断面顶高程', '断面底高程'];
+      const legendNames = [...profileLineLegendNames, ...objectLegendNames];
+
+      const gateLineSegments = dataset.gate_markers.map((item) => [
+        item.location,
+        interpolateProfileValue(item.location, 'bottom_elevation') ?? yMin,
+        yMax,
+        item.short_name || item.name
+      ]);
+      const buildGateStationSeries = () => ({{
+        name: '闸站位置',
         type: 'custom',
-        silent: false,
+        silent: true,
         animation: false,
-        tooltip: {{
-          show: true,
-          trigger: 'item',
-          confine: true,
-          enterable: false,
-          transitionDuration: 0,
-          extraCssText: 'pointer-events:none;',
-          position: positionFloatingTooltip,
-          formatter: (params) => formatAnnotationTooltip(params.data.meta)
-        }},
-        z: 6.7,
+        tooltip: {{ show: false }},
+        z: 7,
         renderItem: (params, api) => {{
+          const stationKey = api.value(3);
+          const x = api.coord([api.value(0), api.value(1)])[0];
+          const yBottom = api.coord([api.value(0), api.value(1)])[1];
+          const yTop = api.coord([api.value(0), api.value(2)])[1];
           const bounds = clipRect(params);
-          const point = api.coord([api.value(0), api.value(1)]);
-          if (
-            point[0] < bounds.x ||
-            point[0] > bounds.x + bounds.width ||
-            point[1] < bounds.y ||
-            point[1] > bounds.y + bounds.height
-          ) {{
-            return null;
-          }}
-          const color = getAnnotationColor(api.value(3));
+          if (x < bounds.x || x > bounds.x + bounds.width) return null;
+          const clippedBottom = Math.max(bounds.y, Math.min(bounds.y + bounds.height, yBottom));
+          const clippedTop = Math.max(bounds.y, Math.min(bounds.y + bounds.height, yTop));
+          const textY = Math.max(bounds.y + 12, clippedTop + 14);
+          const lineTopY = Math.max(clippedTop, textY + 8);
+          const lineShape = lineTopY < clippedBottom
+            ? {{ x1: x, y1: clippedBottom, x2: x, y2: lineTopY }}
+            : null;
           return {{
             type: 'group',
             children: [
+              lineShape ? {{
+                type: 'line',
+                shape: lineShape,
+                style: {{ stroke: '#a5456f', lineWidth: 1.4, lineDash: [6, 4], opacity: 0.92 }}
+              }} : null,
               {{
-                type: 'circle',
-                shape: {{ cx: point[0], cy: point[1], r: 4.2 }},
-                style: {{ fill: color, stroke: '#ffffff', lineWidth: 1.4 }}
+                type: 'text',
+                style: {{
+                  x,
+                  y: textY,
+                  text: stationKey,
+                  fill: '#a5456f',
+                  textAlign: 'center',
+                  textVerticalAlign: 'bottom',
+                  font: '600 12px sans-serif'
+                }}
               }}
-            ]
+            ].filter(Boolean)
           }};
         }},
-        data: objectPointAnnotations.map((item) => ({{
-          value: [item.location, item.water_level, item.name, item.type, item.index],
-          meta: item
-        }}))
+        data: gateLineSegments
       }});
-
-      const gateLines = dataset.gate_markers.map((item) => ({
-        xAxis: item.location,
-        name: item.short_name,
-        label: {{ formatter: item.short_name, color: '#a5456f' }},
-        lineStyle: {{ color: '#a5456f', type: 'dashed', width: 1.5 }}
-      }));
 
       chart.setOption({
         animationDuration: 500,
@@ -987,11 +1463,17 @@ def build_html(dataset: dict) -> str:
           }}
         }},
         legend: {{
+          show: legendNames.length > 0,
+          type: 'scroll',
           top: 12,
           left: 96,
           right: 40,
-          data: ['断面顶高程', '断面底高程', '闸站位置', '对象标注'],
-          textStyle: {{ color: '#5b7385' }}
+          data: legendNames,
+          formatter: formatAnnotationLegendName,
+          textStyle: {{ color: '#5b7385' }},
+          pageTextStyle: {{ color: '#5b7385' }},
+          pageIconColor: '#1c7fb5',
+          pageIconInactiveColor: 'rgba(91, 115, 133, 0.28)'
         }},
         xAxis: {{
           type: 'value',
@@ -1001,7 +1483,7 @@ def build_html(dataset: dict) -> str:
           nameLocation: 'middle',
           nameGap: 44,
           axisLabel: {{ color: '#5b7385', margin: 14 }},
-          splitLine: {{ lineStyle: {{ color: '#e3ebef' }} }}
+          splitLine: {{ show: false }}
         }},
         yAxis: {{
           type: 'value',
@@ -1012,7 +1494,7 @@ def build_html(dataset: dict) -> str:
           nameRotate: 90,
           nameGap: 72,
           axisLabel: {{ color: '#5b7385', margin: 14 }},
-          splitLine: {{ lineStyle: {{ color: '#e3ebef' }} }}
+          splitLine: {{ show: false }}
         }},
         series: [
           {{
@@ -1060,9 +1542,11 @@ def build_html(dataset: dict) -> str:
             type: 'line',
             smooth: false,
             showSymbol: true,
-            symbolSize: 5,
-            lineStyle: {{ color: '#637487', width: 2, type: 'dashed' }},
-            itemStyle: {{ color: '#637487' }},
+            symbol: 'circle',
+            symbolSize: 3,
+            lineStyle: {{ color: '#637487', width: 2 }},
+            itemStyle: buildProfileSeriesPointStyle('#637487'),
+            emphasis: {{ disabled: true }},
             z: 4,
             data: matched.map((item) => [item.location, item.top_elevation])
           }},
@@ -1071,29 +1555,16 @@ def build_html(dataset: dict) -> str:
             type: 'line',
             smooth: false,
             showSymbol: true,
-            symbolSize: 6,
+            symbol: 'circle',
+            symbolSize: 3,
             lineStyle: {{ color: '#87603d', width: 2.2 }},
-            itemStyle: {{ color: '#87603d' }},
+            itemStyle: buildProfileSeriesPointStyle('#87603d'),
+            emphasis: {{ disabled: true }},
             z: 5,
             data: matched.map((item) => [item.location, item.bottom_elevation])
           }},
-          buildObjectRangeSeries(),
-          buildObjectPointSeries(),
-          {{
-            name: '闸站位置',
-            type: 'line',
-            silent: true,
-            showSymbol: false,
-            lineStyle: {{ opacity: 0 }},
-            itemStyle: {{ opacity: 0 }},
-            tooltip: {{ show: false }},
-            markLine: {{
-              symbol: 'none',
-              silent: true,
-              data: gateLines
-            }},
-            data: []
-          }}
+          ...objectAnnotationSeries,
+          buildGateStationSeries()
         ]
       });
 
@@ -1104,7 +1575,8 @@ def build_html(dataset: dict) -> str:
           <p>${item.role}</p>
           <div class="station-meta">
             <span>里程 ${item.location} km</span>
-            <span>入口断面 ${item.inlet_section}</span>
+            <span>闸前 ${{item.inlet_section || '无'}}</span>
+            <span>闸后 ${{item.outlet_section || '无'}}</span>
             ${item.gates.map((gate) => `<span>${gate}</span>`).join('')}
           </div>
         </div>
