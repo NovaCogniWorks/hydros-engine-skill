@@ -31,12 +31,12 @@ description: |
    - Claude Code: `.claude.json` 或 `~/.claude.json`
    - Codex: `~/.codex/config.toml`
    - Copaw: `workspaces/agent.json`
-   其中 `hydros-engine-executor` 负责仿真任务链路，`hydros-engine-mdm` 作为场景建模元数据、拓扑和 `objects.yaml` 相关流程的前置条件。这样可以及早发现连接问题，避免在后续流程中遇到意外失败。
+   其中 `hydros-engine-executor` 负责仿真任务链路，`hydros-engine-mdm` 作为场景建模元数据、拓扑和 `objects.yaml` 相关流程的前置条件。两个服务的配置结构和 Header 完全一致，只需要把服务名和 URL 后缀分别配置为 `hydros-engine-executor` 与 `hydros-engine-mdm`。这样可以及早发现连接问题，避免在后续流程中遇到意外失败。
 
 2. **Token 配置**：检查用户是否已配置 Bearer token。如果 token 缺失，引导用户：
    - 访问 `https://hydroos.cn/playground/` 注册或登录
    - 在”账号管理”中获取 API token
-   - 将 token 提供给我来完成配置
+   - 将 token 写入本机 MCP 配置，并同时用于 `hydros-engine-executor` 和 `hydros-engine-mdm`
 
 3. **使用正确的工具链**：仿真执行、进度跟踪和结果导出优先走已注册的 `hydros-engine-executor` MCP 工具。场景建模元数据、拓扑和 `objects.yaml` 相关动作开始前，先确认 `hydros-engine-mdm` 已接通；如果缺失，先报告“元数据前置条件不足”，不要静默跳过。
 
@@ -137,7 +137,7 @@ description: |
 4. 向用户解释：`sse_client_id` 绑定 SSE 事件订阅通道，后续创建任务、跟踪进度都依赖它。
 
 异常处理：
-- 连接失败时，提示用户检查 `hydros-engine-executor` MCP 服务。
+- 连接失败时，提示用户检查 `hydros-engine-executor` 和 `hydros-engine-mdm` 是否都已配置。mdm 配置与 executor 相同，只是服务名和 URL 后缀改为 `hydros-engine-mdm`。
 - 如果场景建模元数据、拓扑或 `objects.yaml` 相关步骤失败，同时提示用户检查 `hydros-engine-mdm` MCP 配置是否完整。
 - 如果后续报 “SSE通道未建立”，用同一个 `sse_client_id` 重新订阅。
 

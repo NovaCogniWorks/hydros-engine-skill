@@ -12,15 +12,17 @@
   用于场景建模元数据、拓扑和 `objects.yaml` 相关前置检查。
 
 说明：
-- 本文下面的直连示例仍以 `hydros-engine-executor` 为主，因为当前任务执行链路、结果导出轮询和最终下载地址都落在这一侧。
-- `hydros-engine-mdm` 的服务名固定为 `hydros-engine-mdm`，实际 URL 和 Header 以当前环境生效配置为准。
+- `hydros-engine-executor` 和 `hydros-engine-mdm` 的配置结构和 Header 完全一致，只需要替换服务名和 URL 后缀。
+- executor URL 为 `https://hydroos.cn/mcps/hydros-engine-executor`。
+- mdm URL 为 `https://hydroos.cn/mcps/hydros-engine-mdm`。
 - 如果场景拓扑、建模元数据或 `objects.yaml` 相关步骤报错，不要只检查 executor，也要一起检查 mdm 配置。
 
 ## 连接方式
 
 ### 正确连接方式
 
-- **URL**: `https://hydroos.cn/mcps/hydros-engine-executor`
+- **executor URL**: `https://hydroos.cn/mcps/hydros-engine-executor`
+- **mdm URL**: `https://hydroos.cn/mcps/hydros-engine-mdm`
 - **协议**: `JSON-RPC 2.0 over HTTP POST`
 - **必需 Header**:
   - `Authorization: Bearer <token>`
@@ -30,7 +32,7 @@
   - `Accept: application/json,text/event-stream`
 
 说明：
-- `hydros-engine-executor` 是标准 MCP 服务名，不要误写成 `hydro-engine-mcp`
+- `hydros-engine-executor` 和 `hydros-engine-mdm` 是标准 MCP 服务名，不要误写成 `hydro-engine-mcp`
 - 配置里的 URL 不要带尾部空格
 
 ### 标准工作流
@@ -53,11 +55,42 @@
 | Codex | `~/.codex/config.toml` |
 | Copaw | `workspaces/agent.json` |
 
-检查 `hydros-engine-executor` 和 `hydros-engine-mdm` 两个 MCP 服务是否都在配置文件中正确配置。
+检查 `hydros-engine-executor` 和 `hydros-engine-mdm` 两个 MCP 服务是否都在配置文件中正确配置。两个服务的 Header 相同，URL 只差最后的服务名后缀。
+
+JSON 形态配置示例：
+
+```json
+{
+  "mcpServers": {
+    "hydros-engine-executor": {
+      "type": "http",
+      "url": "https://hydroos.cn/mcps/hydros-engine-executor",
+      "headers": {
+        "Authorization": "Bearer <token>",
+        "Execution-Source": "codex",
+        "Production-Code": "copaw",
+        "Accept": "application/json,text/event-stream"
+      }
+    },
+    "hydros-engine-mdm": {
+      "type": "http",
+      "url": "https://hydroos.cn/mcps/hydros-engine-mdm",
+      "headers": {
+        "Authorization": "Bearer <token>",
+        "Execution-Source": "codex",
+        "Production-Code": "copaw",
+        "Accept": "application/json,text/event-stream"
+      }
+    }
+  }
+}
+```
+
+如果当前客户端使用 TOML 或其他格式，不要直接粘贴 JSON；按该客户端语法配置同名的两个 server。
 
 ### HTTP 直连排查
 
-当需要排查连接问题时，使用以下配置：
+当需要排查连接问题时，分别探测两个 MCP 入口：
 
 ```bash
 curl -X POST https://hydroos.cn/mcps/hydros-engine-executor \
@@ -67,10 +100,18 @@ curl -X POST https://hydroos.cn/mcps/hydros-engine-executor \
   -H "Accept: application/json,text/event-stream" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"initialize","params":{},"id":1}'
+
+curl -X POST https://hydroos.cn/mcps/hydros-engine-mdm \
+  -H "Authorization: Bearer <token>" \
+  -H "Execution-Source: codex" \
+  -H "Production-Code: copaw" \
+  -H "Accept: application/json,text/event-stream" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"initialize","params":{},"id":2}'
 ```
 
 **注意事项**：
-- 只排查 MCP 入口 `https://hydroos.cn/mcps/hydros-engine-executor`
+- 只排查 MCP 入口 `https://hydroos.cn/mcps/hydros-engine-executor` 和 `https://hydroos.cn/mcps/hydros-engine-mdm`
 - 不要误打业务网页或猜测式 REST 路径（如 `https://hydroos.cn/api/scenario/lists`）
 - 这类业务地址通常返回 HTML，不是可用的 JSON/MCP 响应
 
@@ -81,7 +122,7 @@ curl -X POST https://hydroos.cn/mcps/hydros-engine-executor \
 | `406 Not Acceptable` | 缺少 `Content-Type` 或 `Accept` header | 确保请求包含 `Content-Type: application/json` 和 `Accept: application/json,text/event-stream` |
 | `401 Unauthorized` | Token 或业务 Header 缺失 | 检查 `Authorization`、`Execution-Source`、`Production-Code` 是否完整且值正确 |
 | `32602` | 参数缺失 | 检查是否漏传 `sse_client_id` 等必需参数 |
-| 返回 HTML | URL 错误 | 使用 `/mcp` 端点，不是 `/api/xxx` |
+| 返回 HTML | URL 错误 | 使用 `/mcps` 端点，不是 `/api/xxx` |
 | 连接超时 | 使用了不兼容的客户端库 | 避免使用 SSE 客户端库做初始化，使用标准 HTTP POST |
 | 场景拓扑或 `objects.yaml` 读取失败 | `hydros-engine-mdm` 未配置或未生效 | 回到配置文件检查 `hydros-engine-mdm` 是否存在、服务名是否正确、当前环境是否已加载 |
 | `get_export_status` 一直非 `COMPLETED` | 导出或 Excel 上传尚未完成 | 持续轮询；在 `COMPLETED` 前不要尝试下载结果文件 |
@@ -120,8 +161,8 @@ curl -X POST https://hydroos.cn/mcps/hydros-engine-executor \
 1. 访问 `https://hydroos.cn/playground/`
 2. 完成注册或登录
 3. 在"账号管理"中获取 API token
-4. 将 token 配置到 `Authorization: Bearer <token>`
-5. 同时保留业务 Header：`Execution-Source: codex`、`Production-Code: copaw`
+4. 将 token 同时配置到 `hydros-engine-executor` 和 `hydros-engine-mdm` 的 `Authorization: Bearer <token>`
+5. 两个服务都保留业务 Header：`Execution-Source: codex`、`Production-Code: copaw`
 
 ### Token 验证
 
@@ -134,5 +175,5 @@ curl -X POST https://hydroos.cn/mcps/hydros-engine-executor \
 
 1. **检查 MCP 安装**：确认 `hydros-engine-executor` 和 `hydros-engine-mdm` 都已安装并可连通
 2. **轻量探测**：检查 MCP 服务是否可用
-3. **使用工具链**：优先走已安装的 `hydros-engine-executor` 工具链，避免临时直连
+3. **使用工具链**：仿真执行走已安装的 `hydros-engine-executor` 工具链；场景、事件和拓扑元数据走 `hydros-engine-mdm`
 4. **仅在排查时直连**：只在需要排查问题时才使用 HTTP 直连，且必须带齐必需 Header

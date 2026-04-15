@@ -187,7 +187,12 @@ Skill：调用 get_timeseries_data → 轮询 get_export_status → 下载结果
 
 ## Skill 配置
 
-本 Skill 依赖外部 MCP 服务 `hydros-engine-executor`，并要求在进入场景建模元数据、拓扑或 `objects.yaml` 相关流程前确认 `hydros-engine-mdm` 已配置可用。
+本 Skill 依赖两个外部 MCP 服务，必须同时配置：
+
+- `hydros-engine-executor`：仿真任务创建、进度跟踪、结果导出和倍速控制。
+- `hydros-engine-mdm`：场景清单、预置事件、建模元数据、拓扑和 `objects.yaml` 前置检查。
+
+两个服务的配置结构和 Header 完全一致，只需要把服务名与 URL 后缀分别写成 `hydros-engine-executor` 和 `hydros-engine-mdm`。
 
 ```json
 {
@@ -201,12 +206,22 @@ Skill：调用 get_timeseries_data → 轮询 get_export_status → 下载结果
         "Production-Code": "copaw",
         "Accept": "application/json,text/event-stream"
       }
+    },
+    "hydros-engine-mdm": {
+      "type": "http",
+      "url": "https://hydroos.cn/mcps/hydros-engine-mdm",
+      "headers": {
+        "Authorization": "Bearer <token>",
+        "Execution-Source": "codex",
+        "Production-Code": "copaw",
+        "Accept": "application/json,text/event-stream"
+      }
     }
   }
 }
 ```
 
-同时需要在同一份 MCP 配置中补齐 `hydros-engine-mdm`。服务名固定为 `hydros-engine-mdm`，其实际 URL 和 Header 以当前环境已生效配置为准；在进入场景拓扑、建模元数据校验、`objects.yaml` 获取与复用流程前，必须先确认该服务已可用。
+如果当前客户端使用 TOML 或其他格式，不要直接粘贴上面的 JSON；按该客户端的 MCP 配置语法创建同名的两个 server，并保持 URL 与 Header 一致。
 
 ## 项目结构
 
