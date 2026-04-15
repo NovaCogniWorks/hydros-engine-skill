@@ -88,7 +88,7 @@ description: |
 - 如果需要快速交付一个可直接打开的页面，优先复用模板资产，而不是从零开始。
 - 需要完整版 HTML 报告、结果曲线展示或可直接打开的单文件页面时，优先复用 [assets/hydros-report-template/index.html](assets/hydros-report-template/index.html) 模板，并按当前脚本实现把真实 payload 内联到 `simulation_report.html`。
 - 当用户明确要“报告”“完整报告”“HTML 报告”“汇报页”时，不要先交付临时分析报告、手写摘要页或简版 HTML 作为最终产物；如果本地结果文件尚未就位，先完成 `get_timeseries_data -> get_export_status 轮询 -> resource_uri/下载地址 -> 落盘结果文件 -> build_timeseries_report.py`，再输出遵循模板的正式报告。
-- HTML 正式报告应尽量包含结果曲线图产物和渠道纵剖面图；若 `chart1_water_level.png`、`chart2_water_flow.png`、`chart4_gate_opening.png`、`chart5_disturbance_flow.png`、`chart6_heatmap.png`、`chart7_longitudinal_profile.png` 中有缺失，仍可交付 HTML，但必须在报告正文里显式写明缺失项、缺失原因和影响范围，不能把缺图问题只留在聊天回复里解释。
+- HTML 正式报告应尽量包含结果曲线图产物和渠道纵剖面图；若 `chart1_water_level.png`、`chart2_water_flow.png`、`chart4_gate_opening.png`、`chart5_disturbance_flow.png`、`chart7_longitudinal_profile.png` 中有缺失，仍可交付 HTML，但必须在报告正文里显式写明缺失项、缺失原因和影响范围，不能把缺图问题只留在聊天回复里解释。
 - 正式 HTML 报告生成完成后，默认通过 Hydros OpenAPI 匿名文件上传接口直接上传本地 `simulation_report.html`，并把接口返回结果作为交付结果的一部分；除非用户明确只要本地文件，否则不要停在“本地已生成 HTML”这一步。
 - HTML 报告上传统一使用 `curl --form` 直传到 `https://hydroos.cn/openapi/engine/api/v1/file/anonymous/upload/<biz_scene_instance_id>`；如果接口返回 `ACCESS_UNAUTHORIZED` 或其他失败响应，明确报告“远端上传失败”和接口错误，不要伪装成本地报告失败。
 - 直传命令模板如下。`Content-Type: multipart/form-data; boundary=...` 由 `curl --form` 自动生成，通常不要手写固定 boundary，避免请求头与 multipart 请求体不一致：
@@ -337,7 +337,7 @@ INIT -> WAITING_AGENTS -> READY -> STEPPING -> COMPLETED
 
 2. **统计摘要**：生成总记录数、采样步数、对象数、指标数、异常点数量。
 
-3. **图表生成**：用 `scripts/generate_charts.py` 生成水位、流量、热力图等图表。注意 y 轴自适应收紧，热力图按真实采样步绘制，识别并剔除占位零值。
+3. **图表生成**：用 `scripts/generate_charts.py` 生成水位、流量、闸门开度和分水口流量等图表。注意 y 轴自适应收紧。
 
 4. **异常分析**：用 `scripts/analyze_anomalies.py` 检测负压、流速异常、水头损失等。
 

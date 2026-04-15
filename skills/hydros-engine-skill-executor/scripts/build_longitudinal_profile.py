@@ -152,6 +152,7 @@ def parse_cross_sections(text: str) -> list[dict]:
         top_match = re.search(r"\n    (?:t_top_elevation|top_elevation):\s*(?P<value>[-\d.]+)", body)
         bottom_match = re.search(r"\n    bottom_elevation:\s*(?P<value>[-\d.]+)", body)
         location_match = re.search(r"\n    location:\s*(?P<value>[-\d.]+)", body)
+        identity_role_match = re.search(r"\n    identity_role:\s*(?P<value>.+?)\s*$", body, re.MULTILINE)
         point_elevations = [
             float(value)
             for value in re.findall(r"\n\s*-\s*\n\s*-\s*[-\d.]+\n\s*-\s*([-\d.]+)", body)
@@ -175,6 +176,7 @@ def parse_cross_sections(text: str) -> list[dict]:
                 "bottom_elevation": bottom_elevation,
                 "top_elevation": top_elevation,
                 "location": float(location_match.group("value")),
+                "identity_role": identity_role_match.group("value").strip() if identity_role_match else "",
                 "source_index": source_index,
             }
         )
@@ -208,6 +210,109 @@ def collect_section_errors(sections: list[dict]) -> list[dict]:
             }
         )
     return errors
+
+
+def select_profile_sections_from_objects(
+    text: str,
+    sections: list[dict],
+    invalid_section_ids: set[int] | None = None,
+    invalid_section_names: set[str] | None = None,
+) -> tuple[list[dict], list[dict]]:
+    invalid_section_ids = invalid_section_ids or set()
+    invalid_section_names = invalid_section_names or set()
+    sections_by_id = {item["id"]: item for item in sections}
+    sections_by_name = {item["name"]: item for item in sections}
+    selected_by_id: dict[int, dict] = {}
+    errors: list[dict] = []
+
+    for block in split_object_blocks(text):
+        object_type = extract_block_value(block, "type")
+        object_name = extract_block_value(block, "name")
+        if not object_type or not object_name:
+            continue
+
+        child_block = extract_nested_block(block, "cross_section_children")
+        child_refs = parse_cross_section_children(child_block)
+        for ref in child_refs:
+            role = ref.get("role", "")
+            if role not in {"INLET", "OUTLET"}:
+                continue
+            section_id = ref.get("id")
+            section_name = ref.get("name", "")
+            section = sections_by_id.get(section_id) if section_id is not None else None
+            matched_by = "id"
+            if section is None and section_name:
+                section = sections_by_name.get(section_name)
+                matched_by = "name"
+            if section is None:
+                errors.append(
+                    {
+                        "type": "missing_profile_section_ref",
+                        "severity": "warning",
+                        "object_name": object_name,
+                        "object_type": object_type,
+                        "role": role,
+                        "section_id": section_id,
+                        "section_name": section_name,
+                        "message": "对象 INLET/OUTLET 引用的断面未在 cross_sections 中找到，已跳过该断面引用",
+                    }
+                )
+                continue
+            if section.get("identity_role") == "source_duplicate":
+                errors.append(
+                    {
+                        "type": "source_duplicate_profile_section_ref",
+                        "severity": "warning",
+                        "object_name": object_name,
+                        "object_type": object_type,
+                        "role": role,
+                        "section_id": section_id,
+                        "section_name": section_name,
+                        "message": "对象 INLET/OUTLET 引用的断面标记为 source_duplicate，已跳过该断面引用",
+                    }
+                )
+                continue
+            if section["id"] in invalid_section_ids or section["name"] in invalid_section_names:
+                errors.append(
+                    {
+                        "type": "invalid_profile_section_ref",
+                        "severity": "warning",
+                        "object_name": object_name,
+                        "object_type": object_type,
+                        "role": role,
+                        "section_id": section_id,
+                        "section_name": section_name,
+                        "message": "对象 INLET/OUTLET 引用的断面存在数据错误，已跳过该断面引用",
+                    }
+                )
+                continue
+            if matched_by == "name":
+                errors.append(
+                    {
+                        "type": "profile_section_ref_name_fallback",
+                        "severity": "warning",
+                        "object_name": object_name,
+                        "object_type": object_type,
+                        "role": role,
+                        "section_id": section_id,
+                        "section_name": section_name,
+                        "matched_section_id": section["id"],
+                        "message": "对象 INLET/OUTLET 引用缺少有效断面 id，已按 name 回退匹配",
+                    }
+                )
+            selected_by_id.setdefault(section["id"], section)
+
+    selected = normalize_section_locations(list(selected_by_id.values()))
+    if len(selected) < 3:
+        errors.append(
+            {
+                "type": "insufficient_profile_sections",
+                "severity": "error",
+                "section_count": len(selected),
+                "message": "从 objects 的 INLET/OUTLET 引用中提取的有效断面不足 3 个，无法生成可靠纵剖面",
+            }
+        )
+    return selected, errors
 
 
 def extract_section(text: str, section_name: str) -> str:
@@ -429,7 +534,14 @@ def build_dataset(
     section_errors = collect_section_errors(all_sections)
     invalid_section_ids = {item["section_id"] for item in section_errors}
     invalid_section_names = {item["section_name"] for item in section_errors}
-    sections = [item for item in all_sections if item["id"] not in invalid_section_ids]
+    sections, profile_section_errors = select_profile_sections_from_objects(
+        yaml_text,
+        all_sections,
+        invalid_section_ids=invalid_section_ids,
+        invalid_section_names=invalid_section_names,
+    )
+    if len(sections) < 3:
+        raise ValueError("从 objects 的 INLET/OUTLET 引用中提取的有效断面不足 3 个，无法生成纵剖面")
     sections_by_id = {item["id"]: item for item in sections}
     sections_by_name = {item["name"]: item for item in sections}
     object_annotations, object_errors = parse_object_annotations(
@@ -556,7 +668,7 @@ def build_dataset(
             for item in object_annotations
             if not (item.get("type") == "GateStation" and item.get("name") in invalid_gate_names)
         ]
-    profile_errors = [*section_errors, *object_errors, *gate_errors]
+    profile_errors = [*section_errors, *profile_section_errors, *object_errors, *gate_errors]
 
     return {
         "meta": {
@@ -574,6 +686,7 @@ def build_dataset(
             "section_error_count": len(section_errors),
             "object_error_count": len(object_errors),
             "gate_error_count": len(gate_errors),
+            "profile_section_error_count": len(profile_section_errors),
             "profile_error_count": len(profile_errors),
         },
         "profile_points": profile_points,
@@ -655,7 +768,7 @@ def save_profile_png(dataset: dict, output_png: Path) -> None:
             station["location"],
             station_bed,
             y_top - 0.45,
-            color="#a5456f",
+            color="#111827",
             linestyle="--",
             linewidth=1.4,
             alpha=0.82,
@@ -667,7 +780,7 @@ def save_profile_png(dataset: dict, output_png: Path) -> None:
             ha="center",
             va="bottom",
             fontsize=10,
-            color="#874564",
+            color="#111827",
             fontweight="bold",
         )
 
@@ -715,7 +828,7 @@ def build_html(dataset: dict) -> str:
         --water: #1c7fb5;
         --bed: #87603d;
         --depth: rgba(28,127,181,0.16);
-        --gate: #a5456f;
+        --gate: #111827;
       }}
       * {{ box-sizing: border-box; }}
       body {{
@@ -897,8 +1010,8 @@ def build_html(dataset: dict) -> str:
         padding: 6px 10px;
         border-radius: 999px;
         font-size: 12px;
-        background: rgba(165,69,111,0.08);
-        color: #874564;
+        background: rgba(17,24,39,0.08);
+        color: #111827;
       }}
       .table-wrap {{
         margin-top: 18px;
@@ -1091,12 +1204,12 @@ def build_html(dataset: dict) -> str:
       const annotationTypeColors = {{
         UnifiedCanal: '#176a87',
         Pipe: '#d12f2f',
-        GateStation: '#a5456f',
+        GateStation: '#111827',
         DisturbanceNode: '#2b8a57'
       }};
       const getAnnotationColor = (type) => annotationTypeColors[type] || '#4c6476';
       const annotationTypeLabels = {{
-        UnifiedCanal: '水面线',
+        UnifiedCanal: '渠道范围',
         Pipe: '倒虹吸/管道',
         GateStation: '闸站',
         DisturbanceNode: '分水口/退水闸'
@@ -1231,9 +1344,14 @@ def build_html(dataset: dict) -> str:
       }});
       const annotationLegendPrefix = '相关对象: ';
       const annotationTypeOrder = ['UnifiedCanal', 'Pipe', 'GateStation', 'DisturbanceNode'];
+      const hiddenAnnotationTypes = new Set(['UnifiedCanal']);
       const buildAnnotationLegendName = (type) => `${{annotationLegendPrefix}}${{localizeAnnotationType(type)}}`;
       const formatAnnotationLegendName = (name) =>
-        name.startsWith(annotationLegendPrefix) ? name.slice(annotationLegendPrefix.length) : name;
+        name === buildAnnotationLegendName('UnifiedCanal')
+          ? name
+          : name.startsWith(annotationLegendPrefix)
+            ? name.slice(annotationLegendPrefix.length)
+            : name;
       const buildObjectAnnotationDataItem = (item) => {{
         const isRange = item.mode === 'range';
         return {{
@@ -1257,6 +1375,7 @@ def build_html(dataset: dict) -> str:
       const buildObjectAnnotationSeries = (rangeItems, pointItems) => {{
         const grouped = new Map();
         [...rangeItems, ...pointItems].forEach((item) => {{
+          if (hiddenAnnotationTypes.has(item.type)) return;
           if (!grouped.has(item.type)) grouped.set(item.type, []);
           grouped.get(item.type).push(item);
         }});
@@ -1386,8 +1505,14 @@ def build_html(dataset: dict) -> str:
         }}));
       }};
       const objectAnnotationSeries = buildObjectAnnotationSeries(objectRangeAnnotations, objectPointAnnotations);
-      const objectLegendNames = objectAnnotationSeries.map((item) => item.name);
-      const profileLineLegendNames = ['断面顶高程', '断面底高程'];
+      const profileLineLegendNames = ['断面顶高程', '断面底高程', '水面线'];
+      const canalRangeLegendName = buildAnnotationLegendName('UnifiedCanal');
+      const objectLegendNames = [
+        canalRangeLegendName,
+        ...objectAnnotationSeries
+          .map((item) => item.name)
+          .filter((name) => !profileLineLegendNames.includes(name) && name !== canalRangeLegendName)
+      ];
       const legendNames = [...profileLineLegendNames, ...objectLegendNames];
 
       const gateLineSegments = dataset.gate_markers.map((item) => [
@@ -1423,7 +1548,7 @@ def build_html(dataset: dict) -> str:
               lineShape ? {{
                 type: 'line',
                 shape: lineShape,
-                style: {{ stroke: '#a5456f', lineWidth: 1.4, lineDash: [6, 4], opacity: 0.92 }}
+                style: {{ stroke: '#111827', lineWidth: 1.4, lineDash: [6, 4], opacity: 0.92 }}
               }} : null,
               {{
                 type: 'text',
@@ -1431,7 +1556,7 @@ def build_html(dataset: dict) -> str:
                   x,
                   y: textY,
                   text: stationKey,
-                  fill: '#a5456f',
+                  fill: '#111827',
                   textAlign: 'center',
                   textVerticalAlign: 'bottom',
                   font: '600 12px sans-serif'
@@ -1549,6 +1674,32 @@ def build_html(dataset: dict) -> str:
             emphasis: {{ disabled: true }},
             z: 4,
             data: matched.map((item) => [item.location, item.top_elevation])
+          }},
+          {{
+            name: '水面线',
+            type: 'line',
+            smooth: false,
+            showSymbol: true,
+            symbol: 'circle',
+            symbolSize: 2.8,
+            connectNulls: true,
+            lineStyle: {{ color: '#1c7fb5', width: 2.4 }},
+            itemStyle: buildProfileSeriesPointStyle('#1c7fb5'),
+            emphasis: {{ disabled: true }},
+            z: 5.6,
+            data: matched.map((item) => [item.location, item.water_level])
+          }},
+          {{
+            name: canalRangeLegendName,
+            type: 'line',
+            silent: true,
+            animation: false,
+            showSymbol: false,
+            tooltip: {{ show: false }},
+            lineStyle: {{ color: getAnnotationColor('UnifiedCanal'), width: 2.4, opacity: 0.78 }},
+            itemStyle: {{ color: getAnnotationColor('UnifiedCanal') }},
+            emphasis: {{ disabled: true }},
+            data: []
           }},
           {{
             name: '断面底高程',

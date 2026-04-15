@@ -80,7 +80,7 @@ object_name + metrics_code
 
 ### 3. 指标维度
 
-适合做概览图、热力图和异常聚焦：
+适合做概览图、趋势分析和异常聚焦：
 
 - `water_level`
 - `water_flow`
@@ -93,7 +93,6 @@ object_name + metrics_code
 
 - 主图：折线图
 - 对比：多对象折线图
-- 空间分布：热力图
 
 ### water_flow
 

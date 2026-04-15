@@ -6,13 +6,12 @@
     python generate_charts.py <timeseries_data.json> [output_dir]
         [--total-steps N] [--sim-step-size SECONDS] [--output-step-size SECONDS]
 
-生成 6 张分析图表:
+生成 5 张分析图表:
   1. 关键断面水位时序图
   2. 关键断面流量时序图
   3. 负流量专项分析图
   4. 闸门开度时序图
   5. 分水口流量分析图
-  6. 沿程水位热力图
 """
 
 import json
@@ -311,78 +310,6 @@ def chart5_disturbance_flow(groups, output_dir, axis_label):
     print(f"图5 已生成: {path}")
 
 
-def chart6_heatmap(groups, output_dir):
-    """图6: 沿程水位热力图"""
-    all_sections = sorted(
-        [name for (name, metric, otype) in groups
-         if otype == 'CrossSection' and metric == 'water_level' and name.startswith('QD-')
-         and '#001' in name],
-        key=lambda x: int(x.split('-')[1].split('#')[0])
-    )
-    if not all_sections:
-        print("图6 跳过: 未检测到断面水位数据")
-        return
-
-    sampled_steps = set()
-    for name in all_sections:
-        key = (name, 'water_level', 'CrossSection')
-        if key in groups:
-            for s, _ in groups[key]:
-                sampled_steps.add(s)
-    sampled_steps = sorted(sampled_steps)
-    if not sampled_steps:
-        print("图6 跳过: 未检测到有效采样步")
-        return
-
-    # 剔除类似 step 0 的占位零值列，避免热力图出现误导性的整列异常颜色。
-    placeholder_steps = []
-    for step in sampled_steps:
-        step_values = []
-        for name in all_sections:
-            key = (name, 'water_level', 'CrossSection')
-            if key not in groups:
-                continue
-            value_dict = dict(groups[key])
-            if step in value_dict:
-                step_values.append(value_dict[step])
-        if step_values:
-            zero_ratio = sum(1 for value in step_values if value == 0) / len(step_values)
-            if zero_ratio >= 0.5:
-                placeholder_steps.append(step)
-
-    plot_steps = [step for step in sampled_steps if step not in placeholder_steps]
-    if not plot_steps:
-        plot_steps = sampled_steps
-
-    matrix = []
-    for name in all_sections:
-        key = (name, 'water_level', 'CrossSection')
-        if key in groups:
-            val_dict = dict(groups[key])
-            row = [val_dict.get(step, np.nan) for step in plot_steps]
-            matrix.append(row)
-
-    matrix = np.array(matrix, dtype=float)
-
-    fig, ax = plt.subplots(figsize=(14, 6.8))
-    im = ax.imshow(matrix, aspect='auto', cmap='coolwarm', interpolation='nearest')
-    ax.set_yticks(range(len(all_sections)))
-    ax.set_yticklabels(all_sections, fontsize=9)
-    tick_count = min(len(plot_steps), 8)
-    tick_positions = np.linspace(0, len(plot_steps) - 1, num=tick_count, dtype=int)
-    tick_positions = np.unique(tick_positions)
-    ax.set_xticks(tick_positions)
-    ax.set_xticklabels([str(plot_steps[index]) for index in tick_positions], fontsize=10)
-    ax.set_xlabel('采样步', fontsize=12)
-    ax.set_title('沿程断面水位热力图', fontsize=14, fontweight='bold')
-    plt.colorbar(im, ax=ax, label='水位 (m)')
-    plt.tight_layout()
-    path = os.path.join(output_dir, 'chart6_heatmap.png')
-    plt.savefig(path, dpi=150)
-    plt.close()
-    print(f"图6 已生成: {path}")
-
-
 def main():
     args = parse_args(sys.argv[1:])
 
@@ -430,7 +357,6 @@ def main():
     chart3_negative_flow(groups, output_dir, axis_info['label'])
     chart4_gate_opening(groups, output_dir, axis_info['label'])
     chart5_disturbance_flow(groups, output_dir, axis_info['label'])
-    chart6_heatmap(groups, output_dir)
 
     print(f"\n所有图表已生成到: {output_dir}")
 

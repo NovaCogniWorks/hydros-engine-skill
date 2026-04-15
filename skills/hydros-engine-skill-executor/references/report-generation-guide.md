@@ -68,12 +68,10 @@
 - `chart2_water_flow.png` - 流量时序图
 - `chart4_gate_opening.png` - 闸门开度图
 - `chart5_disturbance_flow.png` - 分水口流量图
-- `chart6_heatmap.png` - 热力图
 - `chart7_longitudinal_profile.png` - 纵剖面图
 
 **图表要求**：
 - y 轴根据实际数值自动收紧范围，避免小幅波动被压扁
-- 热力图按真实采样步绘制，不展开稀疏采样
 - 识别并剔除占位零值（尤其是首步）
 
 ### 4. 异常分析
@@ -98,7 +96,6 @@ output/
       │   ├── chart2_water_flow.png
       │   ├── chart4_gate_opening.png
       │   ├── chart5_disturbance_flow.png
-      │   ├── chart6_heatmap.png
       │   └── chart7_longitudinal_profile.png
       └── data/
           ├── <原始结果文件名>.xlsx
@@ -153,7 +150,6 @@ output/
 - `chart2_water_flow.png`
 - `chart4_gate_opening.png`
 - `chart5_disturbance_flow.png`
-- `chart6_heatmap.png`
 - `chart7_longitudinal_profile.png`
 
 **处理方式**：
@@ -171,7 +167,6 @@ output/
 2. 流量时序图 → 2-3 句分析
 3. 闸门开度图 → 2-3 句分析
 4. 分水口流量图 → 2-3 句分析
-5. 热力图 → 2-3 句分析
 
 ### 文字分析要求
 

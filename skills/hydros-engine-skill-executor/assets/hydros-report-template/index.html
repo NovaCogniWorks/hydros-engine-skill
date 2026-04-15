@@ -194,6 +194,7 @@
       .hero-chip::before,
       .filter-chip::before {
         content: "";
+        flex: 0 0 auto;
         width: 0.45rem;
         height: 0.45rem;
         border-radius: 999px;
@@ -444,11 +445,32 @@
         padding: 0.7rem;
       }
 
+      .curve-object-title {
+        min-width: 0;
+        flex: 1;
+        white-space: normal;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+        line-height: 1.45;
+      }
+
       .curve-child-list {
         display: flex;
         flex-wrap: wrap;
         gap: 0.4rem;
         margin-top: 0.55rem;
+      }
+
+      .curve-child-list .filter-chip {
+        max-width: 100%;
+        white-space: normal;
+        align-items: center;
+        line-height: 1.35;
+      }
+
+      .curve-child-list .filter-chip span {
+        overflow-wrap: anywhere;
+        word-break: break-word;
       }
 
       .curve-search-input {
@@ -1059,7 +1081,7 @@
         bed: "#87603d",
         bedFill: "rgba(135, 96, 61, 0.16)",
         crest: "#637487",
-        gate: "#a5456f",
+        gate: "#111827",
         plotBackground: "rgba(244, 249, 250, 0.72)",
         panelFill: "rgba(255, 255, 255, 0.92)",
         panelStroke: "rgba(135, 166, 179, 0.32)",
@@ -1184,44 +1206,6 @@
       window.addEventListener("transitionend", scheduleChartResize, { passive: true });
       window.visualViewport?.addEventListener("resize", scheduleChartResize, { passive: true });
 
-      function buildStepMarkLine(step, options = {}) {
-        const data = [];
-        if (options.includeZeroBaseline) {
-          data.push({
-            yAxis: 0,
-            label: { show: false },
-            lineStyle: { type: "dashed", color: chartTheme.crosshair, opacity: 0.9 },
-          });
-        }
-
-        if (step != null && Number.isFinite(Number(step))) {
-          data.push({
-            xAxis: Number(step),
-            label: {
-              formatter: formatStepLabel(Number(step)),
-              color: chartTheme.text,
-              backgroundColor: "rgba(255, 255, 255, 0.94)",
-              borderColor: "rgba(135, 166, 179, 0.35)",
-              borderWidth: 1,
-              borderRadius: 999,
-              padding: [4, 8],
-            },
-            lineStyle: {
-              type: "dashed",
-              color: chartTheme.crosshair,
-              width: 1.2,
-            },
-          });
-        }
-
-        return {
-          symbol: "none",
-          silent: true,
-          animation: false,
-          data,
-        };
-      }
-
       const interactionState = {
         steps: (
           reportData.longitudinalProfile?.stepValues?.length
@@ -1251,7 +1235,7 @@
         }
         if (currentLabel) {
           currentLabel.textContent = formatStepTimeLabel(interactionState.currentStep);
-          currentLabel.title = "步长按 simulation_start_time + 步长 * output_step_size 折算";
+          currentLabel.title = "步长按仿真开始时间 + 步长 × 输出步长折算";
         }
         const currentMeta = document.getElementById("timelineCurrentMeta");
         if (currentMeta && !currentMeta.textContent.trim()) {
@@ -1567,12 +1551,12 @@
         const annotationTypeColors = {
           UnifiedCanal: "#176a87",
           Pipe: "#d12f2f",
-          GateStation: "#a5456f",
+          GateStation: "#111827",
           DisturbanceNode: "#2b8a57",
         };
         const getAnnotationColor = (type) => annotationTypeColors[type] || "#4c6476";
         const annotationTypeLabels = {
-          UnifiedCanal: "水面线",
+          UnifiedCanal: "渠道范围",
           Pipe: "倒虹吸/管道",
           GateStation: "闸站",
           DisturbanceNode: "分水口/退水闸",
@@ -1638,9 +1622,14 @@
           ].join("<br>");
         const annotationLegendPrefix = "相关对象: ";
         const annotationTypeOrder = ["UnifiedCanal", "Pipe", "GateStation", "DisturbanceNode"];
+        const hiddenAnnotationTypes = new Set(["UnifiedCanal"]);
         const buildAnnotationLegendName = (type) => `${annotationLegendPrefix}${localizeAnnotationType(type)}`;
         const formatAnnotationLegendName = (name) =>
-          name.startsWith(annotationLegendPrefix) ? name.slice(annotationLegendPrefix.length) : name;
+          name === buildAnnotationLegendName("UnifiedCanal")
+            ? name
+            : name.startsWith(annotationLegendPrefix)
+              ? name.slice(annotationLegendPrefix.length)
+              : name;
         const interpolateWaterLevel = (profilePoints, location) => {
           if (!profilePoints.length) return null;
           if (location <= profilePoints[0].location) return profilePoints[0].water_level;
@@ -1787,6 +1776,7 @@
         const buildObjectAnnotationSeries = (rangeItems, pointItems) => {
           const grouped = new Map();
           [...rangeItems, ...pointItems].forEach((item) => {
+            if (hiddenAnnotationTypes.has(item.type)) return;
             if (!grouped.has(item.type)) grouped.set(item.type, []);
             grouped.get(item.type).push(item);
           });
@@ -1923,7 +1913,8 @@
           }));
         };
         const objectLegendSelected = {};
-        const profileLineLegendNames = ["断面顶高程", "断面底高程", "闸站位置"];
+        const profileLineLegendNames = ["断面顶高程", "断面底高程", "水面线", "闸站位置"];
+        const canalRangeLegendName = buildAnnotationLegendName("UnifiedCanal");
         const profileLineLegendSelected = Object.fromEntries(profileLineLegendNames.map((name) => [name, true]));
 
         chart.on("dataZoom", (event) => {
@@ -2064,7 +2055,12 @@
           const objectRangeAnnotations = buildRangeObjectAnnotations(points);
           const objectPointAnnotations = buildPointObjectAnnotations(points);
           const objectAnnotationSeries = buildObjectAnnotationSeries(objectRangeAnnotations, objectPointAnnotations);
-          const objectLegendNames = objectAnnotationSeries.map((item) => item.name);
+          const objectLegendNames = [
+            canalRangeLegendName,
+            ...objectAnnotationSeries
+              .map((item) => item.name)
+              .filter((name) => !profileLineLegendNames.includes(name) && name !== canalRangeLegendName),
+          ];
           const objectLegendSelection = Object.fromEntries(
             objectLegendNames.map((name) => [name, objectLegendSelected[name] ?? true])
           );
@@ -2263,6 +2259,32 @@
                 data: points.map((item) => [item.location, item.top_elevation]),
               },
               {
+                name: "水面线",
+                type: "line",
+                showSymbol: true,
+                symbol: "circle",
+                symbolSize: 2.8,
+                clip: true,
+                connectNulls: true,
+                lineStyle: { color: chartTheme.water, width: 2.4 },
+                itemStyle: buildProfileSeriesPointStyle(chartTheme.water),
+                emphasis: { disabled: true },
+                z: 5.6,
+                data: points.map((item) => [item.location, item.water_level]),
+              },
+              {
+                name: canalRangeLegendName,
+                type: "line",
+                silent: true,
+                animation: false,
+                showSymbol: false,
+                tooltip: { show: false },
+                lineStyle: { color: getAnnotationColor("UnifiedCanal"), width: 2.4, opacity: 0.78 },
+                itemStyle: { color: getAnnotationColor("UnifiedCanal") },
+                emphasis: { disabled: true },
+                data: [],
+              },
+              {
                 name: "断面底高程",
                 type: "line",
                 showSymbol: true,
@@ -2355,10 +2377,109 @@
         const categoryOrder = ["渠道", "闸站", "倒虹吸", "分水口", "其他"];
         const chartInterpretations = reportData.chartInterpretations || {};
 
+        function formatCheckNumber(value, digits = 3) {
+          const number = Number(value);
+          if (!Number.isFinite(number)) return "-";
+          return Number(number.toFixed(digits)).toString();
+        }
+
+        function normalizeSeriesPoints(series) {
+          return (series?.data || [])
+            .map((point) => {
+              const rawStep = Array.isArray(point) ? point[0] : point?.step;
+              const rawValue = Array.isArray(point) ? point[1] : point?.value;
+              return {
+                step: normalizeStepValue(rawStep),
+                value: Number(rawValue),
+              };
+            })
+            .filter((point) => Number.isFinite(point.step) && Number.isFinite(point.value))
+            .sort((left, right) => left.step - right.step);
+        }
+
+        function analyzeWaterLevelDrop(selectedSeries) {
+          const outputStepHours = Number(reportData.meta?.output_step_size) / 3600;
+          if (!Number.isFinite(outputStepHours) || outputStepHours <= 0) {
+            return "水位下降速率检查：缺少有效输出步长，暂无法按 m/h 折算。";
+          }
+          let worst = null;
+          selectedSeries.forEach((series) => {
+            const points = normalizeSeriesPoints(series);
+            for (let index = 1; index < points.length; index += 1) {
+              const previous = points[index - 1];
+              const current = points[index];
+              const stepGap = current.step - previous.step;
+              if (stepGap <= 0) continue;
+              const drop = previous.value - current.value;
+              if (drop <= 0) continue;
+              const rate = drop / (stepGap * outputStepHours);
+              if (!worst || rate > worst.rate) {
+                worst = { series, previous, current, drop, rate };
+              }
+            }
+          });
+          if (!worst) {
+            return "水位下降速率检查：当前选中曲线未识别到下降段，未触发 0.15 m/h、0.3 m/h 阈值。";
+          }
+          const level =
+            worst.rate > 0.3
+              ? "超过 0.3 m/h 控制阈值，需重点复核。"
+              : worst.rate > 0.15
+                ? "超过 0.15 m/h 关注阈值，建议复核。"
+                : "未超过 0.15 m/h 关注阈值。";
+          return (
+            `水位下降速率检查：最大下降速率 ${formatCheckNumber(worst.rate)} m/h，` +
+            `出现在 ${getSeriesDisplayName(worst.series)} 的步长 ${worst.previous.step} → ${worst.current.step}，` +
+            `水位下降 ${formatCheckNumber(worst.drop)} m，${level}`
+          );
+        }
+
+        function analyzeGateOpeningChange(selectedSeries) {
+          let minValue = null;
+          let maxValue = null;
+          let maxChange = null;
+          let minEffectiveChange = null;
+          let effectiveChangeCount = 0;
+          selectedSeries.forEach((series) => {
+            const points = normalizeSeriesPoints(series);
+            points.forEach((point) => {
+              minValue = minValue == null ? point.value : Math.min(minValue, point.value);
+              maxValue = maxValue == null ? point.value : Math.max(maxValue, point.value);
+            });
+            for (let index = 1; index < points.length; index += 1) {
+              const change = Math.abs(points[index].value - points[index - 1].value);
+              if (change <= 0) continue;
+              maxChange = maxChange == null ? change : Math.max(maxChange, change);
+              if (change >= 0.03) {
+                effectiveChangeCount += 1;
+                minEffectiveChange = minEffectiveChange == null ? change : Math.min(minEffectiveChange, change);
+              }
+            }
+          });
+          if (minValue == null || maxValue == null) {
+            return "闸门开度检查：当前未选中有效开度曲线。";
+          }
+          const rangeText = `当前选中开度范围 ${formatCheckNumber(minValue)} ~ ${formatCheckNumber(maxValue)} m，开度允许为正值或负值。`;
+          if (!effectiveChangeCount) {
+            return `${rangeText} 未识别到 ≥ 0.03 m 的有效开度变幅，低于该阈值的变化按微小波动处理。`;
+          }
+          return (
+            `${rangeText} 按绝对变幅检查，识别到 ${effectiveChangeCount} 次 ≥ 0.03 m 的有效变化，` +
+            `最小有效变幅 ${formatCheckNumber(minEffectiveChange)} m，最大变幅 ${formatCheckNumber(maxChange)} m。`
+          );
+        }
+
         function renderCurveInterpretation(elementId, interpretation, selectedSeries, selectedType) {
           const element = document.getElementById(elementId);
           if (!element) return;
-          element.innerHTML = [interpretation?.analysis]
+          const dynamicChecks = [];
+          if (elementId === "levelInterpretation") {
+            dynamicChecks.push(analyzeWaterLevelDrop(selectedSeries));
+          }
+          if (elementId === "gateInterpretation") {
+            dynamicChecks.push(analyzeGateOpeningChange(selectedSeries));
+          }
+          element.innerHTML = [interpretation?.analysis, ...dynamicChecks]
             .filter(Boolean)
             .map((text) => `<p>${localizeTermText(text)}</p>`)
             .join("");
@@ -2399,7 +2520,7 @@
               itemHeight: 8,
               textStyle: { color: chartTheme.textSoft, fontSize: 11 },
               pageTextStyle: { color: chartTheme.textSoft },
-              formatter: (name) => shortenText(name, 24),
+              formatter: (name) => shortenText(name, 42),
               selected: legendSelected,
             },
           };
@@ -2640,7 +2761,7 @@
                 emitChanged();
               });
               const title = document.createElement("span");
-              title.className = "min-w-0 flex-1 truncate";
+              title.className = "curve-object-title";
               title.textContent = objectItem.label;
               title.title = objectItem.label;
               const count = document.createElement("span");
@@ -2670,7 +2791,7 @@
                 });
 
                 const span = document.createElement("span");
-                span.textContent = shortenText(child.displayName || child.name, 30);
+                span.textContent = child.displayName || child.name;
                 childLabel.appendChild(checkbox);
                 childLabel.appendChild(span);
                 childList.appendChild(childLabel);
@@ -2729,12 +2850,6 @@
             selectedSeriesMeta.map((item) => item.data.map((point) => normalizeStepValue(point[0]) ?? point[0]))
           );
           renderCurveInterpretation("levelInterpretation", chartInterpretations.level, selectedSeriesMeta, levelTypeSelect.value);
-          if (selectedSeries[0] && step != null) {
-            selectedSeries[0] = {
-              ...selectedSeries[0],
-              markLine: buildStepMarkLine(step),
-            };
-          }
           syncLegendSelection(levelChart, levelLegendSelected);
           const layout = buildAdaptiveChartLayout(selectedSeriesMeta.length, levelLegendSelected);
 
@@ -2808,12 +2923,6 @@
             selectedSeriesMeta.map((item) => item.data.map((point) => normalizeStepValue(point[0]) ?? point[0]))
           );
           renderCurveInterpretation("flowInterpretation", chartInterpretations.flow, selectedSeriesMeta, flowTypeSelect.value);
-          if (selectedSeries[0]) {
-            selectedSeries[0] = {
-              ...selectedSeries[0],
-              markLine: buildStepMarkLine(step, { includeZeroBaseline: true }),
-            };
-          }
           syncLegendSelection(flowChart, flowLegendSelected);
           const layout = buildAdaptiveChartLayout(selectedSeriesMeta.length, flowLegendSelected);
 
@@ -2895,12 +3004,6 @@
           const stepBounds = computeAxisExtent(
             selectedSeriesMeta.map((series) => series.data.map((point) => normalizeStepValue(point[0]) ?? point[0]))
           );
-          if (gateChartSeries[0] && step != null) {
-            gateChartSeries[0] = {
-              ...gateChartSeries[0],
-              markLine: buildStepMarkLine(step),
-            };
-          }
           syncLegendSelection(gateChart, gateLegendSelected);
           const layout = buildAdaptiveChartLayout(selectedSeriesMeta.length, gateLegendSelected);
 

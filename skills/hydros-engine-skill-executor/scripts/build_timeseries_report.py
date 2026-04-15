@@ -41,6 +41,9 @@ ROOT = Path(__file__).resolve().parent.parent
 PROJECT_ROOT = ROOT.parent.parent
 TEMPLATE_HTML = ROOT / "assets" / "hydros-report-template" / "index.html"
 CHART_SCRIPT = ROOT / "scripts" / "generate_charts.py"
+WATER_LEVEL_DROP_WARN_RATE_M_PER_H = 0.15
+WATER_LEVEL_DROP_CONTROL_RATE_M_PER_H = 0.3
+GATE_OPENING_MIN_EFFECTIVE_CHANGE_M = 0.03
 
 
 @dataclass
@@ -330,12 +333,29 @@ def detect_placeholder_steps(metric_df: pd.DataFrame) -> list[int]:
     return placeholder_steps
 
 
+def preserve_only_available_sample(metric_df: pd.DataFrame, placeholder_steps: list[int]) -> list[int]:
+    if not placeholder_steps or metric_df.empty:
+        return placeholder_steps
+    metric_steps = set(int(step) for step in metric_df["data_index"].unique().tolist())
+    if metric_steps and metric_steps.issubset(set(placeholder_steps)):
+        return []
+    return placeholder_steps
+
+
 def build_metric_series(df: pd.DataFrame, metric: str, excluded_steps: set[int] | None = None, sort_key_func=None) -> list[dict[str, Any]]:
     series = []
     metric_df = df[df["metrics_code"] == metric].copy()
     if excluded_steps:
         metric_df = metric_df[~metric_df["data_index"].astype(int).isin(excluded_steps)].copy()
-    for (object_name, object_type), group in metric_df.groupby(["object_name", "object_type"], sort=False):
+    group_columns = ["object_name", "object_type"]
+    if "object_id" in metric_df.columns:
+        group_columns.append("object_id")
+    for group_key, group in metric_df.groupby(group_columns, sort=False, dropna=False):
+        if len(group_columns) == 3:
+            object_name, object_type, object_id = group_key
+        else:
+            object_name, object_type = group_key
+            object_id = None
         ordered = group.sort_values("data_index")
         if ordered.empty:
             continue
@@ -345,6 +365,9 @@ def build_metric_series(df: pd.DataFrame, metric: str, excluded_steps: set[int] 
             "objectType": object_type,
             "data": points,
         }
+        numeric_object_id = pd.to_numeric(pd.Series([object_id]), errors="coerce").iloc[0]
+        if pd.notna(numeric_object_id):
+            item["objectId"] = int(numeric_object_id)
         if metric == "water_flow":
             item["minValue"] = round_number(ordered["value"].min())
         series.append(item)
@@ -459,11 +482,14 @@ def parse_business_objects(objects_yaml_text: str | None) -> dict[str, Any] | No
 
 
 def resolve_section_ref(ref: dict[str, Any], catalog: dict[str, Any]) -> dict[str, Any] | None:
+    section = None
     if ref.get("id") is not None and int(ref["id"]) in catalog["sectionsById"]:
-        return catalog["sectionsById"][int(ref["id"])]
-    if ref.get("name") and ref["name"] in catalog["sectionsByName"]:
-        return catalog["sectionsByName"][ref["name"]]
-    return None
+        section = catalog["sectionsById"][int(ref["id"])]
+    elif ref.get("name") and ref["name"] in catalog["sectionsByName"]:
+        section = catalog["sectionsByName"][ref["name"]]
+    if section and section.get("identity_role") == "source_duplicate":
+        return None
+    return section
 
 
 def get_object_location(item: dict[str, Any], catalog: dict[str, Any]) -> float:
@@ -480,29 +506,22 @@ def get_object_location(item: dict[str, Any], catalog: dict[str, Any]) -> float:
     return float("inf")
 
 
-def collect_channel_sections(item: dict[str, Any], catalog: dict[str, Any]) -> list[dict[str, Any]]:
-    endpoint_sections = [
-        section
-        for ref in item.get("sectionRefs", [])
-        for section in [resolve_section_ref(ref, catalog)]
-        if section is not None
-    ]
-    if len(endpoint_sections) >= 2:
-        low, high = sorted([float(endpoint_sections[0]["location"]), float(endpoint_sections[-1]["location"])])
-        candidates = [
-            section
-            for section in catalog["sections"]
-            if low - 1e-6 <= float(section["location"]) <= high + 1e-6
-        ]
-    else:
-        candidates = endpoint_sections
-
-    unique: dict[str, dict[str, Any]] = {}
-    for section in candidates:
+def collect_referenced_sections(item: dict[str, Any], catalog: dict[str, Any]) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    unique: dict[int, tuple[dict[str, Any], dict[str, Any]]] = {}
+    for ref in item.get("sectionRefs", []):
+        section = resolve_section_ref(ref, catalog)
+        if section is None:
+            continue
         if abs(float(section.get("top_elevation", 0)) - float(section.get("bottom_elevation", 0))) < 1e-6:
             continue
-        unique[section["name"]] = section
-    return sorted(unique.values(), key=lambda section: (float(section["location"]), int(section.get("source_index", 0))))
+        unique.setdefault(int(section["id"]), (section, ref))
+    return sorted(
+        unique.values(),
+        key=lambda item_ref: (
+            float(item_ref[0]["location"]),
+            int(item_ref[0].get("source_index", 0)),
+        ),
+    )
 
 
 def build_business_children(catalog: dict[str, Any] | None) -> list[dict[str, Any]]:
@@ -533,15 +552,18 @@ def build_business_children(catalog: dict[str, Any] | None) -> list[dict[str, An
         object_label = f"{item['name']}（{item['id']}）"
 
         if object_type == "UnifiedCanal":
-            channel_sections = collect_channel_sections(item, catalog)
+            channel_sections = collect_referenced_sections(item, catalog)
             last_index = len(channel_sections) - 1
-            for section_index, section in enumerate(channel_sections):
-                if section_index == 0:
+            middle_index = 0
+            for section_index, (section, ref) in enumerate(channel_sections):
+                ref_role = ref.get("role", "")
+                if ref_role == "INLET" or section_index == 0:
                     role = "首断面"
-                elif section_index == last_index:
+                elif ref_role == "OUTLET" or section_index == last_index:
                     role = "尾断面"
                 else:
-                    role = f"中间断面 {section_index}"
+                    middle_index += 1
+                    role = f"中间断面 {middle_index}"
                 children.append(
                     {
                         "sourceObjectType": "CrossSection",
@@ -712,19 +734,45 @@ def build_business_metric_series(
     if not business_children:
         return base_series
 
+    referenced_section_ids = {
+        int(child["sourceObjectId"])
+        for child in business_children
+        if child.get("sourceObjectType") == "CrossSection" and child.get("sourceObjectId") is not None
+    }
+
+    by_source_id = {
+        (item["objectType"], item.get("objectId")): item
+        for item in base_series
+        if item.get("objectId") is not None
+    }
     by_source = {(item["objectType"], item["name"]): item for item in base_series}
     series: list[dict[str, Any]] = []
+    mapped_id_keys: set[tuple[str, int]] = set()
     mapped_keys: set[tuple[str, str]] = set()
 
     for child in business_children:
+        id_key = (
+            child["sourceObjectType"],
+            int(child["sourceObjectId"]),
+        ) if child.get("sourceObjectId") is not None else None
         key = (child["sourceObjectType"], child["sourceObjectName"])
-        base_item = by_source.get(key)
+        base_item = by_source_id.get(id_key) if id_key is not None else None
+        if not base_item:
+            base_item = by_source.get(key)
         if not base_item:
             continue
         series.append(clone_series_with_business_meta(base_item, child, metric))
-        mapped_keys.add(key)
+        if id_key is not None:
+            mapped_id_keys.add(id_key)
+        else:
+            mapped_keys.add(key)
 
     for base_item in base_series:
+        object_id = base_item.get("objectId")
+        if base_item["objectType"] == "CrossSection" and object_id is not None and int(object_id) not in referenced_section_ids:
+            continue
+        if object_id is not None and (base_item["objectType"], int(object_id)) in mapped_id_keys:
+            continue
         key = (base_item["objectType"], base_item["name"])
         if key in mapped_keys:
             continue
@@ -916,6 +964,8 @@ def build_longitudinal_profile_payload(
 
 def describe_series_points(group: pd.DataFrame) -> str:
     ordered = group.sort_values("data_index")
+    if ordered.empty:
+        return "本次结果输出点不足，无法生成首末值描述"
     first_step = int(ordered["data_index"].iloc[0])
     last_step = int(ordered["data_index"].iloc[-1])
     first_value = round_number(ordered["value"].iloc[0])
@@ -952,7 +1002,11 @@ def build_report_data(
     gate_df = df[(df["object_type"] == "Gate") & (df["metrics_code"] == "gate_opening")].copy()
     placeholder_level_steps = detect_placeholder_steps(level_df)
     placeholder_flow_steps = detect_placeholder_steps(flow_df)
+    placeholder_level_steps = preserve_only_available_sample(level_df, placeholder_level_steps)
+    placeholder_flow_steps = preserve_only_available_sample(flow_df, placeholder_flow_steps)
     display_excluded_steps = sorted(set(placeholder_level_steps) | set(placeholder_flow_steps))
+    if raw_unique_steps and set(raw_unique_steps).issubset(set(display_excluded_steps)):
+        display_excluded_steps = []
     unique_steps = [step for step in raw_unique_steps if step not in display_excluded_steps] or raw_unique_steps
     level_display_df = level_df[~level_df["data_index"].astype(int).isin(placeholder_level_steps)].copy()
     flow_display_df = flow_df[~flow_df["data_index"].astype(int).isin(placeholder_flow_steps)].copy()
@@ -1000,7 +1054,7 @@ def build_report_data(
         values = ordered["value"].tolist()
         change_steps = []
         for index in range(1, len(values)):
-            if values[index] != values[index - 1]:
+            if abs(values[index] - values[index - 1]) >= GATE_OPENING_MIN_EFFECTIVE_CHANGE_M:
                 change_steps.append(int(ordered["data_index"].iloc[index]))
         if change_steps:
             dynamic_gate_groups.append((object_name, ordered, change_steps))
@@ -1029,6 +1083,22 @@ def build_report_data(
             (flow_display_df["object_name"] == highlight_flow_name) & (flow_display_df["object_type"] == highlight_flow_type)
         ]
     highlight_flow_window_text = describe_variation_window(highlight_flow_group)
+    highlight_flow_display_name = highlight_flow_name or "流量结果序列"
+    highlight_flow_range_value = (
+        float(highlight_flow_stats["range"])
+        if highlight_flow_stats is not None and pd.notna(highlight_flow_stats["range"])
+        else 0.0
+    )
+    highlight_flow_min_value = (
+        float(highlight_flow_stats["min"])
+        if highlight_flow_stats is not None and pd.notna(highlight_flow_stats["min"])
+        else None
+    )
+    highlight_flow_max_value = (
+        float(highlight_flow_stats["max"])
+        if highlight_flow_stats is not None and pd.notna(highlight_flow_stats["max"])
+        else None
+    )
 
     last_step = unique_steps[-1]
     cs_level_df = level_df[level_df["object_type"] == "CrossSection"].copy()
@@ -1107,12 +1177,17 @@ def build_report_data(
     constant_flow_count = len(constant_flow_groups)
     dynamic_gate_count = len(dynamic_gate_groups)
     stability_score = max(55, 95 - zero_flow_count * 4 - constant_flow_count - len(anomaly_items) * 2)
-    control_score = min(85, 20 + dynamic_gate_count * 12 + (10 if highlight_flow_stats["range"] > 20 else 0))
-    highlight_level_name, highlight_level_type = level_range.index[0]
-    highlight_level_stats = level_range.iloc[0]
-    highlight_level_group = level_display_df[
-        (level_display_df["object_name"] == highlight_level_name) & (level_display_df["object_type"] == highlight_level_type)
-    ]
+    control_score = min(85, 20 + dynamic_gate_count * 12 + (10 if highlight_flow_range_value > 20 else 0))
+    highlight_level_name = "水位结果序列"
+    highlight_level_type = None
+    highlight_level_stats = {"min": None, "max": None, "mean": None, "std": None, "range": 0.0}
+    highlight_level_group = pd.DataFrame(columns=level_display_df.columns)
+    if not level_range.empty:
+        highlight_level_name, highlight_level_type = level_range.index[0]
+        highlight_level_stats = level_range.iloc[0]
+        highlight_level_group = level_display_df[
+            (level_display_df["object_name"] == highlight_level_name) & (level_display_df["object_type"] == highlight_level_type)
+        ]
     highlight_level_window_text = describe_variation_window(highlight_level_group)
 
     runtime_started_at = pd.to_datetime(df["gmt_create"].min())
@@ -1163,7 +1238,7 @@ def build_report_data(
         )
     )
     simulation_duration_text = (
-        f"{format_duration_text(simulation_duration_seconds)}（total_steps {total_runtime_steps} * output_step_size {output_interval_seconds} 秒）"
+        f"{format_duration_text(simulation_duration_seconds)}（总步数 × 输出步长）"
         if simulation_duration_seconds is not None and total_runtime_steps is not None
         else (
             f"{total_runtime_steps} 个输出步长"
@@ -1260,11 +1335,11 @@ def build_report_data(
         {
             "title": "变化规律",
             "body": (
-                f"从当前结果看，变化主要集中在 {highlight_level_name}、{highlight_flow_name} 等关键位置；"
+                f"从当前结果看，变化主要集中在 {highlight_level_name}、{highlight_flow_display_name} 等关键位置；"
                 "其余大多数区段过程较平顺，主干渠沿程水面线整体呈平滑下降。"
                 if longitudinal_profile is not None
                 else (
-                    f"从当前结果曲线看，变化主要集中在 {highlight_level_name}、{highlight_flow_name} 等关键位置；"
+                    f"从当前结果曲线看，变化主要集中在 {highlight_level_name}、{highlight_flow_display_name} 等关键位置；"
                     "其余大多数区段过程较平顺。"
                 )
             ),
@@ -1272,8 +1347,12 @@ def build_report_data(
         {
             "title": "局部差异",
             "body": (
-                f"{highlight_flow_name} 的流量最大变化幅度最明显，达到 {round_number(highlight_flow_stats['range'])} m³/s；"
-                "相比之下，其余大多数对象变化幅度更小，说明差异主要集中在局部关键节点。"
+                (
+                    f"{highlight_flow_name} 的流量最大变化幅度最明显，达到 {round_number(highlight_flow_range_value)} m³/s；"
+                    "相比之下，其余大多数对象变化幅度更小，说明差异主要集中在局部关键节点。"
+                )
+                if highlight_flow_stats is not None
+                else "本次结果输出步数较少，流量变化幅度无法可靠排序，建议把该项作为短时快跑结果解读。"
             ),
         },
         {
@@ -1321,7 +1400,11 @@ def build_report_data(
 
     recommendations = [
         "优先确认发生零流量或极低流量的节点在该场景下是否应保持关闭，避免把配置状态误判为异常。",
-        f"复核 {highlight_flow_name} 附近的边界条件、分流关系和联动控制，解释其变化原因。",
+        (
+            f"复核 {highlight_flow_name} 附近的边界条件、分流关系和联动控制，解释其变化原因。"
+            if highlight_flow_name
+            else "本次结果输出步数较少，建议结合更多输出点复核流量变化过程。"
+        ),
         (
             f"若需要更细的过程诊断，建议把输出步长从当前 {runtime_config.output_step_size} 秒/次缩短到 600-1200 秒/次。"
             if runtime_config.output_step_size
@@ -1521,13 +1604,19 @@ def build_report_data(
                 "analysis": (
                     f"水位结果曲线整体变化不大，{highlight_level_name} 的最大变化幅度为 "
                     f"{round_number(highlight_level_stats['range'])} m；默认建议优先查看断面序列的同步变化。"
+                    f"渠道水位下降速率按输出步长折算，{WATER_LEVEL_DROP_WARN_RATE_M_PER_H} m/h 作为关注阈值，"
+                    f"{WATER_LEVEL_DROP_CONTROL_RATE_M_PER_H} m/h 作为控制阈值。"
                 ),
                 "placeholder_steps": placeholder_level_steps,
             },
             "flow": {
                 "analysis": (
-                    f"流量结果曲线以稳定输水为主，{highlight_flow_name} 的最大变化幅度为 "
-                    f"{round_number(highlight_flow_stats['range'])} m³/s。"
+                    (
+                        f"流量结果曲线以稳定输水为主，{highlight_flow_name} 的最大变化幅度为 "
+                        f"{round_number(highlight_flow_range_value)} m³/s。"
+                    )
+                    if highlight_flow_stats is not None
+                    else "本次结果输出点较少，流量变化幅度无法可靠排序。"
                 ),
                 "placeholder_steps": placeholder_flow_steps,
             },
@@ -1535,8 +1624,11 @@ def build_report_data(
                 "analysis": (
                     f"闸门结果曲线共 {int(gate_df.groupby('object_name').ngroups)} 条，"
                     f"{dynamic_gate_count} 条存在明显开度切换，适合与水位、流量阶段变化联动解释。"
+                    f"闸门开度允许为正值或负值，开度变幅按绝对值检查，"
+                    f"≥ {GATE_OPENING_MIN_EFFECTIVE_CHANGE_M} m 计为有效变化。"
                 ),
                 "placeholder_steps": display_excluded_steps,
+                "dynamic_gate_count": dynamic_gate_count,
             },
         },
         "analysisSummary": {
@@ -1568,9 +1660,9 @@ def build_report_data(
             "top_flow_variation": {
                 "object_name": highlight_flow_name,
                 "object_type": highlight_flow_type,
-                "min": round_number(highlight_flow_stats["min"]),
-                "max": round_number(highlight_flow_stats["max"]),
-                "range": round_number(highlight_flow_stats["range"]),
+                "min": round_number(highlight_flow_min_value),
+                "max": round_number(highlight_flow_max_value),
+                "range": round_number(highlight_flow_range_value),
                 "description": describe_series_points(highlight_flow_group),
             },
             "top_level_variation": {
@@ -1644,6 +1736,12 @@ def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
             f"- 用户参数推导的总时长与结果文件覆盖时长存在差异，当前差值为 `{duration_gap_text}`；"
             "需优先排查结果文件导出链路，再决定是否可用于严格时间过程分析。"
         )
+    gate_dynamic_count = int(payload.get("chartInterpretations", {}).get("gate", {}).get("dynamic_gate_count") or 0)
+    gate_curve_followup = (
+        "存在有效阶跃变化，说明场景中存在控制动作，而不是完全静态工况。"
+        if gate_dynamic_count > 0
+        else f"当前未识别到 ≥ {GATE_OPENING_MIN_EFFECTIVE_CHANGE_M} m 的有效开度阶跃，整体更接近静态或微调工况。"
+    )
     markdown = f"""# {payload['meta']['report_title']}
 
 ## 概况
@@ -1709,7 +1807,7 @@ def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
 
 ![闸门开度时序](../charts/chart4_gate_opening.png)
 
-{payload['chartInterpretations']['gate']['analysis']} 存在明显阶跃变化，说明场景中存在控制动作，而不是完全静态工况。
+{payload['chartInterpretations']['gate']['analysis']} {gate_curve_followup}
 
 ### 4. 分水口/退水闸流量
 
@@ -1717,11 +1815,6 @@ def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
 
 分流/退水节点侧呈现“少数动态、多数恒定”的特征。部分节点全程为零或维持恒定流量，更像稳态配水结果而非持续调节过程。
 
-### 5. 沿程水位热力图
-
-![沿程水位热力图](../charts/chart6_heatmap.png)
-
-热力图显示主渠水位从上游向下游稳定递减，且时间维变化幅度有限，说明本次仿真以稳定输水为主。局部颜色变化主要集中在中前段断面，与闸门动作的时间段基本一致。
 {profile_markdown}
 
 ## 结论
@@ -1762,7 +1855,6 @@ def validate_required_report_assets(charts_dir: Path, profile_dataset: Any) -> d
         "chart2_water_flow.png",
         "chart4_gate_opening.png",
         "chart5_disturbance_flow.png",
-        "chart6_heatmap.png",
         "chart7_longitudinal_profile.png",
     ]
     missing = [name for name in required_chart_names if not (charts_dir / name).exists()]
