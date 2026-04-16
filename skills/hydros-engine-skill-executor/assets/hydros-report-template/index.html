@@ -1003,7 +1003,7 @@
         const span = rawMax - rawMin;
         const minPadding = options.minPadding ?? 0.05;
         const paddingRatio = options.paddingRatio ?? 0.12;
-        const padding = span === 0 ? Math.max(Math.abs(rawMax) * paddingRatio, minPadding) : Math.max(span * paddingRatio, minPadding);
+        const padding = span === 0 ? minPadding : Math.max(span * paddingRatio, minPadding);
 
         return {
           min: Number((rawMin - padding).toFixed(3)),
@@ -2526,15 +2526,29 @@
           };
         }
 
-        function bindLegendSelection(chart, legendSelected) {
+        function bindLegendSelection(chart, legendSelected, onChange) {
+          let legendChangeFrame = null;
           chart.on("legendselectchanged", (event) => {
             Object.assign(legendSelected, event?.selected || {});
+            if (!onChange) return;
+            if (legendChangeFrame) {
+              cancelAnimationFrame(legendChangeFrame);
+            }
+            legendChangeFrame = requestAnimationFrame(() => {
+              legendChangeFrame = null;
+              onChange();
+            });
           });
         }
 
         function syncLegendSelection(chart, legendSelected) {
           const selected = chart.getOption()?.legend?.[0]?.selected || {};
           Object.assign(legendSelected, selected);
+        }
+
+        function getLegendVisibleSeriesMeta(selectedSeriesMeta, legendSelected) {
+          const visibleSeriesMeta = selectedSeriesMeta.filter((item) => legendSelected[getSeriesDisplayName(item)] !== false);
+          return visibleSeriesMeta.length ? visibleSeriesMeta : selectedSeriesMeta;
         }
 
         function buildTooltipFormatter(unit) {
@@ -2824,33 +2838,34 @@
         const levelObjectList = document.getElementById("levelObjectList");
         const getSelectedLevel = buildBusinessFilter(levelSeries, levelTypeSelect, levelObjectList, '渠道');
         const levelLegendSelected = {};
-        bindLegendSelection(levelChart, levelLegendSelected);
+        bindLegendSelection(levelChart, levelLegendSelected, () => updateLevelChart(interactionState.currentStep));
 
         const flowTypeSelect = document.getElementById("flowTypeSelect");
         const flowObjectList = document.getElementById("flowObjectList");
         const getSelectedFlow = buildBusinessFilter(flowSeries, flowTypeSelect, flowObjectList, '渠道');
         const flowLegendSelected = {};
-        bindLegendSelection(flowChart, flowLegendSelected);
+        bindLegendSelection(flowChart, flowLegendSelected, () => updateFlowChart(interactionState.currentStep));
 
         const gateTypeSelect = document.getElementById("gateTypeSelect");
         const gateObjectList = document.getElementById("gateObjectList");
         const getSelectedGate = buildBusinessFilter(gateSeries, gateTypeSelect, gateObjectList, '闸站');
         const gateLegendSelected = {};
-        bindLegendSelection(gateChart, gateLegendSelected);
+        bindLegendSelection(gateChart, gateLegendSelected, () => updateGateChart(interactionState.currentStep));
 
         function updateLevelChart(step = interactionState.currentStep) {
           const selectedIndices = getSelectedLevel();
           const selectedSeriesMeta = selectedIndices.map((index) => levelSeries[index]);
           const selectedSeries = selectedSeriesMeta.map((item, index) => buildLineSeries(getSeriesDisplayName(item), item.data, index, { hueOffset: 210 }));
+          syncLegendSelection(levelChart, levelLegendSelected);
+          const visibleSeriesMeta = getLegendVisibleSeriesMeta(selectedSeriesMeta, levelLegendSelected);
           const bounds = computeAxisBounds(
-            selectedSeriesMeta.map((item) => item.data.map((point) => point[1])),
+            visibleSeriesMeta.map((item) => item.data.map((point) => point[1])),
             { paddingRatio: 0.12, minPadding: 0.03 }
           );
           const stepBounds = computeAxisExtent(
-            selectedSeriesMeta.map((item) => item.data.map((point) => normalizeStepValue(point[0]) ?? point[0]))
+            visibleSeriesMeta.map((item) => item.data.map((point) => normalizeStepValue(point[0]) ?? point[0]))
           );
           renderCurveInterpretation("levelInterpretation", chartInterpretations.level, selectedSeriesMeta, levelTypeSelect.value);
-          syncLegendSelection(levelChart, levelLegendSelected);
           const layout = buildAdaptiveChartLayout(selectedSeriesMeta.length, levelLegendSelected);
 
           levelChart.setOption({
@@ -2915,15 +2930,16 @@
               lineWidth: item.minValue < 0 ? 2.5 : 1.8,
             })
           );
+          syncLegendSelection(flowChart, flowLegendSelected);
+          const visibleSeriesMeta = getLegendVisibleSeriesMeta(selectedSeriesMeta, flowLegendSelected);
           const bounds = computeAxisBounds(
-            selectedSeriesMeta.map((item) => item.data.map((point) => point[1])),
+            visibleSeriesMeta.map((item) => item.data.map((point) => point[1])),
             { paddingRatio: 0.14, minPadding: 0.2 }
           );
           const stepBounds = computeAxisExtent(
-            selectedSeriesMeta.map((item) => item.data.map((point) => normalizeStepValue(point[0]) ?? point[0]))
+            visibleSeriesMeta.map((item) => item.data.map((point) => normalizeStepValue(point[0]) ?? point[0]))
           );
           renderCurveInterpretation("flowInterpretation", chartInterpretations.flow, selectedSeriesMeta, flowTypeSelect.value);
-          syncLegendSelection(flowChart, flowLegendSelected);
           const layout = buildAdaptiveChartLayout(selectedSeriesMeta.length, flowLegendSelected);
 
           flowChart.setOption({
@@ -2997,14 +3013,15 @@
               { hueOffset: 30, lineWidth: 2.2, step: "end" }
             )
           );
+          syncLegendSelection(gateChart, gateLegendSelected);
+          const visibleSeriesMeta = getLegendVisibleSeriesMeta(selectedSeriesMeta, gateLegendSelected);
           const bounds = computeAxisBounds(
-            selectedSeriesMeta.map((series) => series.data.map((point) => point[1])),
+            visibleSeriesMeta.map((series) => series.data.map((point) => point[1])),
             { paddingRatio: 0.12, minPadding: 0.02 }
           );
           const stepBounds = computeAxisExtent(
-            selectedSeriesMeta.map((series) => series.data.map((point) => normalizeStepValue(point[0]) ?? point[0]))
+            visibleSeriesMeta.map((series) => series.data.map((point) => normalizeStepValue(point[0]) ?? point[0]))
           );
-          syncLegendSelection(gateChart, gateLegendSelected);
           const layout = buildAdaptiveChartLayout(selectedSeriesMeta.length, gateLegendSelected);
 
           gateChart.setOption({
