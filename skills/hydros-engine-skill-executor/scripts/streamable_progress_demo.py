@@ -62,8 +62,8 @@ def polling_mode_demo(total_steps: int = 1200, poll_interval: float = 5.0):
     print()
 
     while current_step < total_steps:
-        # 模拟轮询：调用 get_task_status
-        print(f"[轮询] 查询任务状态...")
+        # 模拟轮询：调用 get_task_step
+        print(f"[轮询] 查询当前步数...")
 
         # 模拟在轮询间隔内，仿真继续推进
         current_step = min(current_step + int(steps_per_second * poll_interval), total_steps)

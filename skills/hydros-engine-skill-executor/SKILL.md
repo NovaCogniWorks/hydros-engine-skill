@@ -65,6 +65,7 @@ description: |
 - 用户选定场景后，调用 `hydros-engine-mdm` 的 `get_scenario_events` 查询预置事件，与默认参数一起展示。这让用户全面了解场景配置，一次性确认所有关键参数。
 - 用户只回复场景 ID 或”选这个”时，视为”选定场景”而非”立即启动”。先展示默认参数供确认，避免使用错误配置启动任务。
 - 创建 live 仿真任务后，持续监测到终态（`COMPLETED` 或 `FAILED`）。中途停止会导致用户无法及时了解任务结果。
+- `create_simulation_task` 的关键返回值通常嵌套在 `result.data` 下，`biz_scene_instance_id`、`total_steps`、`task_status` 等字段优先从 `result.data` 里读取，不要假设它们平铺在顶层。
 - 用户说”启动””运行”时，默认包含”持续跟踪”。避免额外追问，保持流程流畅。
 - 只在实际进入轮询循环后才说”正在持续监测中”。确保状态描述与实际行为一致，避免误导用户。
 - 用户说”停止仿真””终止任务”时，默认执行不可恢复的取消操作。只有明确说”暂停”时才走暂停语义。
@@ -77,7 +78,8 @@ description: |
   - **轮询模式（当前实现）**：每 5-10 秒查询一次进度，跳跃式更新。适合长时间运行的任务，网络开销小，实现简单。
   - **流式模式（可选）**：利用 Claude 的流式输出特性，在轮询循环中每次查询后立即输出进度条。通过缩短轮询间隔（2-5 秒）和连续输出，让进度更新更流畅。参考 `scripts/streamable_progress_demo.py` 查看两种模式的对比演示。
 - 在追加消息型聊天环境里，”自动显示进度条”的正确含义是：只要本轮仍在持续轮询，代理就必须主动连续发送文本进度条快照，不需要用户再次提醒；如果本轮被用户中断，则自动刷新链条随之中断，恢复后必须先说明”监测曾中断，现已恢复”。
-- 调用 `get_timeseries_data` 前先确认任务状态为 `COMPLETED`。未完成的任务可能返回不完整的数据。
+- 调用 `get_timeseries_data` 前先确认最新 `get_task_step({ biz_scene_instance_id, sse_client_id })` 返回的当前步数已经达到配置的 `total_steps`。正常完成路径不要额外调用 `get_task_status`；只有仿真出错或结果获取被拒绝时，才查询 `get_task_status` 留存全量状态记录。运行中只使用 `get_task_step` 返回的 `received_hydro_events` 判断是否有事件发生；不要每轮调用完整事件查询。
+- **终态判定补充**：如果 `get_task_step` 已显示 `current_step >= total_steps`，但 `task_status` 仍是 `STEPPING` / `READY` / 其他非终态，不要立刻把任务当成已完成，也不要立刻启动结果导出；应继续短轮询 `get_task_step` 直到状态真正切到 `COMPLETED`，若随后转为 `FAILED` 或长时间不收敛，再调用 `get_task_status` 留存失败原因或最终状态。
 - `get_timeseries_data` 现在只负责启动结果导出任务，不保证立即可下载。后续必须轮询 `get_export_status(biz_scene_instance_id)`，直到状态为 `COMPLETED`。
 - 只有当 `get_export_status` 返回 `COMPLETED` 且给出 `resource_uri` 或下载地址时，才允许进入下载步骤。若状态为 `FAILED`，立即报告“结果导出失败”，不要继续生成任何图表或报告。
 - 当目标是“下载结果文件到本地”而不是立刻做报告时，也必须走同一条标准链路：`get_timeseries_data -> get_export_status 轮询 -> resource_uri/下载地址 -> 标准 HTTP GET 下载到本地 -> 本地一次性校验`。不要把结果内容通过终端标准输入、交互式 `cat`、消息复制粘贴等方式中转。
@@ -235,9 +237,9 @@ description: |
    - `total_steps`
    - `default_render_objects`
    - `valid`
-9. 如果这是 live 任务，创建成功后立即进入阶段四持续监测，直到任务进入 `COMPLETED` 或 `FAILED`，不要在首个进度点就结束本轮处理。
+9. 如果这是 live 任务，创建成功后立即进入阶段四持续监测，直到 `get_task_step` 返回的当前步数达到 `total_steps`，或异常路径已经用 `get_task_status` 留存失败记录；不要在首个进度点就结束本轮处理。
 10. 对”启动 100001””运行这个场景”这类明确启动指令，默认把”持续监测到终态”视为同一轮动作的一部分，不需要再次征询用户。
-11. 创建成功后的第一条反馈应直接包含任务 ID、当前状态、当前进度和“正在持续监测中”的事实；不要把“是否继续盯进度”作为可选后续动作抛给用户。
+11. 创建成功后的第一条反馈应直接包含任务 ID、创建成功事实、当前进度和“正在持续监测中”的事实；不要把“是否继续盯进度”作为可选后续动作抛给用户。
 12. 如果要给出“预计剩余时间”或“预计完成时间”，必须基于真实轮询中观测到的步进速度计算，不能用 `total_steps * sim_step_size` 推导成墙钟剩余时间。
 
 异常处理：
@@ -252,20 +254,35 @@ description: |
 
 ### 阶段四：跟踪仿真进度
 
-使用 `get_task_status(sse_client_id, biz_scene_instance_id)` 轮询任务状态和当前步数。
+使用 `get_task_step({ biz_scene_instance_id, sse_client_id })` 轮询当前步数。常规进度跟踪不调用 `get_task_status`；只有仿真出错、步数查询异常、或需要留存失败原因时，才调用 `get_task_status({ biz_scene_instance_id, sse_client_id })` 获取全量状态记录。
+
+运行中事件监测规则：
+- 常规进度监测只读取 `get_task_step` 返回的 `received_hydro_events`，用它判断是否已有事件发生。
+- 如果 `received_hydro_events` 相比上一轮出现新增事件，在进度播报中简要写明事件名称、触发步和事件 ID。
+- 运行中不要每轮调用 `get_simulation_scenario_events`，因为完整事件记录可能包含天气时序、预警规则等大体量详情。
+- 只有用户明确要求展开事件详情，或出现异常/结果突变需要解释时，才调用 `get_simulation_scenario_events(biz_scene_instance_id)`。
+
+`get_task_step` 传参要求：
+- `biz_scene_instance_id`：仿真任务实例 ID，来自 `create_simulation_task` 返回结果。
+- `sse_client_id`：SSE 客户端 ID，必须与本任务创建前调用 `subscribe_to_simulation_events` 时使用的值一致。
 
 标准监测方法：
 
 1. 创建 live 任务成功后，立刻进入轮询循环。
-2. 每一轮轮询必须至少执行一次 `get_task_status(sse_client_id, biz_scene_instance_id)`。
-3. 每一轮都要用最新一次 `get_task_status` 的结果更新“最新可信状态”：
-   - 优先使用最新的终态（`COMPLETED` / `FAILED`）。
-   - 进度、状态和异常信息都以 `get_task_status` 返回结果为准。
-4. 每一轮结束后，只有在准备继续下一轮轮询时，才可以对用户表述为“正在持续监测中”。
-5. 如果已经停止轮询，或当前回合不会继续执行下一轮，则必须明确表述为“本轮已查询到最新状态”，不能伪装成持续监测。
+2. 每一轮轮询必须至少执行一次 `get_task_step({ biz_scene_instance_id, sse_client_id })`。
+4. 每一轮都要用最新一次 `get_task_step` 的结果更新“最新可信进度”：
+   - 进度以 `get_task_step` 返回的当前步数为准。
+   - 已发生事件以 `get_task_step.received_hydro_events` 为准；只记录和播报新增事件摘要，不拉取完整事件详情。
+   - `total_steps` 使用创建任务时确认的配置值；不要为了读取 `total_steps` 而常规调用 `get_task_status`。
+   - 当 `current_step >= total_steps` 但 `task_status` 还不是 `COMPLETED` / `FAILED` / `CANCELLED` / `PAUSED` 时，视为“到达末步但尚未收敛到终态”，继续短轮询，不要提前结束。
+   - 只有当 `task_status` 真正进入终态，或异常路径已经通过 `get_task_status` 留存了全量失败记录，才结束持续监测。
+   - 若 `get_task_step` 调用失败、返回异常、或 SSE/任务事件显示仿真失败，再调用一次 `get_task_status({ biz_scene_instance_id, sse_client_id })` 获取全量状态和 `failure_exception`，作为错误记录。
+
+5. 如果已经停止轮询，或当前回合不会继续执行下一轮，则必须明确表述为“本轮已查询到最新进度”，不能伪装成持续监测。
 6. 推荐轮询间隔为 5 到 10 秒；如果任务步进非常快，可缩短到 2 到 5 秒，但不能只查一次就结束。
 7. “持续监测完成”的判定只有两种：
-   - 捕获到终态 `COMPLETED` 或 `FAILED`
+   - `get_task_step` 返回的当前步数达到或超过 `total_steps`
+   - 仿真出错后已用 `get_task_status` 留存全量失败记录
    - 用户明确要求停止跟踪、取消任务或结束当前流程
 
 剩余时间与完成时间估算规则：
@@ -289,10 +306,11 @@ description: |
 
 真实性校验要求：
 - 任意一次“正在持续监测中”的回复，都必须能对应到本轮刚刚执行过的真实 MCP 调用结果，而不是沿用上一次的旧状态。
-- 如果回复里出现“最新进度”“当前状态”“正在监测”，必须能同时指出最近一次真实查询得到的 `task_status`、`current_step` 或 `failure_exception`。
+- 如果回复里出现“最新进度”“当前进度”“正在监测”，必须能指出最近一次真实 `get_task_step` 查询得到的 `current_step`；只有异常路径才补充 `get_task_status` 返回的 `task_status` 或 `failure_exception`。
+- 如果回复里提到“事件已发生”或“新增事件”，必须来自最近一次真实 `get_task_step.received_hydro_events`，或来自按需调用的 `get_simulation_scenario_events`。
 - 不允许只在创建任务后说一句“我会持续监测”，然后没有后续轮询动作。
 
-状态流转：
+状态流转仅用于理解任务生命周期；常规进度轮询不依赖 `get_task_status` 获取这些状态：
 
 ```text
 INIT -> WAITING_AGENTS -> READY -> STEPPING -> COMPLETED
@@ -300,13 +318,13 @@ INIT -> WAITING_AGENTS -> READY -> STEPPING -> COMPLETED
 ```
 
 展示要求：
-- 对 `STEPPING` 状态必须展示文本进度条快照、`current_step / total_steps` 和百分比。
+- 对运行中任务必须展示文本进度条快照、`current_step / total_steps` 和百分比。
 - 文本进度条快照默认使用 10 格宽度，格式固定为 `███░░░░░░15.4% | 185/1200`；已完成部分用 `█`，未完成部分用 `░`，百分比保留 1 位小数。
-- 任何包含当前进度、当前状态、最新进度、正在监测等内容的回复，第一行都必须先给出这条文本进度条；后面才允许补状态、ETA 或说明。
+- 任何包含当前进度、最新进度、正在监测等内容的回复，第一行都必须先给出这条文本进度条；后面才允许补 ETA 或说明。
 - 在追加消息型聊天环境中，每一条进度播报都应把最新文本进度条放在回复第一行，后面再补状态、ETA 或说明；不要把进度条埋在长段解释后面。
 - 当任务首次进入 `STEPPING` 状态时，在进度输出中附带一句提示，告知用户当前速度和预估剩余时间；如果此时样本还不足以给出可靠 ETA，就明确写“暂未形成可靠 ETA”。同时说明可以随时输入"加速"或"4x"来调整倍速（可选：0.25x、0.5x、1x、2x、4x）。这条提示只出现一次，之后不再重复。关键点：不要用阻塞式提问（如 AskUserQuestion）来询问加速，因为那会中断轮询循环，导致监测停止。正确做法是把加速提示作为进度输出的一部分，然后立即继续轮询；如果用户在后续消息中主动要求加速，再调用 `update_task_speed`。
-- 对 `FAILED` 状态优先提取 `failure_exception`。
-- 对 live 任务，默认持续轮询 `get_task_status`，直到捕获终态；在终态前不要把流程当作完成。
+- 对异常或失败状态，调用 `get_task_status` 后优先提取 `failure_exception`。
+- 对 live 任务，默认持续轮询 `get_task_step`，直到当前步数达到 `total_steps`；在达到前不要把流程当作完成。
 - 禁止把“继续等待”“继续盯进度”“稍后再查”“是否拉结果”写成三选一或多选一的尾句；正确做法是继续轮询，并在终态后再自然衔接结果获取或报告生成。
 - 如果用户的意图是“跑一个仿真并看结果/出报告/继续等待”，则任务完成后应自动衔接阶段五，无需再次等待用户提醒。
 - 如果运行环境是命令行 PTY，而不是聊天消息流，优先用单行文本进度条展示，如 `██████░░░░34.0% | 408/1200`，通过 `\r` 原地刷新；但对用户可见的进度文本格式仍必须与聊天环境保持一致。
@@ -316,7 +334,8 @@ INIT -> WAITING_AGENTS -> READY -> STEPPING -> COMPLETED
 ### 阶段五：获取结果与分析
 
 1. **数据获取**：
-    - 确认任务状态为 `COMPLETED`
+    - 确认最新 `get_task_step({ biz_scene_instance_id, sse_client_id })` 返回的当前步数已经达到 `total_steps`
+    - 如果步数未达标、步数查询异常、或结果获取返回任务失败/未完成，再调用 `get_task_status({ biz_scene_instance_id, sse_client_id })` 查询全量状态并记录原因
     - 调用 `get_timeseries_data(biz_scene_instance_id)` 启动结果导出任务
     - 持续轮询 `get_export_status(biz_scene_instance_id)`，直到状态为 `COMPLETED` 或 `FAILED`
     - 当状态为 `COMPLETED` 时，提取 `resource_uri` 或实际下载地址
@@ -335,13 +354,19 @@ INIT -> WAITING_AGENTS -> READY -> STEPPING -> COMPLETED
     - 如果结果文件下载失败、写盘失败，或校验后判断为坏文件/残缺文件，则直接报告阶段五失败并停止，不允许继续生成图表、异常分析或任何正式报告
     - 传递用户显式提供的仿真参数给脚本，避免写死默认值
 
-2. **统计摘要**：生成总记录数、采样步数、对象数、指标数、异常点数量。
+2. **完整事件记录**：
+    - 生成正式报告、事件复盘或运行过程记录时，调用 `get_simulation_scenario_events(biz_scene_instance_id)` 获取完整工况事件。
+    - 用户明确要求“查看事件”“工况事件”“过程记录”“事件详情”时，调用 `get_simulation_scenario_events(biz_scene_instance_id)`。
+    - 若结果曲线出现突变、仿真异常、MPC 控制结果异常，或需要解释某个事件对对象/时序的影响，调用完整事件查询做关联分析。
+    - 不要把 `get_simulation_scenario_events` 放入阶段四高频轮询；阶段四只用 `received_hydro_events` 轻量判断事件是否发生。
 
-3. **图表生成**：用 `scripts/generate_charts.py` 生成水位、流量、闸门开度和分水口流量等图表。注意 y 轴自适应收紧。
+3. **统计摘要**：生成总记录数、采样步数、对象数、指标数、异常点数量。
 
-4. **异常分析**：用 `scripts/analyze_anomalies.py` 检测负压、流速异常、水头损失等。
+4. **图表生成**：用 `scripts/generate_charts.py` 生成水位、流量、闸门开度和分水口流量等图表。注意 y 轴自适应收紧。
 
-5. **报告生成**：
+5. **异常分析**：用 `scripts/analyze_anomalies.py` 检测负压、流速异常、水头损失等。
+
+6. **报告生成**：
    - **默认产出**：HTML 报告 + Markdown 报告（除非用户明确只要其中一种）
    - **HTML 报告**：对齐 `assets/hydros-report-template/index.html` 完整版结构，包含纵剖面与时序曲线联动
    - **Markdown 报告**：图文并茂，每张图表配套文字分析
@@ -381,7 +406,8 @@ INIT -> WAITING_AGENTS -> READY -> STEPPING -> COMPLETED
 | “列出场景” | 执行阶段一到阶段二 |
 | 用户回复场景 ID / “选这个场景” | 视为完成阶段二选择动作；先输出该场景基于 `objects.yaml` 的简要拓扑总结，再进入阶段三参数确认 |
 | “跑一个仿真” / “启动 100001” / “运行这个场景” | 执行阶段一到阶段四并默认持续监测到终态；若用户同时关心结果、报告或明确要求等待完成，则继续自动执行阶段五 |
-| “查看进度” / “任务状态” | 执行阶段四 |
+| “查看进度” / “任务状态” | 执行阶段四；常规只查 `get_task_step`，异常时再查 `get_task_status` |
+| “查看事件” / “工况事件” / “过程记录” / “事件详情” | 调用 `get_simulation_scenario_events` 获取完整事件记录 |
 | “拉取结果” / “分析数据” | 执行阶段五 |
 | “生成报告” | 执行阶段五，默认输出 HTML 报告和 Markdown 报告 |
 | “做个页面看仿真数据” / “做 HTML 页面” | 先执行阶段五拿到数据，再读 references 并生成报告页或专题 HTML 页面 |
@@ -410,6 +436,8 @@ biz_scenario_id
 biz_scenario_config_url
 biz_scene_instance_id
 task_status
+current_step
 total_steps
+received_hydro_events
 default_render_objects
 ```

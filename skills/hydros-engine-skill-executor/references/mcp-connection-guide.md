@@ -39,9 +39,12 @@
 
 1. `initialize` - 初始化 MCP 连接
 2. `subscribe_to_simulation_events` - 订阅仿真事件
-3. `create_simulation_task` / `get_task_status` - 执行仿真并跟踪进度
+3. `create_simulation_task` / `get_task_step` - 执行仿真并轻量跟踪当前步数与已接收事件摘要
 4. `get_timeseries_data` - 启动结果导出任务
 5. `get_export_status` - 轮询导出与 Excel 上传状态，拿到 `resource_uri` 或下载地址
+
+说明：常规进度跟踪只使用 `get_task_step({ biz_scene_instance_id, sse_client_id })`。只有仿真出错、步数查询异常、或需要留存失败原因时，才调用 `get_task_status({ biz_scene_instance_id, sse_client_id })` 获取全量状态记录。
+事件说明：运行中通过 `get_task_step.received_hydro_events` 判断是否有事件发生。只有生成报告、事件复盘、异常排查，或用户明确要求查看工况事件详情时，才调用 `get_simulation_scenario_events(biz_scene_instance_id)` 获取完整事件记录。
 
 ## 连接排查
 
@@ -121,7 +124,7 @@ curl -X POST https://hydroos.cn/mcps/hydros-engine-mdm \
 |------------|------|---------|
 | `406 Not Acceptable` | 缺少 `Content-Type` 或 `Accept` header | 确保请求包含 `Content-Type: application/json` 和 `Accept: application/json,text/event-stream` |
 | `401 Unauthorized` | Token 或业务 Header 缺失 | 检查 `Authorization`、`Execution-Source`、`Production-Code` 是否完整且值正确 |
-| `32602` | 参数缺失 | 检查是否漏传 `sse_client_id` 等必需参数 |
+| `32602` | 参数缺失 | 检查是否漏传 `biz_scene_instance_id` 或 `sse_client_id` 等必需参数 |
 | 返回 HTML | URL 错误 | 使用 `/mcps` 端点，不是 `/api/xxx` |
 | 连接超时 | 使用了不兼容的客户端库 | 避免使用 SSE 客户端库做初始化，使用标准 HTTP POST |
 | 场景拓扑或 `objects.yaml` 读取失败 | `hydros-engine-mdm` 未配置或未生效 | 回到配置文件检查 `hydros-engine-mdm` 是否存在、服务名是否正确、当前环境是否已加载 |
