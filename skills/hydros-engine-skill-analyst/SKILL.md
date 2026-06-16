@@ -95,35 +95,35 @@ Excel 还可能包含分水口/退水闸流量列（名称不固定，位于流�
 
 ## 阶段二：对象匹配
 
-MCP 仿真对象和 Excel Sheet（节制闸）之间的对应关系必须优先通过 **MDM 元数据** 建立，不能默认用静态映射表或直接用仿真对象名猜测。
+MCP 仿真对象和 Excel Sheet（节制闸）之间的对应关系必须优先通过 **Hydros MCP 元数据能力** 建立，不能默认用静态映射表或直接用仿真对象名猜测。
 
-### MDM 优先匹配逻辑
+### 元数据优先匹配逻辑
 
 对于每个历史 Excel Sheet：
 
 1. 从 Sheet 名提取闸站关键词，例如去掉 `倒虹吸出口节制闸`、`渡槽进口节制闸`、`节制闸` 等后缀。
-2. 调用 `hydros-engine-mdm.fetch_gate_info(waterway_id, station_name)` 查询闸站。
-3. 从 MDM 返回中读取：
+2. 调用当前 Hydros Engine MCP 暴露的 `fetch_gate_info(waterway_id, station_name)` 查询闸站。
+3. 从元数据返回中读取：
    - `station_front_section`：闸前断面
    - `station_back_section`：闸后断面
-4. 用 MDM 断面的 `object_id` 到仿真结果 Excel 中精确匹配 `object_id`。
+4. 用元数据断面的 `object_id` 到仿真结果 Excel 中精确匹配 `object_id`。
 5. 仿真侧按 `metrics_code` 读取 `water_level` / `water_flow`。
 6. 历史侧在同一个 Sheet 内优先精确读取 `闸前水位`、`闸后水位`、`流量`。
 
 **匹配规则（按优先级）：**
 
-1. **MDM object_id 精确匹配**：`station_front_section.object_id` / `station_back_section.object_id` 命中仿真结果 `object_id`，置信度最高。
-2. **MDM object_name 精确匹配**：当 ID 未命中时，用 MDM 断面名称匹配仿真结果 `object_name`。
+1. **元数据 object_id 精确匹配**：`station_front_section.object_id` / `station_back_section.object_id` 命中仿真结果 `object_id`，置信度最高。
+2. **元数据 object_name 精确匹配**：当 ID 未命中时，用元数据断面名称匹配仿真结果 `object_name`。
 3. **历史列名精确匹配**：默认读取 `闸前水位`、`闸后水位`、`流量`；只有精确列名不存在时，才允许用 `上游水位`、`下游水位`、`过闸流量` 等别名兜底。
-4. **失败显式输出**：MDM 查不到、断面缺失、仿真序列缺失或历史列缺失时，必须在报告的映射诊断表中写明状态和原因，不得静默套用旧映射。
+4. **失败显式输出**：元数据查不到、断面缺失、仿真序列缺失或历史列缺失时，必须在报告的映射诊断表中写明状态和原因，不得静默套用旧映射。
 
 ### 指标映射
 
 | Excel 列 | MCP metrics_code | 说明 |
 |----------|-----------------|------|
-| 闸前水位 | `water_level` | MDM `station_front_section` 的水位 |
-| 闸后水位 | `water_level` | MDM `station_back_section` 的水位 |
-| 流量 | `water_flow` | 默认使用 MDM `station_front_section` 的断面流量 |
+| 闸前水位 | `water_level` | 元数据 `station_front_section` 的水位 |
+| 闸后水位 | `water_level` | 元数据 `station_back_section` 的水位 |
+| 流量 | `water_flow` | 默认使用元数据 `station_front_section` 的断面流量 |
 | N号闸门开度 | `gate_opening` | 注意单位：Excel 可能是 mm，MCP 可能是 m |
 
 ### 展示与确认

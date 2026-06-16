@@ -27,13 +27,15 @@
 ```python
 # 调用 get_timeseries_data 启动结果导出任务
 # 轮询 get_export_status，直到状态为 COMPLETED
-# 通过标准 HTTP GET 从 resource_uri 或下载地址下载结果文件
+# 优先通过 MCP resources/read 读取 resource_uri
+# 只有明确给出可访问 HTTP 下载地址时，才通过标准 HTTP GET 下载结果文件
 # 落盘为本地 .csv 或 .xlsx 文件
 ```
 
 **元数据前置条件**：
-- 在进入场景建模元数据、拓扑或 `objects.yaml` 相关步骤前，先确认 `hydros-engine-mdm` 已配置可用。
-- 如果当前环境缺少 `hydros-engine-mdm`，直接报告“元数据前置条件不足”，不要跳过说明继续产出拓扑或纵剖面相关内容。
+- 在进入场景建模元数据、拓扑或 `objects.yaml` 相关步骤前，先确认当前 Hydros Engine MCP endpoint 已配置可用。
+- 当前生产环境使用统一 MCP URL `https://mcp.hydroos.pub/`，不再要求新客户端单独配置 `hydros-engine-mdm`。
+- 如果当前 MCP 工具集缺少拓扑或对象元数据能力，直接报告“元数据前置条件不足”，不要跳过说明继续产出拓扑或纵剖面相关内容。
 
 **建模文件兼容**：
 - 如果场景 YAML 或 `objects.yaml` 的远程地址包含中文路径，脚本层应先做 URL 编码规范化，再发起请求。
@@ -50,7 +52,7 @@
 - 如有不一致，在报告中单列说明
 - 如果 `get_export_status` 仍未完成，不要提前下载 Excel
 - 如果 `get_export_status` 返回 `FAILED`，直接视为导出链路失败，不要继续生成报告
-- 如果结果文件下载失败或落盘后校验不通过，直接视为下载链路失败，不要继续生成报告
+- 如果 `resource_uri` 读取、结果文件下载或落盘后校验不通过，直接视为结果获取链路失败，不要继续生成报告
 
 ### 2. 生成统计摘要
 
