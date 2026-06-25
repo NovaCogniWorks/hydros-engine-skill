@@ -1,0 +1,3207 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Hydros 仿真分析报告模板</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%231e5f86'/%3E%3Cpath d='M18 38c4-10 8-15 14-15s10 5 14 15' fill='none' stroke='white' stroke-width='5' stroke-linecap='round'/%3E%3Ccircle cx='32' cy='22' r='5' fill='white'/%3E%3C/svg%3E" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              reportBg: "#e8f0f2",
+              ink: "#102332",
+              panel: "#f8fbfc",
+              line: "#d8e5ea",
+              primary: "#185b75",
+              accent: "#0f8b8d",
+              success: "#1f7a57",
+              warning: "#ba7a1f",
+              danger: "#c23b38",
+              navy: "#0d2333",
+              foam: "#dff4f3",
+              sand: "#e8dcc8",
+            },
+            boxShadow: {
+              sheet: "0 28px 70px rgba(16, 35, 50, 0.14)",
+              float: "0 18px 40px rgba(15, 64, 88, 0.12)",
+            },
+          },
+        },
+      };
+    </script>
+    <style>
+      :root {
+        color-scheme: light;
+        --report-bg: #e8f0f2;
+        --report-bg-strong: #d9eaef;
+        --ink: #102332;
+        --ink-soft: rgba(16, 35, 50, 0.72);
+        --line: rgba(135, 166, 179, 0.32);
+        --primary: #185b75;
+        --accent: #0f8b8d;
+        --gold: #b48b45;
+        --panel: rgba(248, 251, 252, 0.88);
+        --panel-strong: rgba(255, 255, 255, 0.96);
+      }
+
+      html,
+      body {
+        min-height: 100%;
+        overflow-y: auto;
+        overscroll-behavior-y: auto;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      body {
+        font-family:
+          "Times New Roman",
+          "Noto Sans SC",
+          "PingFang SC",
+          "Hiragino Sans GB",
+          "Microsoft YaHei",
+          "SF Pro Text",
+          "Segoe UI",
+          "Helvetica Neue",
+          Arial,
+          sans-serif;
+        background:
+          radial-gradient(circle at top left, rgba(15, 139, 141, 0.16), transparent 30%),
+          radial-gradient(circle at top right, rgba(24, 91, 117, 0.18), transparent 28%),
+          linear-gradient(180deg, rgba(232, 240, 242, 0.9), rgba(221, 233, 237, 0.9)),
+          var(--report-bg);
+        text-rendering: optimizeLegibility;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+
+      .report-shell {
+        position: relative;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.84), rgba(248, 251, 252, 0.95)),
+          #ffffff;
+        backdrop-filter: blur(18px);
+        box-shadow:
+          0 28px 80px rgba(16, 35, 50, 0.14),
+          inset 0 1px 0 rgba(255, 255, 255, 0.7);
+      }
+
+      .report-shell::before,
+      .report-shell::after {
+        content: "";
+        position: absolute;
+        pointer-events: none;
+        z-index: 0;
+      }
+
+      .report-shell::before {
+        inset: 0 auto auto 0;
+        width: min(46vw, 560px);
+        height: 280px;
+        background:
+          radial-gradient(circle at 18% 24%, rgba(15, 139, 141, 0.18), transparent 38%),
+          linear-gradient(135deg, rgba(24, 91, 117, 0.12), transparent 72%);
+      }
+
+      .report-shell::after {
+        inset: 0;
+        background-image:
+          linear-gradient(rgba(24, 91, 117, 0.03) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(24, 91, 117, 0.03) 1px, transparent 1px);
+        background-size: 48px 48px;
+        mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.55), transparent 36%);
+      }
+
+      .report-shell > * {
+        position: relative;
+        z-index: 1;
+      }
+
+      h1,
+      h2,
+      h3 {
+        font-family:
+          "Times New Roman",
+          "Cormorant Garamond",
+          "Noto Serif SC",
+          "Songti SC",
+          "STSong",
+          Georgia,
+          serif;
+        letter-spacing: 0.01em;
+      }
+
+      code {
+        border-radius: 999px;
+        background: rgba(16, 35, 50, 0.06);
+        padding: 0.14rem 0.5rem;
+        font-size: 0.92em;
+      }
+
+      .hero-section {
+        background:
+          linear-gradient(135deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0)),
+          radial-gradient(circle at right bottom, rgba(180, 139, 69, 0.12), transparent 28%);
+      }
+
+      .section-shell {
+        border: 1px solid rgba(135, 166, 179, 0.25);
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(248, 251, 252, 0.94)),
+          var(--panel);
+        box-shadow:
+          0 16px 34px rgba(16, 35, 50, 0.07),
+          inset 0 1px 0 rgba(255, 255, 255, 0.72);
+      }
+
+      .section-shell-dark {
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        background:
+          radial-gradient(circle at top, rgba(18, 85, 110, 0.38), transparent 55%),
+          linear-gradient(180deg, rgba(13, 35, 51, 0.97), rgba(10, 26, 39, 0.96));
+        box-shadow: 0 18px 34px rgba(8, 18, 26, 0.22);
+      }
+
+      .soft-panel {
+        border: 1px solid rgba(135, 166, 179, 0.18);
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(244, 249, 250, 0.98)),
+          rgba(255, 255, 255, 0.92);
+      }
+
+      .hero-chip,
+      .filter-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        border-radius: 999px;
+        border: 1px solid rgba(135, 166, 179, 0.22);
+        background: rgba(255, 255, 255, 0.8);
+        padding: 0.52rem 0.95rem;
+        font-size: 0.78rem;
+        font-weight: 500;
+        line-height: 1;
+        color: rgba(16, 35, 50, 0.72);
+        box-shadow: 0 10px 24px rgba(16, 35, 50, 0.05);
+      }
+
+      .hero-chip::before,
+      .filter-chip::before {
+        content: "";
+        flex: 0 0 auto;
+        width: 0.45rem;
+        height: 0.45rem;
+        border-radius: 999px;
+        background: linear-gradient(135deg, var(--accent), var(--primary));
+        box-shadow: 0 0 0 4px rgba(15, 139, 141, 0.12);
+      }
+
+      .metric-card {
+        border: 1px solid rgba(135, 166, 179, 0.18);
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(245, 249, 250, 0.94)),
+          var(--panel-strong);
+        box-shadow: 0 16px 28px rgba(16, 35, 50, 0.07);
+      }
+
+      .headline-card {
+        position: relative;
+        overflow: hidden;
+        border: 1px solid rgba(135, 166, 179, 0.2);
+        background:
+          linear-gradient(160deg, rgba(255, 255, 255, 0.94), rgba(246, 250, 251, 0.96)),
+          var(--panel);
+      }
+
+      .headline-card::before {
+        content: "";
+        position: absolute;
+        inset: 0 0 auto;
+        height: 4px;
+        background: linear-gradient(90deg, var(--accent), var(--primary), rgba(180, 139, 69, 0.9));
+      }
+
+      .timeline-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        cursor: pointer;
+        transition:
+          transform 180ms ease,
+          background-color 180ms ease,
+          border-color 180ms ease,
+          color 180ms ease,
+          box-shadow 180ms ease;
+      }
+
+      .timeline-rate-control {
+        cursor: pointer;
+        transition:
+          transform 180ms ease,
+          background-color 180ms ease,
+          border-color 180ms ease,
+          color 180ms ease,
+          box-shadow 180ms ease;
+      }
+
+      .timeline-rate-select {
+        cursor: pointer;
+        appearance: none;
+        -webkit-appearance: none;
+        -moz-appearance: none;
+        text-align: center;
+        text-align-last: center;
+        background-image: none;
+      }
+
+      .timeline-rate-select-wrap {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        margin-left: 2px;
+        padding-left: 10px;
+        border-left: 1px solid rgba(24, 91, 117, 0.16);
+        cursor: pointer;
+        transition:
+          transform 180ms ease,
+          color 180ms ease,
+          opacity 180ms ease;
+      }
+
+      .timeline-rate-select-wrap:hover {
+        transform: translateY(-1px);
+      }
+
+      .timeline-rate-select-wrap:hover .timeline-rate-chevron {
+        transform: translateY(-1px) scale(1.06);
+        color: rgba(24, 91, 117, 0.96);
+      }
+
+      .timeline-rate-chevron {
+        pointer-events: none;
+        color: rgba(24, 91, 117, 0.72);
+        transition:
+          transform 180ms ease,
+          color 180ms ease;
+      }
+
+      .timeline-rate-label {
+        border: 0;
+        background: transparent;
+        color: inherit;
+        cursor: pointer;
+      }
+
+      .timeline-button:hover {
+        transform: translateY(-1px);
+      }
+
+      .timeline-rate-control:hover {
+        transform: translateY(-1px);
+      }
+
+      .timeline-button:focus-visible {
+        outline: 2px solid rgba(24, 91, 117, 0.36);
+        outline-offset: 2px;
+      }
+
+      .timeline-button[disabled] {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+
+      .table-shell thead th {
+        font-weight: 600;
+      }
+
+      .anomaly-table {
+        table-layout: fixed;
+      }
+
+      .table-shell tbody tr:nth-child(odd) {
+        background: rgba(248, 251, 252, 0.88);
+      }
+
+      .table-shell tbody tr:hover {
+        background: rgba(223, 244, 243, 0.46);
+      }
+
+      .anomaly-table th,
+      .anomaly-table td {
+        vertical-align: middle;
+        text-align: center;
+        white-space: normal;
+        word-break: break-word;
+        overflow-wrap: anywhere;
+      }
+
+      .anomaly-table th {
+        text-align: center;
+      }
+
+      .anomaly-table td > *,
+      .anomaly-table th > * {
+        margin-left: auto;
+        margin-right: auto;
+      }
+
+      .metric-pill {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        max-width: 100%;
+        white-space: normal;
+        text-align: center;
+      }
+
+      .chart-legend {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.75rem 1.25rem;
+        min-width: 0;
+      }
+
+      .chart-stage {
+        overflow: hidden;
+        min-width: 0;
+      }
+
+      .chart-canvas {
+        width: 100%;
+        min-width: 0;
+      }
+
+      .chart-canvas--wide {
+        height: clamp(320px, 46vw, 540px);
+      }
+
+      .chart-canvas--standard {
+        height: clamp(300px, 36vw, 440px);
+      }
+
+      .chart-canvas--compact {
+        height: clamp(260px, 30vw, 390px);
+      }
+
+      .chart-axis-label {
+        font-size: 0.875rem;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        color: rgba(16, 35, 50, 0.78);
+      }
+
+      .term-hint {
+        cursor: help;
+        text-decoration: underline dotted rgba(16, 35, 50, 0.28);
+        text-underline-offset: 0.16em;
+      }
+
+      .chart-axis-label-muted {
+        font-size: 0.8125rem;
+        font-weight: 500;
+        color: rgba(16, 35, 50, 0.52);
+      }
+
+      .curve-filter-panel {
+        width: 100%;
+        min-width: 0;
+      }
+
+      .curve-filter-row {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        width: 100%;
+        min-width: 0;
+      }
+
+      .curve-filter-row select {
+        width: min(240px, 36%);
+        min-width: 160px;
+      }
+
+      .curve-object-list {
+        width: 100%;
+        max-height: 220px;
+        overflow-y: auto;
+        display: grid;
+        gap: 0.55rem;
+        padding-right: 0.2rem;
+      }
+
+      .curve-object-card {
+        border: 1px solid rgba(135, 166, 179, 0.22);
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.68);
+        padding: 0.7rem;
+      }
+
+      .curve-object-title {
+        min-width: 0;
+        flex: 1;
+        white-space: normal;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+        line-height: 1.45;
+      }
+
+      .curve-child-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem;
+        margin-top: 0.55rem;
+      }
+
+      .curve-child-list .filter-chip {
+        max-width: 100%;
+        white-space: normal;
+        align-items: center;
+        line-height: 1.35;
+      }
+
+      .curve-child-list .filter-chip span {
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+
+      .curve-search-input {
+        width: 100%;
+        border: 1px solid rgba(135, 166, 179, 0.28);
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.78);
+        padding: 0.45rem 0.75rem;
+        font-size: 0.78rem;
+        color: rgba(16, 35, 50, 0.78);
+        outline: none;
+      }
+
+      .curve-search-input:focus {
+        border-color: rgba(24, 91, 117, 0.58);
+        box-shadow: 0 0 0 3px rgba(24, 91, 117, 0.1);
+      }
+
+      .curve-select-menu {
+        position: relative;
+        flex-shrink: 0;
+      }
+
+      .curve-select-all-button {
+        flex-shrink: 0;
+        border: 1px solid rgba(24, 91, 117, 0.24);
+        border-radius: 999px;
+        background: rgba(24, 91, 117, 0.08);
+        padding: 0.45rem 0.85rem;
+        font-size: 0.78rem;
+        font-weight: 650;
+        color: rgba(24, 91, 117, 0.92);
+        transition:
+          background-color 160ms ease,
+          border-color 160ms ease,
+          color 160ms ease;
+      }
+
+      .curve-select-all-button:hover {
+        border-color: rgba(24, 91, 117, 0.42);
+        background: rgba(24, 91, 117, 0.14);
+        color: rgba(16, 64, 84, 0.98);
+      }
+
+      .curve-select-options {
+        position: absolute;
+        top: calc(100% - 1px);
+        right: 0;
+        z-index: 30;
+        min-width: 180px;
+        display: none;
+        overflow: hidden;
+        border: 1px solid rgba(135, 166, 179, 0.24);
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.98);
+        box-shadow: 0 16px 38px rgba(16, 35, 50, 0.16);
+      }
+
+      .curve-select-menu:hover .curve-select-options,
+      .curve-select-menu:focus-within .curve-select-options {
+        display: grid;
+      }
+
+      .curve-select-option {
+        width: 100%;
+        padding: 0.62rem 0.8rem;
+        text-align: left;
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: rgba(16, 35, 50, 0.72);
+      }
+
+      .curve-select-option:hover {
+        background: rgba(24, 91, 117, 0.08);
+        color: rgba(16, 64, 84, 0.98);
+      }
+
+      .curve-select-option:disabled {
+        cursor: not-allowed;
+        color: rgba(16, 35, 50, 0.32);
+        background: transparent;
+      }
+
+      @media (max-width: 640px) {
+        .curve-filter-row {
+          flex-direction: column;
+          align-items: stretch;
+        }
+
+        .curve-filter-row select {
+          width: 100%;
+          min-width: 0;
+        }
+
+        .curve-select-menu,
+        .curve-select-all-button {
+          width: 100%;
+        }
+
+        .curve-select-options {
+          left: 0;
+          right: 0;
+        }
+      }
+
+      .curve-empty-state {
+        border: 1px dashed rgba(135, 166, 179, 0.42);
+        border-radius: 16px;
+        padding: 0.9rem;
+        text-align: center;
+        font-size: 0.78rem;
+        color: rgba(16, 35, 50, 0.5);
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation: none !important;
+          transition: none !important;
+          scroll-behavior: auto !important;
+        }
+      }
+
+      @media (max-width: 820px) {
+        .report-shell {
+          border-radius: 28px;
+        }
+
+        .section-shell,
+        .section-shell-dark {
+          border-radius: 24px;
+        }
+
+        .table-shell {
+          overflow: visible;
+          background: transparent;
+          border-color: transparent;
+          box-shadow: none;
+        }
+
+        .anomaly-table,
+        .anomaly-table tbody,
+        .anomaly-table tr,
+        .anomaly-table td {
+          display: block;
+          width: 100%;
+        }
+
+        .anomaly-table thead {
+          display: none;
+        }
+
+        .anomaly-table tbody {
+          display: grid;
+          gap: 14px;
+          background: transparent;
+        }
+
+        .anomaly-table tr {
+          border: 1px solid rgba(135, 166, 179, 0.24);
+          border-radius: 22px;
+          background:
+            linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(247, 250, 251, 0.96)),
+            rgba(255, 255, 255, 0.94);
+          box-shadow: 0 14px 28px rgba(16, 35, 50, 0.06);
+          padding: 16px;
+        }
+
+        .anomaly-table td {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 14px;
+          padding: 0;
+          border: 0;
+          text-align: center;
+        }
+
+        .anomaly-table td + td {
+          margin-top: 12px;
+        }
+
+        .anomaly-table td::before {
+          content: attr(data-label);
+          flex: none;
+          min-width: 0;
+          font-size: 11px;
+          font-weight: 700;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          color: rgba(16, 35, 50, 0.48);
+          text-align: center;
+        }
+
+        .anomaly-table td[data-label="现象"],
+        .anomaly-table td[data-label="建议"] {
+          align-items: center;
+          gap: 6px;
+        }
+
+        .anomaly-table td[data-label="现象"]::before,
+        .anomaly-table td[data-label="建议"]::before {
+          flex: none;
+          min-width: 0;
+        }
+
+        .anomaly-table .metric-pill {
+          max-width: 100%;
+        }
+
+        .chart-canvas--wide {
+          height: clamp(280px, 68vw, 420px);
+        }
+
+        .chart-canvas--standard {
+          height: clamp(260px, 64vw, 380px);
+        }
+
+        .chart-canvas--compact {
+          height: clamp(240px, 56vw, 340px);
+        }
+      }
+    </style>
+  </head>
+  <body class="min-h-screen text-ink">
+    <div class="mx-auto max-w-[1440px] px-4 py-6 lg:px-8 lg:py-8">
+      <main class="report-shell overflow-hidden rounded-[36px] border border-white/80 shadow-sheet">
+        <section class="hero-section border-b border-line/80 px-6 py-8 lg:px-10 lg:py-10">
+          <div>
+            <div class="flex min-w-0 w-full flex-col justify-between">
+              <h1 id="reportTitle" class="mt-5 max-w-full break-words text-center text-[2.35rem] font-semibold tracking-[0.01em] text-ink lg:text-[3.6rem] lg:leading-[0.98]">水力仿真结果分析报告</h1>
+            </div>
+          </div>
+        </section>
+
+        <section id="headlineCards" class="grid gap-4 border-b border-line/80 bg-white/36 px-6 py-6 lg:grid-cols-4 lg:px-10"></section>
+
+        <section class="grid gap-6 px-6 py-8 lg:grid-cols-[minmax(0,1fr)_minmax(280px,360px)] xl:grid-cols-[minmax(0,1.3fr)_360px] lg:px-10">
+            <article class="section-shell min-w-0 rounded-[30px] p-5 lg:col-start-1 lg:row-start-1">
+              <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <h2 class="mt-2 text-2xl font-semibold">执行摘要</h2>
+                </div>
+                <span id="summaryBadge" class="inline-flex w-fit rounded-full border border-primary/12 bg-primary/8 px-4 py-2 text-base font-medium text-primary"></span>
+              </div>
+              <div class="soft-panel mt-5 rounded-[24px] px-5 py-5">
+                <div id="summaryParagraph" class="space-y-4 text-base leading-7 text-ink/76"></div>
+              </div>
+              <div class="mt-6">
+                <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                  <div>
+                    <h2 class="mt-2 text-2xl font-semibold">关键发现</h2>
+                  </div>
+                </div>
+                <div class="soft-panel mt-5 rounded-[24px] px-5 py-5">
+                  <ol class="grid gap-3 lg:grid-cols-2" id="summaryBullets"></ol>
+                </div>
+              </div>
+            </article>
+
+            <article id="longitudinalSection" class="section-shell min-w-0 rounded-[30px] p-5 lg:col-span-2 lg:col-start-1 lg:row-start-2">
+                <div>
+                <h2 class="mt-2 text-2xl font-semibold">渠道纵剖面</h2>
+                <p class="mt-2 text-sm text-ink/58">叠加断面顶高程、底高程、水体填充、闸站位置、相关对象与流向</p>
+              </div>
+              <div class="soft-panel mt-4 rounded-[24px] px-4 py-4">
+                <div class="flex flex-col gap-4 lg:flex-row lg:items-center">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <button id="timelinePlay" class="timeline-button rounded-full bg-primary px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-primary/92">播放</button>
+                    <button id="timelinePause" class="timeline-button rounded-full border border-line bg-white px-4 py-2 text-sm font-medium text-ink/78 hover:bg-slate-50">暂停</button>
+                    <button id="timelineResume" class="timeline-button rounded-full border border-line bg-white px-4 py-2 text-sm font-medium text-ink/78 hover:bg-slate-50">继续</button>
+                    <div class="timeline-rate-control inline-flex items-center justify-center gap-2 rounded-full border border-line bg-white px-3 py-2 text-sm text-ink/72 shadow-sm" role="group" aria-label="倍速控制">
+                      <button id="timelineRateLabel" type="button" class="timeline-rate-label inline-flex items-center justify-center rounded-full px-0 py-0 text-sm">
+                        倍速
+                      </button>
+                      <span id="timelineRateSelectWrap" class="timeline-rate-select-wrap" title="点这里展开下拉选择">
+                        <select id="timelineRate" class="timeline-rate-select rounded-full border-0 bg-transparent pr-1 text-sm font-medium text-primary focus:outline-none">
+                          <option value="0.5">0.5x</option>
+                          <option value="1" selected>1x</option>
+                          <option value="2">2x</option>
+                          <option value="4">4x</option>
+                        </select>
+                        <svg class="timeline-rate-chevron h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                          <path d="M4 6.5L8 10L12 6.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+                        </svg>
+                      </span>
+                    </div>
+                  </div>
+                  <div class="min-w-0 flex-1">
+                    <div class="mb-2 flex items-center justify-between gap-3 text-sm text-ink/62">
+                      <span id="timelineStatus">已暂停</span>
+                      <div class="flex items-center gap-3">
+                        <span id="timelineCurrentMeta" class="text-xs text-ink/58">沿程水头损失 -</span>
+                        <span id="timelineCurrentStep" class="font-medium text-primary term-hint" title="data_index">当前展示步 -/-</span>
+                      </div>
+                    </div>
+                    <input id="timelineSlider" type="range" min="0" max="0" value="0" class="h-2 w-full cursor-pointer appearance-none rounded-full bg-primary/18 accent-primary" />
+                  </div>
+                </div>
+              </div>
+              <div class="mt-5 space-y-5">
+                <div class="p-0">
+                  <div class="chart-stage relative px-0 py-0">
+                    <details id="longitudinalSectionErrorPanel" class="absolute right-4 top-4 z-20 w-[min(360px,calc(100%-2rem))] rounded-[8px] border border-red-700/20 bg-white/96 text-red-900 shadow-lg backdrop-blur" hidden>
+                      <summary class="cursor-pointer list-none px-3 py-2 text-xs font-semibold [&::-webkit-details-marker]:hidden">
+                        剖面数据错误 <span id="longitudinalSectionErrorCount">0</span>
+                      </summary>
+                      <div id="longitudinalSectionErrorList" class="max-h-56 overflow-auto border-t border-red-700/15 px-3 py-2 text-xs leading-6"></div>
+                    </details>
+                    <div id="longitudinalChart" class="chart-canvas chart-canvas--wide"></div>
+                  </div>
+                </div>
+                <div class="grid gap-4 lg:grid-cols-2">
+                  <div class="soft-panel rounded-[24px] px-5 py-5">
+                    <h3 class="text-base font-semibold">纵剖面解读</h3>
+                    <p id="longitudinalSummary" class="mt-3 text-sm leading-7 text-ink/72"></p>
+                  </div>
+                  <div class="soft-panel rounded-[24px] px-5 py-5">
+                    <h3 class="text-base font-semibold">关键观察</h3>
+                    <div id="longitudinalHighlights" class="mt-3 space-y-3 text-sm text-ink/72"></div>
+                  </div>
+                </div>
+              </div>
+            </article>
+
+            <article class="section-shell min-w-0 rounded-[30px] p-5 lg:col-span-2 lg:col-start-1 lg:row-start-3">
+              <div>
+                <h2 class="mt-2 text-2xl font-semibold">结果曲线</h2>
+                <p class="mt-2 text-sm text-ink/58">
+                  展示全部
+                  <span class="term-hint" title="water_level">水位</span>、
+                  <span class="term-hint" title="water_flow">流量</span>、
+                  <span class="term-hint" title="gate_opening">闸门开度</span>
+                  序列
+                </p>
+              </div>
+              <div class="mt-5 space-y-5">
+                <div class="soft-panel rounded-[24px] p-4">
+                  <h3 id="levelCardTitle" class="text-base font-semibold">关键断面水位时序</h3>
+                  <p id="levelCardDesc" class="mt-1 text-sm text-ink/62">对比上中游代表断面，观察抬升斜率和同步性。</p>
+                  <div class="curve-filter-panel mt-2 flex flex-col gap-2">
+                    <div class="curve-filter-row">
+                      <select id="levelTypeSelect" class="shrink-0 rounded-lg border border-line px-3 py-1.5 text-xs text-ink/72 focus:outline-primary"></select>
+                      <input id="levelSearchInput" class="curve-search-input" type="search" placeholder="搜索渠道、闸站、倒虹吸、分水口、断面或设备" />
+                      <div class="curve-select-menu">
+                        <button id="levelSelectAll" type="button" class="curve-select-all-button">全选</button>
+                        <div class="curve-select-options" role="menu" aria-label="水位曲线批量选择">
+                          <button type="button" class="curve-select-option" data-select-scope="all">全选</button>
+                          <button type="button" class="curve-select-option" data-select-scope="inlet">全选入口侧断面</button>
+                          <button type="button" class="curve-select-option" data-select-scope="outlet">全选出口侧断面</button>
+                        </div>
+                      </div>
+                    </div>
+                    <div id="levelObjectList" class="curve-object-list"></div>
+                  </div>
+                  <div id="levelChart" class="chart-canvas chart-canvas--standard mt-2"></div>
+                  <div id="levelInterpretation" class="soft-panel mt-3 rounded-[18px] px-4 py-3 text-sm leading-7 text-ink/72"></div>
+                </div>
+                <div class="soft-panel rounded-[24px] p-4">
+                  <h3 id="flowCardTitle" class="text-base font-semibold">流量时序</h3>
+                  <p id="flowCardDesc" class="mt-1 text-sm text-ink/62">保留 0 参考线，突出连续负流量区段。</p>
+                  <div class="curve-filter-panel mt-2 flex flex-col gap-2">
+                    <div class="curve-filter-row">
+                      <select id="flowTypeSelect" class="shrink-0 rounded-lg border border-line px-3 py-1.5 text-xs text-ink/72 focus:outline-primary"></select>
+                      <input id="flowSearchInput" class="curve-search-input" type="search" placeholder="搜索渠道、闸站、倒虹吸、分水口、断面或设备" />
+                      <div class="curve-select-menu">
+                        <button id="flowSelectAll" type="button" class="curve-select-all-button">全选</button>
+                        <div class="curve-select-options" role="menu" aria-label="流量曲线批量选择">
+                          <button type="button" class="curve-select-option" data-select-scope="all">全选</button>
+                          <button type="button" class="curve-select-option" data-select-scope="inlet">全选入口侧断面</button>
+                          <button type="button" class="curve-select-option" data-select-scope="outlet">全选出口侧断面</button>
+                        </div>
+                      </div>
+                    </div>
+                    <div id="flowObjectList" class="curve-object-list"></div>
+                  </div>
+                  <div id="flowChart" class="chart-canvas chart-canvas--standard mt-2"></div>
+                  <div id="flowInterpretation" class="soft-panel mt-3 rounded-[18px] px-4 py-3 text-sm leading-7 text-ink/72"></div>
+                </div>
+                <div class="soft-panel rounded-[24px] p-4">
+                  <h3 id="gateCardTitle" class="text-base font-semibold">闸门开度响应</h3>
+                  <p id="gateCardDesc" class="mt-1 text-sm text-ink/62">查看闸门控制策略是否存在滞后或平台期。</p>
+                  <div class="curve-filter-panel mt-2 flex flex-col gap-2">
+                    <div class="curve-filter-row">
+                      <select id="gateTypeSelect" class="shrink-0 rounded-lg border border-line px-3 py-1.5 text-xs text-ink/72 focus:outline-primary"></select>
+                      <input id="gateSearchInput" class="curve-search-input" type="search" placeholder="搜索闸站、闸门设备或编号" />
+                      <div class="curve-select-menu">
+                        <button id="gateSelectAll" type="button" class="curve-select-all-button">全选</button>
+                        <div class="curve-select-options" role="menu" aria-label="闸门曲线批量选择">
+                          <button type="button" class="curve-select-option" data-select-scope="all">全选</button>
+                          <button type="button" class="curve-select-option" data-select-scope="inlet">全选入口侧断面</button>
+                          <button type="button" class="curve-select-option" data-select-scope="outlet">全选出口侧断面</button>
+                        </div>
+                      </div>
+                    </div>
+                    <div id="gateObjectList" class="curve-object-list"></div>
+                  </div>
+                  <div id="gateChart" class="chart-canvas chart-canvas--compact mt-2"></div>
+                  <div id="gateInterpretation" class="soft-panel mt-3 rounded-[18px] px-4 py-3 text-sm leading-7 text-ink/72"></div>
+                </div>
+              </div>
+            </article>
+
+            <article class="section-shell min-w-0 rounded-[30px] p-5 lg:col-span-2 lg:col-start-1 lg:row-start-4">
+              <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <h2 class="mt-2 text-2xl font-semibold">异常与建议</h2>
+                </div>
+                <p class="text-sm text-ink/58">按问题严重度排序</p>
+              </div>
+              <div class="table-shell mt-5 overflow-x-auto rounded-[24px] border border-line bg-white/90">
+                <table class="anomaly-table min-w-full divide-y divide-line text-left text-sm">
+                  <thead class="bg-slate-50/90 text-xs uppercase tracking-[0.18em] text-ink/56">
+                    <tr>
+                      <th class="px-4 py-3">序号</th>
+                      <th class="px-4 py-3">优先级</th>
+                      <th class="px-4 py-3">对象</th>
+                      <th class="px-4 py-3">指标</th>
+                      <th class="px-4 py-3">现象</th>
+                      <th class="px-4 py-3">建议</th>
+                    </tr>
+                  </thead>
+                  <tbody id="anomalyTable" class="divide-y divide-line bg-white"></tbody>
+                </table>
+              </div>
+            </article>
+          <aside class="min-w-0 space-y-6 lg:col-start-2 lg:row-start-1">
+            <article class="section-shell-dark rounded-[30px] px-5 py-5 text-white">
+              <p class="text-sm font-semibold uppercase tracking-[0.2em] text-white/62">任务概览</p>
+              <dl class="mt-4 space-y-3 text-base" id="snapshotPanel"></dl>
+            </article>
+
+            <article class="section-shell rounded-[30px] p-5">
+              <div class="flex flex-wrap gap-2" id="asideTabButtons">
+                <button
+                  type="button"
+                  data-aside-panel="risk"
+                  class="aside-tab-button rounded-full border border-line bg-primary px-4 py-2 text-sm font-medium text-white shadow-sm"
+                >风险等级</button>
+                <button
+                  type="button"
+                  data-aside-panel="actions"
+                  class="aside-tab-button rounded-full border border-line bg-white px-4 py-2 text-sm font-medium text-ink/76"
+                >后续建议动作</button>
+                <button
+                  type="button"
+                  data-aside-panel="samples"
+                  class="aside-tab-button rounded-full border border-line bg-white px-4 py-2 text-sm font-medium text-ink/76"
+                >样本明细</button>
+              </div>
+
+              <div class="mt-4">
+                <section data-aside-content="risk" class="aside-panel-content space-y-3">
+                  <div id="riskBars" class="space-y-3"></div>
+                </section>
+
+                <section data-aside-content="actions" class="aside-panel-content hidden">
+                  <ol class="space-y-3 text-sm leading-7 text-ink/76" id="actionList"></ol>
+                </section>
+
+                <section data-aside-content="samples" class="aside-panel-content hidden">
+                  <div class="space-y-3 text-sm" id="miniTable"></div>
+                </section>
+              </div>
+            </article>
+          </aside>
+        </section>
+      </main>
+    </div>
+
+    <script>
+      async function loadReportData() {
+        if (window.HYDROS_REPORT_DATA) {
+          return window.HYDROS_REPORT_DATA;
+        }
+
+        const candidates = ["./report.data.js", "../data/report.data.js"];
+
+        for (const src of candidates) {
+          try {
+            await new Promise((resolve, reject) => {
+              const script = document.createElement("script");
+              script.src = src;
+              script.async = true;
+              script.onload = resolve;
+              script.onerror = reject;
+              document.head.appendChild(script);
+            });
+
+            if (window.HYDROS_REPORT_DATA) {
+              return window.HYDROS_REPORT_DATA;
+            }
+          } catch (error) {
+            // Fall back to the next known location.
+          }
+        }
+
+        throw new Error("HYDROS_REPORT_DATA 未加载，请确认 report.data.js 位于当前目录或上级 data 目录。");
+      }
+
+      (async function initReport() {
+      const reportData = await loadReportData();
+
+      function basename(filePath) {
+        return String(filePath || "").split("/").pop() || "";
+      }
+
+      function formatStepLabel(step) {
+        const totalSteps = reportData.meta?.total_steps ?? "-";
+        return step == null ? `步长 -/${totalSteps}` : `步长 ${step}/${totalSteps}`;
+      }
+
+      function collectNumericValues(items) {
+        return items
+          .flatMap((item) => Array.isArray(item) ? item : [item])
+          .map((value) => Number(value))
+          .filter((value) => Number.isFinite(value));
+      }
+
+      function computeAxisBounds(values, options = {}) {
+        const numericValues = collectNumericValues(values);
+        if (!numericValues.length) {
+          return { min: null, max: null };
+        }
+
+        const rawMin = Math.min(...numericValues);
+        const rawMax = Math.max(...numericValues);
+        const span = rawMax - rawMin;
+        const minPadding = options.minPadding ?? 0.05;
+        const paddingRatio = options.paddingRatio ?? 0.12;
+        const padding = span === 0 ? minPadding : Math.max(span * paddingRatio, minPadding);
+
+        return {
+          min: Number((rawMin - padding).toFixed(3)),
+          max: Number((rawMax + padding).toFixed(3)),
+        };
+      }
+
+      function computeAxisExtent(values) {
+        const numericValues = collectNumericValues(values);
+        if (!numericValues.length) {
+          return { min: null, max: null };
+        }
+        return {
+          min: Number(Math.min(...numericValues).toFixed(3)),
+          max: Number(Math.max(...numericValues).toFixed(3)),
+        };
+      }
+
+      function normalizeStepValue(value) {
+        if (typeof value === "number") return value;
+        const match = String(value ?? "").match(/-?\d+(?:\.\d+)?/);
+        return match ? Number(match[0]) : null;
+      }
+
+      function parseReportDateTime(value) {
+        if (!value) return null;
+        const normalized = String(value).trim().replace(" ", "T");
+        const timestamp = Date.parse(normalized);
+        return Number.isFinite(timestamp) ? new Date(timestamp) : null;
+      }
+
+      function formatDateTimeValue(date) {
+        if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
+        const pad = (value) => String(value).padStart(2, "0");
+        return [
+          date.getFullYear(),
+          pad(date.getMonth() + 1),
+          pad(date.getDate()),
+        ].join("-") + ` ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+      }
+
+      function formatAxisTooltipTitle(axisValue) {
+        const step = normalizeStepValue(axisValue);
+        const startTime = parseReportDateTime(reportData.meta?.simulation_start_time);
+        const outputStepSeconds = Number(reportData.meta?.output_step_size);
+        if (!Number.isFinite(step)) return `步长 ${axisValue ?? "-"}`;
+        if (!startTime || !Number.isFinite(outputStepSeconds)) return `步长 ${step}`;
+        const currentTime = new Date(startTime.getTime() + step * outputStepSeconds * 1000);
+        return `步长 ${step}｜${formatDateTimeValue(currentTime)}`;
+      }
+
+      function formatStepTimeLabel(step) {
+        const stepLabel = formatStepLabel(step);
+        const startTime = parseReportDateTime(reportData.meta?.simulation_start_time);
+        const outputStepSeconds = Number(reportData.meta?.output_step_size);
+        const numericStep = normalizeStepValue(step);
+        if (!startTime || !Number.isFinite(outputStepSeconds) || !Number.isFinite(numericStep)) {
+          return stepLabel;
+        }
+        const currentTime = new Date(startTime.getTime() + numericStep * outputStepSeconds * 1000);
+        return `${stepLabel}｜${formatDateTimeValue(currentTime)}`;
+      }
+
+      const chartTheme = {
+        text: "#486581",
+        textSoft: "#6f8798",
+        grid: "#d7e3ea",
+        gridStrong: "rgba(24, 91, 117, 0.08)",
+        crosshair: "#8aa4b8",
+        water: "#1c7fb5",
+        waterFill: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: "rgba(28, 127, 181, 0.24)" },
+          { offset: 1, color: "rgba(28, 127, 181, 0.06)" },
+        ]),
+        bed: "#87603d",
+        bedFill: "rgba(135, 96, 61, 0.16)",
+        crest: "#637487",
+        gate: "#111827",
+        plotBackground: "rgba(244, 249, 250, 0.72)",
+        panelFill: "rgba(255, 255, 255, 0.92)",
+        panelStroke: "rgba(135, 166, 179, 0.32)",
+      };
+
+      const termLabels = {
+        water_level: "水位",
+        water_flow: "流量",
+        gate_opening: "闸门开度",
+        data_index: "采样时间步",
+        step_index: "计算时间步",
+        source_time: "源业务时间",
+      };
+      const termKeys = Object.keys(termLabels).sort((a, b) => b.length - a.length);
+
+      function escapeRegExp(value) {
+        return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+      }
+
+      function formatLongitudinalProfileErrorDetail(item) {
+        if (item.section_name) {
+          return `里程 ${Number(item.location).toFixed(3)} km，顶高程 ${escapeHtml(item.top_elevation)} m，底高程 ${escapeHtml(item.bottom_elevation)} m`;
+        }
+        if (item.inlet_section_name || item.outlet_section_name) {
+          const inletLocation = item.inlet_location == null ? "无" : `${Number(item.inlet_location).toFixed(3)} km`;
+          const outletLocation = item.outlet_location == null ? "无" : `${Number(item.outlet_location).toFixed(3)} km`;
+          return `闸前 ${escapeHtml(item.inlet_section_name || "-")}，里程 ${inletLocation}；闸后 ${escapeHtml(item.outlet_section_name || "-")}，里程 ${outletLocation}`;
+        }
+        const startLocation = item.start_location == null ? "无" : `${Number(item.start_location).toFixed(3)} km`;
+        const endLocation = item.end_location == null ? "无" : `${Number(item.end_location).toFixed(3)} km`;
+        return `范围 ${escapeHtml(item.start_section_name || "-")} → ${escapeHtml(item.end_section_name || "-")}，起点里程 ${startLocation}，终点里程 ${endLocation}`;
+      }
+
+      function renderLongitudinalSectionErrors(errors = []) {
+        const panel = document.getElementById("longitudinalSectionErrorPanel");
+        const count = document.getElementById("longitudinalSectionErrorCount");
+        const list = document.getElementById("longitudinalSectionErrorList");
+        if (!panel || !count || !list) return;
+        if (!errors.length) {
+          panel.hidden = true;
+          count.textContent = "0";
+          list.innerHTML = "";
+          return;
+        }
+        panel.hidden = false;
+        count.textContent = String(errors.length);
+        list.innerHTML = errors
+          .map(
+            (item) => `
+              <div class="py-1">
+                <strong>${escapeHtml(item.section_name || item.object_name)}</strong><br>
+                ${formatLongitudinalProfileErrorDetail(item)}<br>
+                ${escapeHtml(item.message)}
+              </div>
+            `
+          )
+          .join("");
+      }
+
+      function localizedTermLabel(term) {
+        return termLabels[term] || term;
+      }
+
+      function localizeTermText(text) {
+        let html = escapeHtml(text);
+        termKeys.forEach((term) => {
+          html = html.replace(
+            new RegExp(escapeRegExp(term), "g"),
+            `<span class="term-hint" title="${term}">${localizedTermLabel(term)}</span>`
+          );
+        });
+        return html;
+      }
+
+      const chartRegistry = [];
+      let chartResizeFrame = null;
+      const chartResizeObserver =
+        typeof ResizeObserver !== "undefined"
+          ? new ResizeObserver(() => scheduleChartResize())
+          : null;
+
+      function createChart(elementId) {
+        return echarts.init(document.getElementById(elementId), null, {
+          renderer: "canvas",
+          useDirtyRect: true,
+          devicePixelRatio: Math.min(window.devicePixelRatio || 1, 2),
+        });
+      }
+
+      function registerChart(chart, elementId, onResize) {
+        const element = document.getElementById(elementId);
+        if (element && chartResizeObserver) {
+          chartResizeObserver.observe(element);
+        }
+        chartRegistry.push({ chart, onResize });
+        return chart;
+      }
+
+      function scheduleChartResize() {
+        if (chartResizeFrame) {
+          cancelAnimationFrame(chartResizeFrame);
+        }
+        chartResizeFrame = window.requestAnimationFrame(() => {
+          chartRegistry.forEach(({ chart, onResize }) => {
+            chart.resize();
+            onResize?.();
+          });
+        });
+      }
+
+      window.addEventListener("resize", scheduleChartResize, { passive: true });
+      window.addEventListener("orientationchange", scheduleChartResize, { passive: true });
+      window.addEventListener("transitionend", scheduleChartResize, { passive: true });
+      window.visualViewport?.addEventListener("resize", scheduleChartResize, { passive: true });
+
+      const interactionState = {
+        steps: (
+          reportData.longitudinalProfile?.stepValues?.length
+            ? reportData.longitudinalProfile.stepValues
+            : reportData.analysisSummary?.step_values || []
+        ).map((step) => Number(step)),
+        currentStep: null,
+        playing: false,
+        timer: null,
+        scrubbing: false,
+        playbackRate: 1,
+        api: {},
+      };
+
+      interactionState.currentStep = interactionState.steps.at(-1) ?? null;
+
+      function updateTimelineUI() {
+        const steps = interactionState.steps;
+        const currentIndex = Math.max(0, steps.indexOf(interactionState.currentStep));
+        const slider = document.getElementById("timelineSlider");
+        const currentLabel = document.getElementById("timelineCurrentStep");
+        const statusLabel = document.getElementById("timelineStatus");
+
+        if (slider) {
+          slider.max = String(Math.max(0, steps.length - 1));
+          slider.value = String(currentIndex);
+        }
+        if (currentLabel) {
+          currentLabel.textContent = formatStepTimeLabel(interactionState.currentStep);
+          currentLabel.title = "步长按仿真开始时间 + 步长 × 输出步长折算";
+        }
+        const currentMeta = document.getElementById("timelineCurrentMeta");
+        if (currentMeta && !currentMeta.textContent.trim()) {
+          currentMeta.textContent = "沿程水头损失 -";
+        }
+        if (statusLabel) {
+          statusLabel.textContent = interactionState.playing
+            ? `播放中 · ${interactionState.playbackRate}x`
+            : `已暂停 · ${interactionState.playbackRate}x`;
+        }
+      }
+
+      function getPlaybackInterval() {
+        const safeRate = Math.max(0.25, Number(interactionState.playbackRate) || 1);
+        return Math.max(180, Math.round(900 / safeRate));
+      }
+
+      function stopPlayback() {
+        if (interactionState.timer) {
+          clearInterval(interactionState.timer);
+          interactionState.timer = null;
+        }
+        interactionState.playing = false;
+        updateTimelineUI();
+      }
+
+      function setCurrentStep(step) {
+        interactionState.currentStep = Number(step);
+        updateTimelineUI();
+        interactionState.api.updateLongitudinal?.(interactionState.currentStep);
+        interactionState.api.updateLevelChart?.(interactionState.currentStep);
+        interactionState.api.updateFlowChart?.(interactionState.currentStep);
+        interactionState.api.updateGateChart?.(interactionState.currentStep);
+      }
+
+      function setCurrentStepByIndex(index) {
+        const steps = interactionState.steps;
+        if (!steps.length) return;
+        const safeIndex = Math.max(0, Math.min(steps.length - 1, Number(index) || 0));
+        setCurrentStep(steps[safeIndex]);
+      }
+
+      function advanceStep() {
+        const steps = interactionState.steps;
+        const currentIndex = steps.indexOf(interactionState.currentStep);
+        if (currentIndex >= steps.length - 1) {
+          stopPlayback();
+          return;
+        }
+        setCurrentStep(steps[currentIndex + 1]);
+      }
+
+      function startPlayback(restart = false) {
+        if (!interactionState.steps.length) return;
+        if (restart || interactionState.currentStep == null || interactionState.currentStep === interactionState.steps.at(-1)) {
+          setCurrentStep(interactionState.steps[0]);
+        }
+        stopPlayback();
+        interactionState.playing = true;
+        updateTimelineUI();
+        interactionState.timer = window.setInterval(advanceStep, getPlaybackInterval());
+      }
+
+      function setPlaybackRate(rate) {
+        interactionState.playbackRate = Math.max(0.25, Number(rate) || 1);
+        const rateSelect = document.getElementById("timelineRate");
+        if (rateSelect) {
+          rateSelect.value = String(interactionState.playbackRate);
+        }
+        if (interactionState.playing) {
+          clearInterval(interactionState.timer);
+          interactionState.timer = window.setInterval(advanceStep, getPlaybackInterval());
+        }
+        updateTimelineUI();
+      }
+
+      function renderHeader() {
+        document.title = `${reportData.meta.report_title} - Hydros 仿真分析报告`;
+        document.getElementById("reportTitle").textContent = reportData.meta.report_title;
+        document.getElementById("summaryBadge").textContent = `共 ${reportData.meta.record_count.toLocaleString("zh-CN")} 条记录`;
+        const summaryParagraphs = Array.isArray(reportData.summaryParagraphs) && reportData.summaryParagraphs.length
+          ? reportData.summaryParagraphs
+          : [reportData.summaryParagraph].filter(Boolean);
+        document.getElementById("summaryParagraph").innerHTML = summaryParagraphs
+          .map((text) => `<p>${localizeTermText(text)}</p>`)
+          .join("");
+      }
+
+      function renderHeadlineCards() {
+        const tones = ["text-primary", "text-danger", "text-success", "text-warning"];
+        document.getElementById("headlineCards").innerHTML = reportData.headlineCards
+          .map(
+            (card, index) => `
+              <article class="headline-card flex min-h-[220px] flex-col justify-center rounded-[26px] px-5 py-5 shadow-sm">
+                <h2 class="text-center text-[1.55rem] leading-none font-semibold ${tones[index] || "text-ink"}">${card.title}</h2>
+                <div class="mt-3 flex flex-1 items-center justify-center">
+                  <p class="text-base leading-7 text-ink/76 [text-align:justify]">${card.body}</p>
+                </div>
+              </article>
+            `
+          )
+          .join("");
+      }
+
+      function renderMetaCards() {
+        return;
+      }
+
+      function renderSummaryBullets() {
+        document.getElementById("summaryBullets").innerHTML = reportData.summaryBullets
+          .map(
+            (item) => `
+              <li class="soft-panel rounded-[18px] px-4 py-3">
+                <div class="space-y-2">
+                  <h3 class="text-sm font-semibold text-primary">${localizeTermText(item.title || "")}</h3>
+                  <p class="text-sm leading-7 text-ink/76 [text-align:justify]">${localizeTermText(item.body || item)}</p>
+                </div>
+              </li>
+            `
+          )
+          .join("");
+      }
+
+      function renderSnapshot() {
+        const rows = reportData.snapshotRows?.length
+          ? reportData.snapshotRows
+          : [
+              { label: "任务实例", value: reportData.meta.biz_scene_instance_id || "-" },
+              { label: "场景编号", value: reportData.meta.biz_scenario_id || "-" },
+              { label: "完成时间", value: reportData.meta.completed_at || "-" },
+              { label: "总步数", value: reportData.meta.total_steps ?? "-" },
+            ];
+        document.getElementById("snapshotPanel").innerHTML = rows
+          .map(
+            (row) => `
+              <div class="flex items-start justify-between gap-4 border-b border-white/10 pb-3 last:border-b-0 last:pb-0">
+                <dt class="text-sm text-white/62">${localizeTermText(row.label)}</dt>
+                <dd class="text-right text-base font-medium">${localizeTermText(row.value)}</dd>
+              </div>
+            `
+          )
+          .join("");
+      }
+
+      function renderRiskBars() {
+        const toneByLabel = {
+          倒流风险: "bg-danger",
+          控制滞后: "bg-warning",
+          总体稳定性: "bg-success",
+        };
+
+        document.getElementById("riskBars").innerHTML = reportData.riskBars
+          .map(
+            (bar) => `
+              <div class="soft-panel rounded-[22px] px-4 py-4">
+                <div class="mb-2 flex items-center justify-between text-sm">
+                  <span class="font-medium text-ink">${bar.label}</span>
+                  <span class="font-medium">${bar.value}%</span>
+                </div>
+                <div class="h-2.5 rounded-full bg-slate-100">
+                  <div class="${toneByLabel[bar.label] || "bg-primary"} h-2.5 rounded-full" style="width:${bar.value}%"></div>
+                </div>
+              </div>
+            `
+          )
+          .join("");
+      }
+
+      function renderActions() {
+        const actions = reportData.recommendations || reportData.actions || [];
+        document.getElementById("actionList").innerHTML = actions
+          .map((item, index) => `<li class="soft-panel rounded-[18px] px-4 py-3"><span class="mr-2 font-semibold text-primary">${index + 1}.</span>${localizeTermText(item)}</li>`)
+          .join("");
+      }
+
+      function renderMiniTable() {
+        document.getElementById("miniTable").innerHTML = reportData.miniTable
+          .map(
+            (item) => `
+              <div class="soft-panel rounded-[18px] px-4 py-3">
+                <div class="flex items-center justify-between gap-3">
+                  <span class="font-medium">${item.object_name}</span>
+                  <span class="term-hint rounded-full border border-line/80 px-2.5 py-1 text-[11px] text-ink/56" title="${escapeHtml(item.metrics_code)}">${localizedTermLabel(item.metrics_code)}</span>
+                </div>
+                <div class="mt-2 flex items-center justify-between text-sm text-ink/72">
+                  <span class="term-hint" title="data_index">采样时间步 ${item.data_index}</span>
+                  <span>${item.value}</span>
+                </div>
+              </div>
+            `
+          )
+          .join("");
+      }
+
+      function initAsideTabs() {
+        const buttons = Array.from(document.querySelectorAll("[data-aside-panel]"));
+        const panels = Array.from(document.querySelectorAll("[data-aside-content]"));
+        if (!buttons.length || !panels.length) return;
+
+        const activatePanel = (panelName) => {
+          buttons.forEach((button) => {
+            const active = button.dataset.asidePanel === panelName;
+            button.classList.toggle("bg-primary", active);
+            button.classList.toggle("text-white", active);
+            button.classList.toggle("shadow-sm", active);
+            button.classList.toggle("bg-white", !active);
+            button.classList.toggle("text-ink/76", !active);
+            button.setAttribute("aria-pressed", active ? "true" : "false");
+          });
+
+          panels.forEach((panel) => {
+            panel.classList.toggle("hidden", panel.dataset.asideContent !== panelName);
+          });
+        };
+
+        buttons.forEach((button) => {
+          button.addEventListener("click", () => activatePanel(button.dataset.asidePanel));
+        });
+
+        activatePanel(buttons[0].dataset.asidePanel);
+      }
+
+      function renderAnomalyTable() {
+        document.getElementById("anomalyTable").innerHTML = reportData.anomalies
+          .map(
+            (item, index) => `
+              <tr>
+                <td data-label="序号" class="px-4 py-3 text-center">
+                  <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-ink/58">${index + 1}</span>
+                </td>
+                <td data-label="优先级" class="px-4 py-3 text-center">
+                  <span class="rounded-full px-2.5 py-1 text-xs font-medium ${
+                    item.priority === "高"
+                      ? "bg-danger/10 text-danger"
+                      : item.priority === "中"
+                        ? "bg-warning/10 text-warning"
+                        : "bg-primary/10 text-primary"
+                  }">${item.priority}</span>
+                </td>
+                <td data-label="对象" class="px-4 py-3 font-medium text-ink">${item.object}</td>
+                <td data-label="指标" class="px-4 py-3"><span class="metric-pill term-hint rounded-full border border-line/70 bg-white/85 px-2.5 py-1 text-xs text-ink/68" title="${escapeHtml(item.metric)}">${localizedTermLabel(item.metric)}</span></td>
+                <td data-label="现象" class="px-4 py-3 text-ink/72">${localizeTermText(item.finding)}</td>
+                <td data-label="建议" class="px-4 py-3 text-ink/72">${localizeTermText(item.advice)}</td>
+              </tr>
+            `
+          )
+          .join("");
+      }
+
+      function renderLongitudinalProfile() {
+        const profile = reportData.longitudinalProfile;
+        if (!profile || !profile.available) {
+          const chartRoot = document.getElementById("longitudinalChart");
+          const summary = document.getElementById("longitudinalSummary");
+          const highlights = document.getElementById("longitudinalHighlights");
+          const missingAssets = reportData.analysisSummary?.report_assets?.missing || [];
+          if (chartRoot) {
+            chartRoot.innerHTML = `
+              <div class="soft-panel flex h-full items-center justify-center rounded-[24px] border border-dashed border-warning/35 bg-warning/5 px-6 text-center text-sm leading-7 text-ink/72">
+                ${localizeTermText(`本次未生成渠道纵剖面图。${profile?.reason || reportData.analysisSummary?.profile_error || "缺少对象高程/里程数据或生成链路失败"}`)}
+              </div>
+            `;
+          }
+          if (summary) {
+            summary.textContent = localizeTermText(
+              profile?.reason
+                ? `纵剖面分析已降级：${profile.reason}`
+                : "纵剖面分析已降级：本次缺少可用于绘制纵剖面的对象高程/里程数据。"
+            );
+          }
+          if (highlights) {
+            highlights.innerHTML = [
+              `缺失图表：${missingAssets.length ? missingAssets.join("、") : "chart7_longitudinal_profile.png"}。`,
+              "HTML 已保留该缺失说明；纵向水面线、闸站位置和沿程水深相关结论需要按缺失范围理解。",
+            ]
+              .map((text) => `<div class="soft-panel rounded-[18px] px-4 py-3">${localizeTermText(text)}</div>`)
+              .join("");
+          }
+          return;
+        }
+
+        const chart = registerChart(createChart("longitudinalChart"), "longitudinalChart");
+        renderLongitudinalSectionErrors(profile.profileErrors || profile.sectionErrors || []);
+        const longitudinalZoomState = { start: 0, end: 100 };
+        const frameMap = new Map((profile.frames || []).map((frame) => [Number(frame.step), frame]));
+        const allFramePoints = (profile.frames || []).flatMap((frame) => frame.points || []);
+        const staticPoints = allFramePoints.length ? allFramePoints : profile.points || [];
+        const xBounds = computeAxisExtent(staticPoints.map((item) => item.location));
+        const getCoordClipRect = (params) => ({
+          x: params.coordSys.x,
+          y: params.coordSys.y,
+          width: params.coordSys.width,
+          height: params.coordSys.height,
+        });
+        const clipPolygonToCoordSys = (polygon, params) =>
+          echarts.graphic.clipPointsByRect(polygon, getCoordClipRect(params));
+        const clipPolylineToCoordSys = (polyline, params) =>
+          echarts.graphic.clipPointsByRect(polyline, getCoordClipRect(params));
+        const clipVerticalLineToCoordSys = (x, y1, y2, params) => {
+          const clipRect = getCoordClipRect(params);
+          const yMin = clipRect.y;
+          const yMax = clipRect.y + clipRect.height;
+          if (x < clipRect.x || x > clipRect.x + clipRect.width) {
+            return null;
+          }
+          const clippedY1 = Math.max(yMin, Math.min(yMax, y1));
+          const clippedY2 = Math.max(yMin, Math.min(yMax, y2));
+          if ((y1 < yMin && y2 < yMin) || (y1 > yMax && y2 > yMax)) {
+            return null;
+          }
+          return { x, y1: clippedY1, y2: clippedY2, clipRect };
+        };
+        const annotationTypeColors = {
+          UnifiedCanal: "#176a87",
+          Pipe: "#d12f2f",
+          GateStation: "#111827",
+          DisturbanceNode: "#2b8a57",
+        };
+        const getAnnotationColor = (type) => annotationTypeColors[type] || "#4c6476";
+        const annotationTypeLabels = {
+          UnifiedCanal: "渠道范围",
+          Pipe: "倒虹吸/管道",
+          GateStation: "闸站",
+          DisturbanceNode: "分水口/退水闸",
+        };
+        const annotationParamLabels = {
+          manning_n: "曼宁系数",
+          length: "长度",
+          loss_coeff: "损失系数",
+          orifice_count: "孔口数量",
+          single_orifice_height: "单孔高度",
+          single_orifice_width: "单孔宽度",
+          cross_section_type: "断面形式",
+          boundary_type: "边界类型",
+          min_sectional_area: "最小过水面积",
+          t_bottom_width: "底宽",
+          t_side_slope_ratio: "边坡系数",
+        };
+        const annotationParamUnits = {
+          length: "m",
+          single_orifice_height: "m",
+          single_orifice_width: "m",
+        };
+        const profilePointRadius = 1.5;
+        const buildProfilePointStyle = (strokeColor) => ({ fill: "#ffffff", stroke: strokeColor, lineWidth: 1 });
+        const buildProfileSeriesPointStyle = (strokeColor) => ({
+          color: "#ffffff",
+          borderColor: strokeColor,
+          borderWidth: 1,
+        });
+        const localizeAnnotationType = (type) => annotationTypeLabels[type] || type;
+        const formatAnnotationParamValue = (item) => {
+          const unit = annotationParamUnits[item.key];
+          return unit ? `${item.value} ${unit}` : item.value;
+        };
+        const localizeAnnotationParams = (params) =>
+          (params || []).map((item) => `${annotationParamLabels[item.key] || item.key}=${formatAnnotationParamValue(item)}`).join("，");
+        const positionFloatingTooltip = (point, params, dom, rect, size) => {
+          const [mouseX, mouseY] = point;
+          const viewWidth = size.viewSize[0];
+          const viewHeight = size.viewSize[1];
+          const boxWidth = size.contentSize[0];
+          const boxHeight = size.contentSize[1];
+          const offsetX = 18;
+          const offsetY = 18;
+          let x = mouseX + offsetX;
+          let y = mouseY - boxHeight - offsetY;
+          if (x + boxWidth > viewWidth - 12) {
+            x = Math.max(12, mouseX - boxWidth - offsetX);
+          }
+          if (y < 12) {
+            y = Math.min(viewHeight - boxHeight - 12, mouseY + offsetY);
+          }
+          return [x, y];
+        };
+        const formatAnnotationTooltip = (item) =>
+          [
+            `<strong>${escapeHtml(item.name)}</strong>`,
+            `类型: ${escapeHtml(localizeAnnotationType(item.type))}`,
+            item.mode === "range"
+              ? `范围: ${escapeHtml(item.start_section_name)} → ${escapeHtml(item.end_section_name)}`
+              : `位置: ${Number(item.location).toFixed(3)} km`,
+            item.params?.length ? `参数: ${escapeHtml(localizeAnnotationParams(item.params))}` : "参数: 无",
+          ].join("<br>");
+        const annotationLegendPrefix = "相关对象: ";
+        const annotationTypeOrder = ["UnifiedCanal", "Pipe", "GateStation", "DisturbanceNode"];
+        const hiddenAnnotationTypes = new Set(["UnifiedCanal"]);
+        const buildAnnotationLegendName = (type) => `${annotationLegendPrefix}${localizeAnnotationType(type)}`;
+        const formatAnnotationLegendName = (name) =>
+          name === buildAnnotationLegendName("UnifiedCanal")
+            ? name
+            : name.startsWith(annotationLegendPrefix)
+              ? name.slice(annotationLegendPrefix.length)
+              : name;
+        const interpolateWaterLevel = (profilePoints, location) => {
+          if (!profilePoints.length) return null;
+          if (location <= profilePoints[0].location) return profilePoints[0].water_level;
+          if (location >= profilePoints[profilePoints.length - 1].location) {
+            return profilePoints[profilePoints.length - 1].water_level;
+          }
+          for (let index = 0; index < profilePoints.length - 1; index += 1) {
+            const left = profilePoints[index];
+            const right = profilePoints[index + 1];
+            if (location < left.location || location > right.location) continue;
+            const span = right.location - left.location;
+            if (!span) return left.water_level;
+            const ratio = (location - left.location) / span;
+            return left.water_level + (right.water_level - left.water_level) * ratio;
+          }
+          return null;
+        };
+        const interpolateProfileValue = (profilePoints, location, key) => {
+          if (!profilePoints.length) return null;
+          if (location <= profilePoints[0].location) return profilePoints[0][key];
+          if (location >= profilePoints[profilePoints.length - 1].location) {
+            return profilePoints[profilePoints.length - 1][key];
+          }
+          for (let index = 0; index < profilePoints.length - 1; index += 1) {
+            const left = profilePoints[index];
+            const right = profilePoints[index + 1];
+            if (location < left.location || location > right.location) continue;
+            const span = right.location - left.location;
+            if (!span) return left[key];
+            const ratio = (location - left.location) / span;
+            return left[key] + (right[key] - left[key]) * ratio;
+          }
+          return null;
+        };
+        const buildRangeObjectAnnotations = (profilePoints) =>
+          (profile.objectAnnotations || [])
+            .filter((item) => item.mode === "range")
+            .map((item, index) => {
+              const startPoint = profilePoints.find((point) => point.name === item.start_section_name);
+              const endPoint = profilePoints.find((point) => point.name === item.end_section_name);
+              if (!startPoint || !endPoint) return null;
+              return {
+                ...item,
+                index,
+                start_water_level: startPoint.water_level,
+                end_water_level: endPoint.water_level,
+                start_top_elevation: startPoint.top_elevation,
+                start_bottom_elevation: startPoint.bottom_elevation,
+                end_top_elevation: endPoint.top_elevation,
+                end_bottom_elevation: endPoint.bottom_elevation,
+              };
+            })
+            .filter(Boolean);
+        const buildPointObjectAnnotations = (profilePoints) =>
+          (profile.objectAnnotations || [])
+            .filter((item) => item.mode === "point")
+            .map((item, index) => {
+              const location = item.location ?? item.start_location;
+              const waterLevel = interpolateWaterLevel(profilePoints, location);
+              if (location == null || waterLevel == null) return null;
+              return {
+                ...item,
+                index,
+                location,
+                water_level: waterLevel,
+              };
+            })
+            .filter(Boolean);
+        const gateLineSegments = (profile.gateMarkers || []).map((item) => [
+          item.location,
+          0,
+          0,
+          item.short_name || item.name,
+        ]);
+        const buildGateStationSeries = () => ({
+          id: "gate-stations",
+          name: "闸站位置",
+          type: "custom",
+          silent: true,
+          animation: false,
+          itemStyle: { color: chartTheme.gate },
+          tooltip: { show: false },
+          z: 7,
+          renderItem: (params, api) => {
+            const stationKey = api.value(3);
+            const x = api.coord([api.value(0), api.value(1)])[0];
+            const yBottom = api.coord([api.value(0), api.value(1)])[1];
+            const yTop = api.coord([api.value(0), api.value(2)])[1];
+            const clippedLine = clipVerticalLineToCoordSys(x, yBottom, yTop, params);
+            if (!clippedLine) {
+              return null;
+            }
+            const textY = Math.max(clippedLine.clipRect.y + 12, clippedLine.y2 + 14);
+            const lineTopY = Math.max(clippedLine.y2, textY + 8);
+            const lineBottomY = clippedLine.y1;
+            const lineShape = lineTopY < lineBottomY
+              ? { x1: clippedLine.x, y1: lineBottomY, x2: clippedLine.x, y2: lineTopY }
+              : null;
+            return {
+              type: "group",
+              children: [
+                lineShape ? {
+                  type: "line",
+                  shape: lineShape,
+                  style: { stroke: chartTheme.gate, lineWidth: 1.4, lineDash: [6, 4], opacity: 0.92 },
+                } : null,
+                {
+                  type: "text",
+                  style: {
+                    x: clippedLine.x,
+                    y: textY,
+                    text: stationKey,
+                    fill: chartTheme.gate,
+                    textAlign: "center",
+                    textVerticalAlign: "bottom",
+                    font: "600 12px 'Noto Sans SC', sans-serif",
+                  },
+                },
+              ].filter(Boolean),
+            };
+          },
+          data: gateLineSegments,
+        });
+        const buildObjectAnnotationDataItem = (item) => {
+          const isRange = item.mode === "range";
+          return {
+            value: [
+              isRange ? item.start_location : item.location,
+              isRange ? item.start_water_level : item.water_level,
+              isRange ? item.end_location : item.location,
+              isRange ? item.end_water_level : item.water_level,
+              item.name,
+              item.type,
+              item.index,
+              item.mode,
+              isRange ? item.start_top_elevation : item.water_level,
+              isRange ? item.start_bottom_elevation : item.water_level,
+              isRange ? item.end_top_elevation : item.water_level,
+              isRange ? item.end_bottom_elevation : item.water_level,
+            ],
+            meta: item,
+          };
+        };
+        const buildObjectAnnotationSeries = (rangeItems, pointItems) => {
+          const grouped = new Map();
+          [...rangeItems, ...pointItems].forEach((item) => {
+            if (hiddenAnnotationTypes.has(item.type)) return;
+            if (!grouped.has(item.type)) grouped.set(item.type, []);
+            grouped.get(item.type).push(item);
+          });
+          const sortedTypes = [...grouped.keys()].sort((left, right) => {
+            const leftIndex = annotationTypeOrder.indexOf(left);
+            const rightIndex = annotationTypeOrder.indexOf(right);
+            return (leftIndex === -1 ? 99 : leftIndex) - (rightIndex === -1 ? 99 : rightIndex);
+          });
+          return sortedTypes.map((annotationType) => ({
+            id: `object-type-${annotationType}`,
+            name: buildAnnotationLegendName(annotationType),
+            type: "custom",
+            silent: false,
+            animation: false,
+            itemStyle: { color: getAnnotationColor(annotationType) },
+            tooltip: {
+              show: true,
+              trigger: "item",
+              confine: true,
+              enterable: false,
+              transitionDuration: 0,
+              extraCssText: "pointer-events:none;",
+              position: positionFloatingTooltip,
+              formatter: (params) => formatAnnotationTooltip(params.data.meta),
+            },
+            z: 6.7,
+            renderItem: (params, api) => {
+              const mode = api.value(7);
+              const annotationType = api.value(5);
+              const color = getAnnotationColor(annotationType);
+              if (mode === "range") {
+                if (annotationType === "Pipe") {
+                  const polygon = [
+                    api.coord([api.value(0), api.value(8)]),
+                    api.coord([api.value(2), api.value(10)]),
+                    api.coord([api.value(2), api.value(11)]),
+                    api.coord([api.value(0), api.value(9)]),
+                  ];
+                  const clippedPolygon = clipPolygonToCoordSys(polygon, params);
+                  const topLine = clipPolylineToCoordSys([polygon[0], polygon[1]], params);
+                  const endLine = clipPolylineToCoordSys([polygon[1], polygon[2]], params);
+                  const bottomLine = clipPolylineToCoordSys([polygon[3], polygon[2]], params);
+                  const startLine = clipPolylineToCoordSys([polygon[0], polygon[3]], params);
+                  if (!clippedPolygon?.length) {
+                    return null;
+                  }
+                  const lineStyle = { stroke: color, lineWidth: 2.2, opacity: 0.86 };
+                  return {
+                    type: "group",
+                    children: [
+                      {
+                        type: "polygon",
+                        shape: { points: clippedPolygon },
+                        style: { fill: color, opacity: 0.12, stroke: "none" },
+                      },
+                      topLine?.length >= 2 ? {
+                        type: "line",
+                        shape: { x1: topLine[0][0], y1: topLine[0][1], x2: topLine[topLine.length - 1][0], y2: topLine[topLine.length - 1][1] },
+                        style: lineStyle,
+                      } : null,
+                      bottomLine?.length >= 2 ? {
+                        type: "line",
+                        shape: { x1: bottomLine[0][0], y1: bottomLine[0][1], x2: bottomLine[bottomLine.length - 1][0], y2: bottomLine[bottomLine.length - 1][1] },
+                        style: lineStyle,
+                      } : null,
+                      startLine?.length >= 2 ? {
+                        type: "line",
+                        shape: { x1: startLine[0][0], y1: startLine[0][1], x2: startLine[startLine.length - 1][0], y2: startLine[startLine.length - 1][1] },
+                        style: { ...lineStyle, lineWidth: 1.6 },
+                      } : null,
+                      endLine?.length >= 2 ? {
+                        type: "line",
+                        shape: { x1: endLine[0][0], y1: endLine[0][1], x2: endLine[endLine.length - 1][0], y2: endLine[endLine.length - 1][1] },
+                        style: { ...lineStyle, lineWidth: 1.6 },
+                      } : null,
+                    ].filter(Boolean),
+                  };
+                }
+                const clippedPolyline = clipPolylineToCoordSys(
+                  [
+                    api.coord([api.value(0), api.value(1)]),
+                    api.coord([api.value(2), api.value(3)]),
+                  ],
+                  params
+                );
+                if (!clippedPolyline?.length || clippedPolyline.length < 2) {
+                  return null;
+                }
+                const startPoint = clippedPolyline[0];
+                const endPoint = clippedPolyline[clippedPolyline.length - 1];
+                return {
+                  type: "group",
+                  children: [
+                    {
+                      type: "line",
+                      shape: { x1: startPoint[0], y1: startPoint[1], x2: endPoint[0], y2: endPoint[1] },
+                      style: { stroke: color, lineWidth: 2.4, opacity: 0.78 },
+                    },
+                    {
+                      type: "circle",
+                      shape: { cx: startPoint[0], cy: startPoint[1], r: profilePointRadius },
+                      style: buildProfilePointStyle(color),
+                    },
+                    {
+                      type: "circle",
+                      shape: { cx: endPoint[0], cy: endPoint[1], r: profilePointRadius },
+                      style: buildProfilePointStyle(color),
+                    },
+                  ],
+                };
+              }
+              const clipRect = getCoordClipRect(params);
+              const point = api.coord([api.value(0), api.value(1)]);
+              if (
+                point[0] < clipRect.x ||
+                point[0] > clipRect.x + clipRect.width ||
+                point[1] < clipRect.y ||
+                point[1] > clipRect.y + clipRect.height
+              ) {
+                return null;
+              }
+              return {
+                type: "group",
+                children: [
+                  {
+                    type: "circle",
+                    shape: { cx: point[0], cy: point[1], r: profilePointRadius },
+                    style: buildProfilePointStyle(color),
+                  },
+                ],
+              };
+            },
+            data: grouped.get(annotationType).map(buildObjectAnnotationDataItem),
+          }));
+        };
+        const objectLegendSelected = {};
+        const profileLineLegendNames = ["断面顶高程", "断面底高程", "水面线", "闸站位置"];
+        const canalRangeLegendName = buildAnnotationLegendName("UnifiedCanal");
+        const profileLineLegendSelected = Object.fromEntries(profileLineLegendNames.map((name) => [name, true]));
+
+        chart.on("dataZoom", (event) => {
+          const zoomPayload = Array.isArray(event?.batch) ? event.batch[0] : event;
+          if (!zoomPayload) return;
+          if (Number.isFinite(Number(zoomPayload.start))) {
+            longitudinalZoomState.start = Number(zoomPayload.start);
+          }
+          if (Number.isFinite(Number(zoomPayload.end))) {
+            longitudinalZoomState.end = Number(zoomPayload.end);
+          }
+        });
+        chart.on("legendselectchanged", (event) => {
+          const name = event?.name || "";
+          if (name.startsWith(annotationLegendPrefix)) {
+            objectLegendSelected[name] = event?.selected?.[name] ?? true;
+          } else if (profileLineLegendNames.includes(name)) {
+            profileLineLegendSelected[name] = event?.selected?.[name] ?? true;
+          }
+        });
+
+        const formatProfileNumber = (value, digits = 2) => {
+          const numeric = Number(value);
+          return Number.isFinite(numeric) ? numeric.toFixed(digits) : "-";
+        };
+        const formatProfilePointValue = (point, key, digits = 2) =>
+          point ? `${point.name}（${formatProfileNumber(point[key], digits)} m）` : "-";
+        const buildLongitudinalNarrative = (points, step, headLossValue) => {
+          const startPoint = points[0];
+          const endPoint = points[points.length - 1];
+          const distanceKm =
+            Math.abs(Number(endPoint.location) - Number(startPoint.location)) ||
+            Number(profile.meta?.distance_km) ||
+            0;
+          const waterSlope = distanceKm > 0 ? headLossValue / distanceKm : null;
+          const bottomDrop = Number(startPoint.bottom_elevation) - Number(endPoint.bottom_elevation);
+          const depths = points.map((item) => Number(item.depth)).filter(Number.isFinite);
+          const avgDepth = depths.length ? depths.reduce((sum, value) => sum + value, 0) / depths.length : null;
+          const deepest = points.reduce((best, item) => (item.depth > best.depth ? item : best), points[0]);
+          const shallowRank = [...points]
+            .filter((item) => Number.isFinite(Number(item.depth)))
+            .sort((left, right) => Number(left.depth) - Number(right.depth));
+          const shallowest = shallowRank[0];
+          const freeboardRank = points
+            .map((item) => ({
+              ...item,
+              freeboard: Number(item.top_elevation) - Number(item.water_level),
+            }))
+            .filter((item) => Number.isFinite(item.freeboard))
+            .sort((left, right) => left.freeboard - right.freeboard);
+          const minFreeboard = freeboardRank[0];
+          const overtoppedCount = freeboardRank.filter((item) => item.freeboard < 0).length;
+          const lowFreeboardCount = freeboardRank.filter((item) => item.freeboard >= 0 && item.freeboard <= 0.5).length;
+          const segments = points.slice(0, -1)
+            .map((item, index) => {
+              const next = points[index + 1];
+              const dx = Number(next.location) - Number(item.location);
+              const loss = Number(item.water_level) - Number(next.water_level);
+              return {
+                from: item.name,
+                to: next.name,
+                dx,
+                loss,
+                slope: dx > 0 ? loss / dx : null,
+              };
+            })
+            .filter((item) => Number.isFinite(item.slope));
+          const steepestDrop =
+            segments.filter((item) => item.slope > 0).sort((left, right) => right.slope - left.slope)[0] ||
+            segments.sort((left, right) => Math.abs(right.slope) - Math.abs(left.slope))[0];
+          const objectAnnotations = profile.objectAnnotations || [];
+          const gateStationCount = profile.meta?.gate_station_count ?? objectAnnotations.filter((item) => item.type === "GateStation").length;
+          const pipeCount = objectAnnotations.filter((item) => item.type === "Pipe").length;
+          const disturbanceCount = objectAnnotations.filter((item) => item.type === "DisturbanceNode").length;
+          const sectionErrorCount = (profile.profileErrors || profile.sectionErrors || []).length;
+          const lowDepthText = shallowRank
+            .slice(0, 3)
+            .map((item) => `${item.name} ${formatProfileNumber(item.depth)} m`)
+            .join("、");
+
+          return {
+            summary:
+              `当前展示 ${formatStepTimeLabel(step)}，纵剖面覆盖 ${startPoint.name} 至 ${endPoint.name}，` +
+              `共 ${points.length} 个有效断面、约 ${formatProfileNumber(distanceKm, 2)} km。` +
+              `水面线由 ${formatProfileNumber(startPoint.water_level)} m 降至 ${formatProfileNumber(endPoint.water_level)} m，` +
+              `沿程水头损失 ${formatProfileNumber(headLossValue)} m，平均水面坡降 ${waterSlope == null ? "-" : formatProfileNumber(waterSlope, 3)} m/km；` +
+              `同期渠底高程沿程变化 ${formatProfileNumber(bottomDrop)} m，平均水深 ${avgDepth == null ? "-" : formatProfileNumber(avgDepth)} m。`,
+            highlights: [
+              `水面线趋势：整体从上游向下游递减；局部变化最明显区间为 ${steepestDrop ? `${steepestDrop.from} → ${steepestDrop.to}，坡降约 ${formatProfileNumber(steepestDrop.slope, 3)} m/km` : "暂未识别到有效相邻断面区间"}。`,
+              `过水深度：最大水深断面为 ${formatProfilePointValue(deepest, "depth")}，最小水深断面为 ${formatProfilePointValue(shallowest, "depth")}；低水深优先关注 ${lowDepthText || "无"}。`,
+              `顶高程余量：最小余量位于 ${minFreeboard ? `${minFreeboard.name}（${formatProfileNumber(minFreeboard.freeboard)} m）` : "-"}；${overtoppedCount ? `有 ${overtoppedCount} 个断面水位超过断面顶高程` : "未发现水位超过断面顶高程"}，${lowFreeboardCount ? `${lowFreeboardCount} 个断面余量不超过 0.50 m` : "未发现余量小于等于 0.50 m 的断面"}。`,
+              `控制对象：已叠加 ${gateStationCount} 个闸站位置、${pipeCount} 个倒虹吸/管道、${disturbanceCount} 个分水口/退水闸，图中可按类型隐藏或恢复，用于判断水位突变是否与控制建筑物位置一致。`,
+              `数据质量：本次时间轴有 ${profile.meta?.timeline_step_count || profile.frames?.length || 0} 个可播放时刻；${sectionErrorCount ? `存在 ${sectionErrorCount} 个剖面数据错误，需优先查看右上角错误清单` : "未发现需要在图中单独提示的剖面数据错误"}。`,
+            ],
+          };
+        };
+
+        interactionState.api.updateLongitudinal = (step) => {
+          const frame = frameMap.get(Number(step)) || profile.frames?.at(-1);
+          if (!frame) return;
+
+          const points = frame.points || [];
+          if (!points.length) return;
+          const startPoint = points[0];
+          const endPoint = points[points.length - 1];
+          const headLossValue = Number(startPoint.water_level) - Number(endPoint.water_level);
+          const headLoss = headLossValue.toFixed(2);
+          const currentYBounds = computeAxisBounds([
+            points.map((item) => item.top_elevation),
+            points.map((item) => item.bottom_elevation),
+            points.map((item) => item.water_level),
+          ], { paddingRatio: 0.08, minPadding: 0.18 });
+          const currentGateLineSegments = (profile.gateMarkers || []).map((item) => {
+            const bottomElevation = interpolateProfileValue(points, item.location, "bottom_elevation");
+            return [
+              item.location,
+              bottomElevation ?? currentYBounds.min,
+              currentYBounds.max,
+              item.short_name || item.name,
+            ];
+          });
+          const yMin = currentYBounds.min;
+          const bedFillSegments = points.slice(0, -1).map((item, index) => [
+            item.location,
+            points[index + 1].location,
+            yMin,
+            item.bottom_elevation,
+            points[index + 1].bottom_elevation,
+          ]);
+          const waterFillSegments = points.slice(0, -1).map((item, index) => [
+            item.location,
+            points[index + 1].location,
+            item.bottom_elevation,
+            points[index + 1].bottom_elevation,
+            item.water_level,
+            points[index + 1].water_level,
+          ]);
+          const objectRangeAnnotations = buildRangeObjectAnnotations(points);
+          const objectPointAnnotations = buildPointObjectAnnotations(points);
+          const objectAnnotationSeries = buildObjectAnnotationSeries(objectRangeAnnotations, objectPointAnnotations);
+          const objectLegendNames = [
+            canalRangeLegendName,
+            ...objectAnnotationSeries
+              .map((item) => item.name)
+              .filter((name) => !profileLineLegendNames.includes(name) && name !== canalRangeLegendName),
+          ];
+          const objectLegendSelection = Object.fromEntries(
+            objectLegendNames.map((name) => [name, objectLegendSelected[name] ?? true])
+          );
+          const legendNames = [...profileLineLegendNames, ...objectLegendNames];
+          const legendSelection = {
+            ...profileLineLegendSelected,
+            ...objectLegendSelection,
+          };
+
+          const narrative = buildLongitudinalNarrative(points, step, headLossValue);
+          document.getElementById("longitudinalSummary").textContent = narrative.summary;
+          document.getElementById("timelineCurrentMeta").textContent = `沿程水头损失 ${headLoss} m`;
+
+          document.getElementById("longitudinalHighlights").innerHTML = narrative.highlights
+            .filter(Boolean)
+            .map((text) => `<div class="soft-panel rounded-[18px] px-4 py-3">${localizeTermText(text)}</div>`)
+            .join("");
+
+          chart.setOption({
+            animationDuration: 350,
+            animationDurationUpdate: 350,
+            grid: { left: 38, right: 34, top: legendNames.length ? 68 : 28, bottom: 96, containLabel: true },
+            graphic: [
+              {
+                type: "rect",
+                left: 10,
+                right: 10,
+                top: 10,
+                bottom: 10,
+                silent: true,
+                z: -10,
+                shape: { r: 18 },
+                style: { fill: chartTheme.plotBackground },
+              },
+            ],
+            tooltip: {
+              trigger: "axis",
+              axisPointer: {
+                type: "cross",
+                lineStyle: { color: chartTheme.crosshair, type: "dashed" },
+                label: { backgroundColor: chartTheme.text },
+              },
+              backgroundColor: "rgba(255,255,255,0.96)",
+              borderColor: "rgba(135, 166, 179, 0.4)",
+              borderWidth: 1,
+              textStyle: { color: "#102332" },
+              formatter: (params) => {
+                const row = points[params[0]?.dataIndex ?? 0];
+                return [
+                  `<strong>${row.name}</strong>`,
+                  formatStepTimeLabel(step),
+                  `里程: ${row.location} km`,
+                  `顶高程: ${row.top_elevation} m`,
+                  `底高程: ${row.bottom_elevation} m`,
+                  `水位: ${row.water_level} m`,
+                  `水深: ${row.depth} m`,
+                ].join("<br>");
+              },
+            },
+            legend: {
+              show: legendNames.length > 0,
+              type: "scroll",
+              top: 10,
+              left: 42,
+              right: 42,
+              itemWidth: 12,
+              itemHeight: 8,
+              data: legendNames,
+              selected: legendSelection,
+              formatter: formatAnnotationLegendName,
+              textStyle: { color: chartTheme.textSoft, fontSize: 11 },
+              pageTextStyle: { color: chartTheme.textSoft },
+              pageIconColor: chartTheme.water,
+              pageIconInactiveColor: "rgba(91, 115, 133, 0.28)",
+            },
+            dataZoom: [
+              {
+                type: "inside",
+                xAxisIndex: 0,
+                filterMode: "none",
+                start: longitudinalZoomState.start,
+                end: longitudinalZoomState.end,
+              },
+              {
+                type: "slider",
+                xAxisIndex: 0,
+                height: 22,
+                bottom: 22,
+                borderColor: "transparent",
+                fillerColor: "rgba(28, 127, 181, 0.14)",
+                start: longitudinalZoomState.start,
+                end: longitudinalZoomState.end,
+              },
+            ],
+            xAxis: {
+              type: "value",
+              min: xBounds.min,
+              max: xBounds.max,
+              splitNumber: 6,
+              name: "里程 (km)",
+              nameLocation: "middle",
+              nameGap: 26,
+              nameTextStyle: {
+                color: "rgba(16, 35, 50, 0.86)",
+                fontSize: 12,
+                fontWeight: 600,
+              },
+              axisLine: { lineStyle: { color: chartTheme.grid } },
+              axisTick: { inside: true, lineStyle: { color: chartTheme.grid } },
+              axisLabel: { color: chartTheme.text, margin: 8 },
+              splitLine: { show: false },
+              splitArea: {
+                show: false,
+                areaStyle: { color: ["rgba(255,255,255,0.08)", "rgba(24, 91, 117, 0.018)"] },
+              },
+            },
+            yAxis: {
+              type: "value",
+              min: currentYBounds.min,
+              max: currentYBounds.max,
+              splitNumber: 6,
+              name: "高程 / 水位 (m)",
+              nameLocation: "middle",
+              nameRotate: 90,
+              nameGap: 22,
+              nameTextStyle: {
+                color: "rgba(16, 35, 50, 0.86)",
+                fontSize: 12,
+                fontWeight: 600,
+              },
+              axisLine: { lineStyle: { color: chartTheme.grid } },
+              axisTick: { inside: true, lineStyle: { color: chartTheme.grid } },
+              axisLabel: { color: chartTheme.text, margin: 8 },
+              splitLine: { show: false },
+            },
+            series: [
+              {
+                type: "custom",
+                silent: true,
+                tooltip: { show: false },
+                z: 1,
+                renderItem: (params, api) => {
+                  const polygon = [
+                    api.coord([api.value(0), api.value(2)]),
+                    api.coord([api.value(0), api.value(3)]),
+                    api.coord([api.value(1), api.value(4)]),
+                    api.coord([api.value(1), api.value(2)]),
+                  ];
+                  const clippedPolygon = clipPolygonToCoordSys(polygon, params);
+                  if (!clippedPolygon?.length) {
+                    return null;
+                  }
+                  return {
+                    type: "polygon",
+                    shape: { points: clippedPolygon },
+                    style: { fill: chartTheme.bedFill, stroke: "none" },
+                  };
+                },
+                data: bedFillSegments,
+              },
+              {
+                type: "custom",
+                silent: true,
+                tooltip: { show: false },
+                z: 2,
+                renderItem: (params, api) => {
+                  const polygon = [
+                    api.coord([api.value(0), api.value(2)]),
+                    api.coord([api.value(0), api.value(4)]),
+                    api.coord([api.value(1), api.value(5)]),
+                    api.coord([api.value(1), api.value(3)]),
+                  ];
+                  const clippedPolygon = clipPolygonToCoordSys(polygon, params);
+                  if (!clippedPolygon?.length) {
+                    return null;
+                  }
+                  return {
+                    type: "polygon",
+                    shape: { points: clippedPolygon },
+                    style: { fill: chartTheme.waterFill, stroke: "none" },
+                  };
+                },
+                data: waterFillSegments,
+              },
+              {
+                name: "断面顶高程",
+                type: "line",
+                showSymbol: true,
+                symbol: "circle",
+                symbolSize: 3,
+                clip: true,
+                lineStyle: { color: chartTheme.crest, width: 2 },
+                itemStyle: buildProfileSeriesPointStyle(chartTheme.crest),
+                emphasis: { disabled: true },
+                z: 4,
+                data: points.map((item) => [item.location, item.top_elevation]),
+              },
+              {
+                name: "水面线",
+                type: "line",
+                showSymbol: true,
+                symbol: "circle",
+                symbolSize: 2.8,
+                clip: true,
+                connectNulls: true,
+                lineStyle: { color: chartTheme.water, width: 2.4 },
+                itemStyle: buildProfileSeriesPointStyle(chartTheme.water),
+                emphasis: { disabled: true },
+                z: 5.6,
+                data: points.map((item) => [item.location, item.water_level]),
+              },
+              {
+                name: canalRangeLegendName,
+                type: "line",
+                silent: true,
+                animation: false,
+                showSymbol: false,
+                tooltip: { show: false },
+                lineStyle: { color: getAnnotationColor("UnifiedCanal"), width: 2.4, opacity: 0.78 },
+                itemStyle: { color: getAnnotationColor("UnifiedCanal") },
+                emphasis: { disabled: true },
+                data: [],
+              },
+              {
+                name: "断面底高程",
+                type: "line",
+                showSymbol: true,
+                symbol: "circle",
+                symbolSize: 3,
+                clip: true,
+                lineStyle: { color: chartTheme.bed, width: 2.2 },
+                itemStyle: buildProfileSeriesPointStyle(chartTheme.bed),
+                emphasis: { disabled: true },
+                z: 5,
+                data: points.map((item) => [item.location, item.bottom_elevation]),
+              },
+              ...objectAnnotationSeries,
+              {
+                name: "起点/终点",
+                type: "scatter",
+                symbolSize: 3,
+                clip: true,
+                z: 8,
+                tooltip: { show: false },
+                itemStyle: { color: chartTheme.water, borderColor: "#ffffff", borderWidth: 2 },
+                label: {
+                  show: true,
+                  position: "top",
+                  color: chartTheme.textSoft,
+                  fontSize: 11,
+                  formatter: ({ dataIndex }) => (dataIndex === 0 ? "起点" : "终点"),
+                },
+                data: [
+                  [startPoint.location, startPoint.water_level],
+                  [endPoint.location, endPoint.water_level],
+                ],
+              },
+              {
+                ...buildGateStationSeries(),
+                data: currentGateLineSegments,
+              },
+            ],
+          }, true);
+
+        };
+
+        interactionState.api.updateLongitudinal(interactionState.currentStep ?? profile.stepValues?.[0]);
+      }
+
+      function colorForIndex(index, offset = 0) {
+        const hue = (index * 47 + offset) % 360;
+        return `hsl(${hue} 58% 42%)`;
+      }
+
+      function buildLineSeries(name, data, index, options = {}) {
+        const color = options.color || colorForIndex(index, options.hueOffset || 0);
+        return {
+          name,
+          type: "line",
+          smooth: false,
+          showSymbol: false,
+          lineStyle: { width: options.lineWidth || 2, color, opacity: 1 },
+          itemStyle: { color, opacity: 1 },
+          // Disable line highlight/blur on hover so axis tooltip does not fade series out.
+          emphasis: { disabled: true },
+          step: options.step || false,
+          data,
+        };
+      }
+
+      function renderCharts() {
+        const levelChart = registerChart(createChart("levelChart"), "levelChart");
+        const flowChart = registerChart(createChart("flowChart"), "flowChart");
+        const gateChart = registerChart(createChart("gateChart"), "gateChart");
+
+        const levelSeries = reportData.charts.levelSeries || [];
+        const flowSeries = reportData.charts.flowSeries || [];
+        const gateSeries = reportData.charts.gateSeries || [];
+
+        document.getElementById("levelCardTitle").textContent = `${localizedTermLabel("water_level")}结果曲线`;
+        document.getElementById("levelCardTitle").title = "water_level";
+        document.getElementById("levelCardDesc").textContent = `共 ${levelSeries.length} 条序列，支持按渠道、闸站、倒虹吸、分水口累积多选展示。`;
+        document.getElementById("levelCardDesc").title = "water_level";
+        document.getElementById("flowCardTitle").textContent = `${localizedTermLabel("water_flow")}结果曲线`;
+        document.getElementById("flowCardTitle").title = "water_flow";
+        document.getElementById("flowCardDesc").textContent = `共 ${flowSeries.length} 条序列，支持跨多个对象累积多选展示。`;
+        document.getElementById("flowCardDesc").title = "water_flow";
+        document.getElementById("gateCardTitle").textContent = `${localizedTermLabel("gate_opening")}结果曲线`;
+        document.getElementById("gateCardTitle").title = "gate_opening";
+        document.getElementById("gateCardDesc").textContent = `共 ${gateSeries.length} 条序列，支持多闸站、多闸门设备同时展示。`;
+        document.getElementById("gateCardDesc").title = "gate_opening";
+
+        const typeLabels = { CrossSection: '断面', DisturbanceNode: '分水口/退水闸', Gate: '闸门' };
+        const categoryOrder = ["渠道", "闸站", "倒虹吸", "分水口", "其他"];
+        const chartInterpretations = reportData.chartInterpretations || {};
+
+        function formatCheckNumber(value, digits = 3) {
+          const number = Number(value);
+          if (!Number.isFinite(number)) return "-";
+          return Number(number.toFixed(digits)).toString();
+        }
+
+        function normalizeSeriesPoints(series) {
+          return (series?.data || [])
+            .map((point) => {
+              const rawStep = Array.isArray(point) ? point[0] : point?.step;
+              const rawValue = Array.isArray(point) ? point[1] : point?.value;
+              return {
+                step: normalizeStepValue(rawStep),
+                value: Number(rawValue),
+              };
+            })
+            .filter((point) => Number.isFinite(point.step) && Number.isFinite(point.value))
+            .sort((left, right) => left.step - right.step);
+        }
+
+        function analyzeWaterLevelDrop(selectedSeries) {
+          const outputStepHours = Number(reportData.meta?.output_step_size) / 3600;
+          if (!Number.isFinite(outputStepHours) || outputStepHours <= 0) {
+            return "水位下降速率检查：缺少有效输出步长，暂无法按 m/h 折算。";
+          }
+          let worst = null;
+          selectedSeries.forEach((series) => {
+            const points = normalizeSeriesPoints(series);
+            for (let index = 1; index < points.length; index += 1) {
+              const previous = points[index - 1];
+              const current = points[index];
+              const stepGap = current.step - previous.step;
+              if (stepGap <= 0) continue;
+              const drop = previous.value - current.value;
+              if (drop <= 0) continue;
+              const rate = drop / (stepGap * outputStepHours);
+              if (!worst || rate > worst.rate) {
+                worst = { series, previous, current, drop, rate };
+              }
+            }
+          });
+          if (!worst) {
+            return "水位下降速率检查：当前选中曲线未识别到下降段，未触发 0.15 m/h、0.3 m/h 阈值。";
+          }
+          const level =
+            worst.rate > 0.3
+              ? "超过 0.3 m/h 控制阈值，需重点复核。"
+              : worst.rate > 0.15
+                ? "超过 0.15 m/h 关注阈值，建议复核。"
+                : "未超过 0.15 m/h 关注阈值。";
+          return (
+            `水位下降速率检查：最大下降速率 ${formatCheckNumber(worst.rate)} m/h，` +
+            `出现在 ${getSeriesDisplayName(worst.series)} 的步长 ${worst.previous.step} → ${worst.current.step}，` +
+            `水位下降 ${formatCheckNumber(worst.drop)} m，${level}`
+          );
+        }
+
+        function analyzeGateOpeningChange(selectedSeries) {
+          let minValue = null;
+          let maxValue = null;
+          let maxChange = null;
+          let minEffectiveChange = null;
+          let effectiveChangeCount = 0;
+          selectedSeries.forEach((series) => {
+            const points = normalizeSeriesPoints(series);
+            points.forEach((point) => {
+              minValue = minValue == null ? point.value : Math.min(minValue, point.value);
+              maxValue = maxValue == null ? point.value : Math.max(maxValue, point.value);
+            });
+            for (let index = 1; index < points.length; index += 1) {
+              const change = Math.abs(points[index].value - points[index - 1].value);
+              if (change <= 0) continue;
+              maxChange = maxChange == null ? change : Math.max(maxChange, change);
+              if (change >= 0.03) {
+                effectiveChangeCount += 1;
+                minEffectiveChange = minEffectiveChange == null ? change : Math.min(minEffectiveChange, change);
+              }
+            }
+          });
+          if (minValue == null || maxValue == null) {
+            return "闸门开度检查：当前未选中有效开度曲线。";
+          }
+          const rangeText = `当前选中开度范围 ${formatCheckNumber(minValue)} ~ ${formatCheckNumber(maxValue)} m，开度允许为正值或负值。`;
+          if (!effectiveChangeCount) {
+            return `${rangeText} 未识别到 ≥ 0.03 m 的有效开度变幅，低于该阈值的变化按微小波动处理。`;
+          }
+          return (
+            `${rangeText} 按绝对变幅检查，识别到 ${effectiveChangeCount} 次 ≥ 0.03 m 的有效变化，` +
+            `最小有效变幅 ${formatCheckNumber(minEffectiveChange)} m，最大变幅 ${formatCheckNumber(maxChange)} m。`
+          );
+        }
+
+        function renderCurveInterpretation(elementId, interpretation, selectedSeries, selectedType) {
+          const element = document.getElementById(elementId);
+          if (!element) return;
+          const dynamicChecks = [];
+          if (elementId === "levelInterpretation") {
+            dynamicChecks.push(analyzeWaterLevelDrop(selectedSeries));
+          }
+          if (elementId === "gateInterpretation") {
+            dynamicChecks.push(analyzeGateOpeningChange(selectedSeries));
+          }
+          element.innerHTML = [interpretation?.analysis, ...dynamicChecks]
+            .filter(Boolean)
+            .map((text) => `<p>${localizeTermText(text)}</p>`)
+            .join("");
+        }
+
+        function getSeriesId(item, index) {
+          return item.seriesId || `${item.objectType || "Unknown"}|${item.name}|${index}`;
+        }
+
+        function getSeriesDisplayName(item) {
+          if (item.objectType === "Gate" && item.childRole === "闸门设备") {
+            if (item.businessObjectName && item.sourceName) return `${item.businessObjectName} / ${item.sourceName}`;
+            return item.displayName || item.sourceName || item.legendName || item.name;
+          }
+          return item.legendName || item.displayName || item.name;
+        }
+
+        function shortenText(value, maxLength = 22) {
+          const text = String(value || "");
+          return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
+        }
+
+        function buildAdaptiveChartLayout(seriesCount, legendSelected = {}) {
+          const showLegend = seriesCount > 0;
+          const legendRows = seriesCount > 12 ? 2 : 1;
+          return {
+            grid: {
+              left: 56,
+              right: 18,
+              top: showLegend ? 42 + legendRows * 22 : 32,
+              bottom: 96,
+              containLabel: true,
+            },
+            legend: {
+              show: showLegend,
+              type: "scroll",
+              top: 6,
+              left: 18,
+              right: 18,
+              height: legendRows * 24,
+              itemWidth: 16,
+              itemHeight: 8,
+              textStyle: { color: chartTheme.textSoft, fontSize: 11 },
+              pageTextStyle: { color: chartTheme.textSoft },
+              formatter: (name) => shortenText(name, 42),
+              selected: legendSelected,
+            },
+          };
+        }
+
+        function bindLegendSelection(chart, legendSelected, onChange) {
+          let legendChangeFrame = null;
+          chart.on("legendselectchanged", (event) => {
+            Object.assign(legendSelected, event?.selected || {});
+            if (!onChange) return;
+            if (legendChangeFrame) {
+              cancelAnimationFrame(legendChangeFrame);
+            }
+            legendChangeFrame = requestAnimationFrame(() => {
+              legendChangeFrame = null;
+              onChange();
+            });
+          });
+        }
+
+        function syncLegendSelection(chart, legendSelected) {
+          const selected = chart.getOption()?.legend?.[0]?.selected || {};
+          Object.assign(legendSelected, selected);
+        }
+
+        function getLegendVisibleSeriesMeta(selectedSeriesMeta, legendSelected) {
+          const visibleSeriesMeta = selectedSeriesMeta.filter((item) => legendSelected[getSeriesDisplayName(item)] !== false);
+          return visibleSeriesMeta.length ? visibleSeriesMeta : selectedSeriesMeta;
+        }
+
+        function buildTooltipFormatter(unit) {
+          return (params) => {
+            const list = Array.isArray(params) ? params : [params];
+            const title = formatAxisTooltipTitle(list[0]?.axisValue ?? list[0]?.axisValueLabel ?? list[0]?.name);
+            const lines = list
+              .map((item) => {
+                const value = Array.isArray(item.value) ? item.value[1] : item.value;
+                return `${item.marker}${item.seriesName}: ${value}${unit}`;
+              })
+              .join("<br/>");
+            return `<div style="max-width:520px;white-space:normal;line-height:1.65"><strong>${title}</strong><br/>${lines}</div>`;
+          };
+        }
+
+        function buildBusinessFilter(seriesArr, typeSelectEl, objectListEl, preferredCategory) {
+          const filterPanel = objectListEl.closest(".curve-filter-panel");
+          const searchInputEl = filterPanel?.querySelector(".curve-search-input");
+          const selectAllButtonEl = filterPanel?.querySelector(".curve-select-all-button");
+          const selectOptionEls = Array.from(filterPanel?.querySelectorAll(".curve-select-option") || []);
+          const normalized = seriesArr.map((item, index) => ({
+            ...item,
+            _index: index,
+            _seriesId: getSeriesId(item, index),
+            _category: item.businessCategory || item.filterType || item.objectType || "其他",
+            _objectKey: `${item.businessCategory || item.filterType || item.objectType || "其他"}|${item.businessObjectId ?? item.businessObjectName ?? item.name}`,
+            _objectLabel: item.businessObjectLabel || item.businessObjectName || item.filterTypeLabel || typeLabels[item.objectType] || item.name,
+            _searchText: [
+              item.businessCategory,
+              item.businessObjectLabel,
+              item.businessObjectName,
+              item.businessObjectId,
+              item.childRole,
+              item.displayName,
+              item.legendName,
+              item.sourceName,
+              item.sourceObjectId,
+              item.name,
+              item.objectType,
+            ]
+              .filter((value) => value != null)
+              .join(" ")
+              .toLowerCase(),
+          }));
+          const selectedIds = new Set();
+          const byCategory = new Map();
+
+          normalized.forEach((item) => {
+            if (!byCategory.has(item._category)) byCategory.set(item._category, new Map());
+            const objectMap = byCategory.get(item._category);
+            if (!objectMap.has(item._objectKey)) {
+              objectMap.set(item._objectKey, {
+                key: item._objectKey,
+                label: item._objectLabel,
+                order: Number(item.businessObjectOrder ?? 999999),
+                searchText: item._objectLabel.toLowerCase(),
+                children: [],
+              });
+            }
+            const objectItem = objectMap.get(item._objectKey);
+            objectItem.children.push(item);
+            objectItem.searchText = `${objectItem.searchText} ${item._searchText}`;
+          });
+
+          const categories = Array.from(byCategory.keys()).sort(
+            (a, b) => (categoryOrder.indexOf(a) === -1 ? 99 : categoryOrder.indexOf(a)) - (categoryOrder.indexOf(b) === -1 ? 99 : categoryOrder.indexOf(b))
+          );
+          const initialCategory = categories.includes(preferredCategory) ? preferredCategory : categories[0];
+
+          function sortedObjects(category) {
+            return Array.from(byCategory.get(category)?.values() || []).sort((a, b) => a.order - b.order || a.label.localeCompare(b.label, "zh-Hans-CN"));
+          }
+
+          function defaultChildren(objectItem) {
+            const defaults = objectItem.children.filter((child) => child.defaultSelected);
+            return defaults.length ? defaults : objectItem.children.slice(0, Math.min(3, objectItem.children.length));
+          }
+
+          function visibleObjects() {
+            const selectedCategory = typeSelectEl.value || initialCategory;
+            const searchText = String(searchInputEl?.value || "").trim().toLowerCase();
+            return sortedObjects(selectedCategory).filter((objectItem) => !searchText || objectItem.searchText.includes(searchText));
+          }
+
+          function countVisibleSelection(objects) {
+            const visibleSeriesCount = objects.reduce((count, objectItem) => count + objectItem.children.length, 0);
+            const selectedVisibleCount = objects.reduce(
+              (count, objectItem) => count + objectItem.children.filter((child) => selectedIds.has(child._seriesId)).length,
+              0
+            );
+            return { visibleSeriesCount, selectedVisibleCount };
+          }
+
+          function childMatchesScope(child, scope) {
+            if (scope === "all") return true;
+            const role = String(child.childRole || "");
+            if (scope === "inlet") {
+              return ["首断面", "进口断面", "闸前断面"].includes(role);
+            }
+            if (scope === "outlet") {
+              return ["尾断面", "出口断面", "闸后断面"].includes(role);
+            }
+            return false;
+          }
+
+          function scopedRoleLabel(objects, scope) {
+            if (scope === "all") return "全选";
+            const roles = scopedChildren(objects, scope)
+              .map((child) => String(child.childRole || ""))
+              .filter(Boolean);
+            const uniqueRoles = Array.from(new Set(roles));
+            if (uniqueRoles.length === 1) return `全选${uniqueRoles[0]}`;
+            const preferredRoles =
+              scope === "inlet"
+                ? ["首断面", "进口断面", "闸前断面"]
+                : ["尾断面", "出口断面", "闸后断面"];
+            const matchedPreferredRoles = preferredRoles.filter((role) => uniqueRoles.includes(role));
+            return matchedPreferredRoles.length
+              ? `全选${matchedPreferredRoles.map((role) => role.replace("断面", "")).join("/")}断面`
+              : scope === "inlet"
+                ? "全选入口侧断面"
+                : "全选出口侧断面";
+          }
+
+          function scopedChildren(objects, scope) {
+            return objects.flatMap((objectItem) => objectItem.children.filter((child) => childMatchesScope(child, scope)));
+          }
+
+          function countScopedSelection(objects, scope) {
+            const children = scopedChildren(objects, scope);
+            const selectedCount = children.filter((child) => selectedIds.has(child._seriesId)).length;
+            return { totalCount: children.length, selectedCount };
+          }
+
+          function toggleScopedSelection(scope) {
+            const objects = visibleObjects();
+            const children = scopedChildren(objects, scope);
+            const shouldClear = children.length > 0 && children.every((child) => selectedIds.has(child._seriesId));
+            children.forEach((child) => {
+              if (shouldClear) selectedIds.delete(child._seriesId);
+              else selectedIds.add(child._seriesId);
+            });
+            renderObjects();
+            emitChanged();
+          }
+
+          const firstObject = sortedObjects(initialCategory)[0];
+          if (firstObject) {
+            defaultChildren(firstObject).forEach((child) => selectedIds.add(child._seriesId));
+          }
+
+          function emitChanged() {
+            typeSelectEl.dispatchEvent(new Event("filter-changed"));
+          }
+
+          function updateCategoryOptions() {
+            const current = typeSelectEl.value || initialCategory;
+            typeSelectEl.innerHTML = "";
+            categories.forEach((category) => {
+              const objects = sortedObjects(category);
+              const selectedCount = objects.reduce(
+                (count, objectItem) => count + objectItem.children.filter((child) => selectedIds.has(child._seriesId)).length,
+                0
+              );
+              const opt = document.createElement("option");
+              opt.value = category;
+              opt.textContent = `${category}（${objects.length} 个对象，已选 ${selectedCount} 条）`;
+              opt.selected = category === current;
+              typeSelectEl.appendChild(opt);
+            });
+            if (!typeSelectEl.value && initialCategory) typeSelectEl.value = initialCategory;
+          }
+
+          function renderObjects() {
+            updateCategoryOptions();
+            const searchText = String(searchInputEl?.value || "").trim().toLowerCase();
+            const objects = visibleObjects();
+            objectListEl.innerHTML = "";
+            if (selectAllButtonEl) {
+              const { visibleSeriesCount, selectedVisibleCount } = countVisibleSelection(objects);
+              const isAllVisibleSelected = visibleSeriesCount > 0 && selectedVisibleCount === visibleSeriesCount;
+              selectAllButtonEl.disabled = visibleSeriesCount === 0;
+              selectAllButtonEl.textContent = visibleSeriesCount
+                ? `${isAllVisibleSelected ? "取消全选" : "全选"}（${selectedVisibleCount}/${visibleSeriesCount}）`
+                : "全选";
+            }
+            selectOptionEls.forEach((optionEl) => {
+              const scope = optionEl.dataset.selectScope || "all";
+              const { totalCount, selectedCount } = countScopedSelection(objects, scope);
+              const allSelected = totalCount > 0 && selectedCount === totalCount;
+              const baseLabel = scopedRoleLabel(objects, scope);
+              optionEl.disabled = totalCount === 0;
+              optionEl.textContent = totalCount
+                ? `${allSelected ? "取消" : ""}${baseLabel}（${selectedCount}/${totalCount}）`
+                : `${baseLabel}（0）`;
+            });
+            if (!objects.length) {
+              const empty = document.createElement("div");
+              empty.className = "curve-empty-state";
+              empty.textContent = searchText ? "没有匹配的对象、断面或设备" : "当前分类暂无可展示曲线";
+              objectListEl.appendChild(empty);
+              return;
+            }
+            objects.forEach((objectItem) => {
+              const selectedChildren = objectItem.children.filter((child) => selectedIds.has(child._seriesId));
+              const card = document.createElement("div");
+              card.className = "curve-object-card";
+
+              const header = document.createElement("label");
+              header.className = "flex cursor-pointer items-center gap-2 text-xs font-semibold text-ink/78";
+              const objectCheckbox = document.createElement("input");
+              objectCheckbox.type = "checkbox";
+              objectCheckbox.checked = selectedChildren.length === objectItem.children.length && objectItem.children.length > 0;
+              objectCheckbox.indeterminate = selectedChildren.length > 0 && selectedChildren.length < objectItem.children.length;
+              objectCheckbox.addEventListener("change", () => {
+                if (objectCheckbox.checked) {
+                  const targetChildren = selectedChildren.length ? objectItem.children : defaultChildren(objectItem);
+                  targetChildren.forEach((child) => selectedIds.add(child._seriesId));
+                } else {
+                  objectItem.children.forEach((child) => selectedIds.delete(child._seriesId));
+                }
+                renderObjects();
+                emitChanged();
+              });
+              const title = document.createElement("span");
+              title.className = "curve-object-title";
+              title.textContent = objectItem.label;
+              title.title = objectItem.label;
+              const count = document.createElement("span");
+              count.className = "shrink-0 text-[11px] font-medium text-ink/48";
+              count.textContent = `${selectedChildren.length}/${objectItem.children.length}`;
+              header.appendChild(objectCheckbox);
+              header.appendChild(title);
+              header.appendChild(count);
+              card.appendChild(header);
+
+              const childList = document.createElement("div");
+              childList.className = "curve-child-list";
+              objectItem.children.forEach((child) => {
+                const childLabel = document.createElement("label");
+                childLabel.className = "filter-chip cursor-pointer px-3 py-2 text-xs";
+                childLabel.title = `${objectItem.label} / ${child.displayName || child.name}`;
+
+                const checkbox = document.createElement("input");
+                checkbox.type = "checkbox";
+                checkbox.value = child._seriesId;
+                checkbox.checked = selectedIds.has(child._seriesId);
+                checkbox.addEventListener("change", () => {
+                  if (checkbox.checked) selectedIds.add(child._seriesId);
+                  else selectedIds.delete(child._seriesId);
+                  renderObjects();
+                  emitChanged();
+                });
+
+                const span = document.createElement("span");
+                span.textContent = child.displayName || child.name;
+                childLabel.appendChild(checkbox);
+                childLabel.appendChild(span);
+                childList.appendChild(childLabel);
+              });
+              card.appendChild(childList);
+              objectListEl.appendChild(card);
+            });
+          }
+
+          typeSelectEl.addEventListener("change", () => {
+            if (searchInputEl) searchInputEl.value = "";
+            renderObjects();
+            emitChanged();
+          });
+          searchInputEl?.addEventListener("input", renderObjects);
+          selectAllButtonEl?.addEventListener("click", () => {
+            toggleScopedSelection("all");
+          });
+          selectOptionEls.forEach((optionEl) => {
+            optionEl.addEventListener("click", () => {
+              toggleScopedSelection(optionEl.dataset.selectScope || "all");
+            });
+          });
+          renderObjects();
+
+          return () => normalized.filter((item) => selectedIds.has(item._seriesId)).map((item) => item._index);
+        }
+
+        const levelTypeSelect = document.getElementById("levelTypeSelect");
+        const levelObjectList = document.getElementById("levelObjectList");
+        const getSelectedLevel = buildBusinessFilter(levelSeries, levelTypeSelect, levelObjectList, '渠道');
+        const levelLegendSelected = {};
+        bindLegendSelection(levelChart, levelLegendSelected, () => updateLevelChart(interactionState.currentStep));
+
+        const flowTypeSelect = document.getElementById("flowTypeSelect");
+        const flowObjectList = document.getElementById("flowObjectList");
+        const getSelectedFlow = buildBusinessFilter(flowSeries, flowTypeSelect, flowObjectList, '渠道');
+        const flowLegendSelected = {};
+        bindLegendSelection(flowChart, flowLegendSelected, () => updateFlowChart(interactionState.currentStep));
+
+        const gateTypeSelect = document.getElementById("gateTypeSelect");
+        const gateObjectList = document.getElementById("gateObjectList");
+        const getSelectedGate = buildBusinessFilter(gateSeries, gateTypeSelect, gateObjectList, '闸站');
+        const gateLegendSelected = {};
+        bindLegendSelection(gateChart, gateLegendSelected, () => updateGateChart(interactionState.currentStep));
+
+        function updateLevelChart(step = interactionState.currentStep) {
+          const selectedIndices = getSelectedLevel();
+          const selectedSeriesMeta = selectedIndices.map((index) => levelSeries[index]);
+          const selectedSeries = selectedSeriesMeta.map((item, index) => buildLineSeries(getSeriesDisplayName(item), item.data, index, { hueOffset: 210 }));
+          syncLegendSelection(levelChart, levelLegendSelected);
+          const visibleSeriesMeta = getLegendVisibleSeriesMeta(selectedSeriesMeta, levelLegendSelected);
+          const bounds = computeAxisBounds(
+            visibleSeriesMeta.map((item) => item.data.map((point) => point[1])),
+            { paddingRatio: 0.12, minPadding: 0.03 }
+          );
+          const stepBounds = computeAxisExtent(
+            visibleSeriesMeta.map((item) => item.data.map((point) => normalizeStepValue(point[0]) ?? point[0]))
+          );
+          renderCurveInterpretation("levelInterpretation", chartInterpretations.level, selectedSeriesMeta, levelTypeSelect.value);
+          const layout = buildAdaptiveChartLayout(selectedSeriesMeta.length, levelLegendSelected);
+
+          levelChart.setOption({
+            animationDuration: 500,
+            grid: layout.grid,
+            tooltip: {
+              trigger: "axis",
+              axisPointer: { type: "line", lineStyle: { color: chartTheme.crosshair, type: "dashed" } },
+              formatter: buildTooltipFormatter(" m"),
+            },
+            legend: layout.legend,
+            dataZoom: [
+              { type: "inside", xAxisIndex: 0, filterMode: "none" },
+              { type: "slider", xAxisIndex: 0, height: 18, bottom: 6, borderColor: "transparent", fillerColor: "rgba(28, 127, 181, 0.14)" },
+            ],
+            xAxis: {
+              type: "value",
+              name: reportData.meta?.axis_label || "步长",
+              min: stepBounds.min,
+              max: stepBounds.max,
+              nameLocation: "middle",
+              nameGap: 40,
+              nameTextStyle: {
+                color: "rgba(16, 35, 50, 0.78)",
+                fontSize: 13,
+                fontWeight: 600,
+                padding: [8, 0, 0, 0],
+              },
+              axisLine: { show: true, lineStyle: { color: chartTheme.grid, width: 1.2 } },
+              axisTick: { show: true, inside: true, lineStyle: { color: chartTheme.grid } },
+              axisLabel: { show: true, margin: 10, color: chartTheme.text, hideOverlap: false },
+              splitLine: { show: false },
+            },
+            yAxis: {
+              type: "value",
+              name: "水位 (m)",
+              min: bounds.min,
+              max: bounds.max,
+              nameLocation: "middle",
+              nameGap: 42,
+              nameRotate: 90,
+              nameTextStyle: {
+                color: "rgba(16, 35, 50, 0.78)",
+                fontSize: 13,
+                fontWeight: 600,
+              },
+              axisLine: { show: true, lineStyle: { color: chartTheme.grid, width: 1.2 } },
+              axisTick: { show: true, inside: true, lineStyle: { color: chartTheme.grid } },
+              axisLabel: { show: true, color: chartTheme.text, hideOverlap: false },
+              splitLine: { lineStyle: { color: chartTheme.grid } },
+            },
+            series: selectedSeries,
+          }, true);
+        }
+
+        function updateFlowChart(step = interactionState.currentStep) {
+          const selectedIndices = getSelectedFlow();
+          const selectedSeriesMeta = selectedIndices.map((index) => flowSeries[index]);
+          const selectedSeries = selectedSeriesMeta.map((item, index) =>
+            buildLineSeries(getSeriesDisplayName(item), item.data, index, {
+              hueOffset: item.minValue < 0 ? 0 : 150,
+              lineWidth: item.minValue < 0 ? 2.5 : 1.8,
+            })
+          );
+          syncLegendSelection(flowChart, flowLegendSelected);
+          const visibleSeriesMeta = getLegendVisibleSeriesMeta(selectedSeriesMeta, flowLegendSelected);
+          const bounds = computeAxisBounds(
+            visibleSeriesMeta.map((item) => item.data.map((point) => point[1])),
+            { paddingRatio: 0.14, minPadding: 0.2 }
+          );
+          const stepBounds = computeAxisExtent(
+            visibleSeriesMeta.map((item) => item.data.map((point) => normalizeStepValue(point[0]) ?? point[0]))
+          );
+          renderCurveInterpretation("flowInterpretation", chartInterpretations.flow, selectedSeriesMeta, flowTypeSelect.value);
+          const layout = buildAdaptiveChartLayout(selectedSeriesMeta.length, flowLegendSelected);
+
+          flowChart.setOption({
+            animationDuration: 500,
+            grid: layout.grid,
+            tooltip: {
+              trigger: "axis",
+              axisPointer: { type: "line", lineStyle: { color: chartTheme.crosshair, type: "dashed" } },
+              formatter: buildTooltipFormatter(" m³/s"),
+            },
+            legend: layout.legend,
+            dataZoom: [
+              { type: "inside", xAxisIndex: 0, filterMode: "none" },
+              { type: "slider", xAxisIndex: 0, height: 18, bottom: 6, borderColor: "transparent", fillerColor: "rgba(28, 127, 181, 0.14)" },
+            ],
+            xAxis: {
+              type: "value",
+              name: reportData.meta?.axis_label || "步长",
+              min: stepBounds.min,
+              max: stepBounds.max,
+              nameLocation: "middle",
+              nameGap: 40,
+              nameTextStyle: {
+                color: "rgba(16, 35, 50, 0.78)",
+                fontSize: 13,
+                fontWeight: 600,
+                padding: [8, 0, 0, 0],
+              },
+              axisLine: { show: true, lineStyle: { color: chartTheme.grid, width: 1.2 } },
+              axisTick: { show: true, inside: true, lineStyle: { color: chartTheme.grid } },
+              axisLabel: { show: true, margin: 10, color: chartTheme.text, hideOverlap: false },
+              splitLine: { show: false },
+            },
+            yAxis: {
+              type: "value",
+              name: "流量 (m³/s)",
+              min: bounds.min,
+              max: bounds.max,
+              nameLocation: "middle",
+              nameGap: 42,
+              nameRotate: 90,
+              nameTextStyle: {
+                color: "rgba(16, 35, 50, 0.78)",
+                fontSize: 13,
+                fontWeight: 600,
+              },
+              axisLine: { show: true, lineStyle: { color: chartTheme.grid, width: 1.2 } },
+              axisTick: { show: true, inside: true, lineStyle: { color: chartTheme.grid } },
+              axisLabel: { show: true, color: chartTheme.text, hideOverlap: false },
+              splitLine: { lineStyle: { color: chartTheme.grid } },
+            },
+            series: selectedSeries,
+          }, true);
+        }
+
+        levelTypeSelect.addEventListener("filter-changed", updateLevelChart);
+        flowTypeSelect.addEventListener("filter-changed", updateFlowChart);
+        gateTypeSelect.addEventListener("filter-changed", updateGateChart);
+
+        function updateGateChart(step = interactionState.currentStep) {
+          const selectedIndices = getSelectedGate();
+          const selectedSeriesMeta = selectedIndices.map((index) => gateSeries[index]);
+          renderCurveInterpretation("gateInterpretation", chartInterpretations.gate, selectedSeriesMeta, gateTypeSelect.value);
+          const gateChartSeries = selectedSeriesMeta.map((item, index) =>
+            buildLineSeries(
+              getSeriesDisplayName(item),
+              item.data
+                .map((point) => [normalizeStepValue(point[0]), point[1]])
+                .filter((point) => Number.isFinite(point[0])),
+              index,
+              { hueOffset: 30, lineWidth: 2.2, step: "end" }
+            )
+          );
+          syncLegendSelection(gateChart, gateLegendSelected);
+          const visibleSeriesMeta = getLegendVisibleSeriesMeta(selectedSeriesMeta, gateLegendSelected);
+          const bounds = computeAxisBounds(
+            visibleSeriesMeta.map((series) => series.data.map((point) => point[1])),
+            { paddingRatio: 0.12, minPadding: 0.02 }
+          );
+          const stepBounds = computeAxisExtent(
+            visibleSeriesMeta.map((series) => series.data.map((point) => normalizeStepValue(point[0]) ?? point[0]))
+          );
+          const layout = buildAdaptiveChartLayout(selectedSeriesMeta.length, gateLegendSelected);
+
+          gateChart.setOption({
+            animationDuration: 500,
+            grid: layout.grid,
+            tooltip: {
+              trigger: "axis",
+              axisPointer: { type: "line", lineStyle: { color: chartTheme.crosshair, type: "dashed" } },
+              formatter: buildTooltipFormatter(""),
+            },
+            legend: layout.legend,
+            dataZoom: [
+              { type: "inside", xAxisIndex: 0, filterMode: "none" },
+              { type: "slider", xAxisIndex: 0, height: 18, bottom: 6, borderColor: "transparent", fillerColor: "rgba(28, 127, 181, 0.14)" },
+            ],
+            xAxis: {
+              type: "value",
+              name: reportData.meta?.axis_label || "步长",
+              min: stepBounds.min,
+              max: stepBounds.max,
+              nameLocation: "middle",
+              nameGap: 40,
+              nameTextStyle: {
+                color: "rgba(16, 35, 50, 0.78)",
+                fontSize: 13,
+                fontWeight: 600,
+                padding: [8, 0, 0, 0],
+              },
+              axisLine: { show: true, lineStyle: { color: chartTheme.grid, width: 1.2 } },
+              axisTick: { show: true, inside: true, lineStyle: { color: chartTheme.grid } },
+              axisLabel: { show: true, color: chartTheme.text, fontSize: 11, margin: 12, hideOverlap: false },
+              splitLine: { show: false },
+            },
+            yAxis: {
+              type: "value",
+              name: "开度",
+              min: bounds.min,
+              max: bounds.max,
+              nameLocation: "middle",
+              nameGap: 42,
+              nameRotate: 90,
+              nameTextStyle: {
+                color: "rgba(16, 35, 50, 0.78)",
+                fontSize: 13,
+                fontWeight: 600,
+              },
+              axisLine: { show: true, lineStyle: { color: chartTheme.grid, width: 1.2 } },
+              axisTick: { show: true, inside: true, lineStyle: { color: chartTheme.grid } },
+              axisLabel: { show: true, color: chartTheme.text, hideOverlap: false },
+              splitLine: { lineStyle: { color: chartTheme.grid } },
+            },
+            series: gateChartSeries,
+          }, true);
+        }
+
+        interactionState.api.updateLevelChart = updateLevelChart;
+        interactionState.api.updateFlowChart = updateFlowChart;
+        interactionState.api.updateGateChart = updateGateChart;
+
+        updateLevelChart(interactionState.currentStep);
+        updateFlowChart(interactionState.currentStep);
+        updateGateChart(interactionState.currentStep);
+      }
+
+      function renderTimelineControls() {
+        const slider = document.getElementById("timelineSlider");
+        const playButton = document.getElementById("timelinePlay");
+        const pauseButton = document.getElementById("timelinePause");
+        const resumeButton = document.getElementById("timelineResume");
+        const rateSelect = document.getElementById("timelineRate");
+        const rateControl = rateSelect?.closest(".timeline-rate-control");
+        const rateLabel = document.getElementById("timelineRateLabel");
+        const rateSelectWrap = document.getElementById("timelineRateSelectWrap");
+
+        if (!interactionState.steps.length) {
+          [slider, playButton, pauseButton, resumeButton, rateSelect].forEach((element) => {
+            if (element) element.disabled = true;
+          });
+          return;
+        }
+
+        slider.step = "1";
+        slider.setAttribute("aria-label", "纵剖面时间轴");
+        rateSelect.value = String(interactionState.playbackRate);
+
+        const handleScrub = (event) => {
+          stopPlayback();
+          setCurrentStepByIndex(event.target.value);
+        };
+
+        const scrubToPointer = (clientX) => {
+          const rect = slider.getBoundingClientRect();
+          if (!rect.width) return;
+          const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+          const index = Math.round(ratio * Math.max(0, interactionState.steps.length - 1));
+          slider.value = String(index);
+          setCurrentStepByIndex(index);
+        };
+
+        slider.addEventListener("pointerdown", (event) => {
+          interactionState.scrubbing = true;
+          stopPlayback();
+          slider.focus();
+          scrubToPointer(event.clientX);
+        });
+
+        slider.addEventListener("pointerup", (event) => {
+          interactionState.scrubbing = false;
+          scrubToPointer(event.clientX);
+        });
+
+        slider.addEventListener("pointermove", (event) => {
+          if (!interactionState.scrubbing) return;
+          scrubToPointer(event.clientX);
+        });
+
+        slider.addEventListener("pointercancel", () => {
+          interactionState.scrubbing = false;
+        });
+
+        slider.addEventListener("input", handleScrub);
+        slider.addEventListener("change", handleScrub);
+        slider.addEventListener("keyup", handleScrub);
+
+        playButton.addEventListener("click", () => startPlayback(true));
+        pauseButton.addEventListener("click", () => stopPlayback());
+        resumeButton.addEventListener("click", () => startPlayback(false));
+        rateSelect.addEventListener("change", (event) => setPlaybackRate(event.target.value));
+        rateControl?.addEventListener("click", (event) => {
+          if (event.target === rateSelect || event.target === rateLabel || rateSelectWrap?.contains(event.target)) return;
+          rateSelect.focus();
+        });
+        rateLabel?.addEventListener("click", () => {
+          const options = Array.from(rateSelect.options).map((option) => option.value);
+          const currentIndex = Math.max(0, options.indexOf(String(interactionState.playbackRate)));
+          const nextValue = options[(currentIndex + 1) % options.length];
+          setPlaybackRate(nextValue);
+        });
+        rateSelectWrap?.addEventListener("click", () => {
+          rateSelect.focus();
+          if (typeof rateSelect.showPicker === "function") {
+            rateSelect.showPicker();
+            return;
+          }
+          rateSelect.click();
+        });
+
+        updateTimelineUI();
+        setCurrentStepByIndex(interactionState.steps.indexOf(interactionState.currentStep));
+      }
+
+      renderHeader();
+      renderHeadlineCards();
+      renderMetaCards();
+      renderSummaryBullets();
+      renderSnapshot();
+      renderRiskBars();
+      renderActions();
+      renderMiniTable();
+      initAsideTabs();
+      renderAnomalyTable();
+      renderLongitudinalProfile();
+      renderCharts();
+      renderTimelineControls();
+      })().catch((error) => {
+        console.error(error);
+        document.body.innerHTML = `
+          <div class="mx-auto max-w-3xl px-6 py-16">
+            <div class="section-shell rounded-[32px] p-8">
+              <p class="text-xs font-semibold uppercase tracking-[0.24em] text-danger">Template Error</p>
+              <h1 class="mt-4 text-4xl font-semibold text-ink">报告数据未加载</h1>
+              <p class="mt-4 text-base leading-8 text-ink/72">${error.message}</p>
+            </div>
+          </div>
+        `;
+      });
+    </script>
+  </body>
+</html>
