@@ -238,7 +238,12 @@ def load_mdm_map(path: Path) -> list[dict[str, Any]]:
 
 
 def load_simulation(simulation_file: Path, start_time: datetime, output_step_size: int) -> pd.DataFrame:
-    sim = pd.read_excel(simulation_file, sheet_name=0, engine="openpyxl")
+    if simulation_file.suffix.lower() == ".csv":
+        sim = pd.read_csv(simulation_file)
+    else:
+        sim = pd.read_excel(simulation_file, sheet_name=0, engine="openpyxl")
+    if "data_index" not in sim.columns and "step_index" in sim.columns:
+        sim = sim.rename(columns={"step_index": "data_index"})
     required = {"object_id", "object_name", "metrics_code", "data_index", "value"}
     missing = sorted(required - set(sim.columns))
     if missing:

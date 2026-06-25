@@ -1,0 +1,998 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>标准化调度方案报告 | MPC 调度复核</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230f8b8d'/%3E%3Ctext x='32' y='40' font-size='28' text-anchor='middle' fill='white' font-family='Arial'%3E调%3C/text%3E%3C/svg%3E" />
+  <script src="./standard-dispatch-report.data.js"></script>
+  <style>
+    :root {
+      --paper: #e8f0f2;
+      --ink: #102332;
+      --text: rgba(16, 35, 50, 0.78);
+      --muted: rgba(16, 35, 50, 0.58);
+      --line: rgba(135, 166, 179, 0.28);
+      --green: #0f8b8d;
+      --green-2: #185b75;
+      --blue: #185b75;
+      --amber: #b48b45;
+      --red: #c23b38;
+      --shadow: 0 18px 42px rgba(16, 35, 50, 0.10);
+      --radius: 28px;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(15, 139, 141, 0.16), transparent 30%),
+        radial-gradient(circle at top right, rgba(24, 91, 117, 0.18), transparent 28%),
+        linear-gradient(180deg, rgba(232, 240, 242, 0.9), rgba(221, 233, 237, 0.9)),
+        var(--paper);
+      font-family: "Times New Roman", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+      line-height: 1.62;
+      text-rendering: optimizeLegibility;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .page {
+      width: min(1440px, calc(100% - 48px));
+      margin: 0 auto;
+      padding: 28px 0 64px;
+    }
+
+    .shell {
+      display: grid;
+      grid-template-columns: 236px minmax(0, 1fr);
+      gap: 22px;
+      align-items: start;
+      transition: grid-template-columns 180ms ease;
+    }
+
+    .shell.nav-collapsed { grid-template-columns: 88px minmax(0, 1fr); }
+
+    aside {
+      position: sticky;
+      top: 22px;
+      z-index: 5;
+      min-height: calc(100vh - 56px);
+      padding: 18px;
+      color: #eef8f4;
+      border: 1px solid rgba(255, 255, 255, 0.13);
+      border-radius: 30px;
+      background:
+        radial-gradient(circle at top, rgba(18, 85, 110, 0.38), transparent 55%),
+        linear-gradient(180deg, rgba(13, 35, 51, 0.97), rgba(10, 26, 39, 0.96));
+      box-shadow: 0 18px 34px rgba(8, 18, 26, 0.22);
+      transition: padding 180ms ease, border-radius 180ms ease;
+    }
+
+    main {
+      position: relative;
+      overflow: hidden;
+      min-width: 0;
+      padding: 24px;
+      border: 1px solid rgba(255, 255, 255, 0.78);
+      border-radius: 36px;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.84), rgba(248, 251, 252, 0.95)),
+        #ffffff;
+      box-shadow:
+        0 28px 80px rgba(16, 35, 50, 0.14),
+        inset 0 1px 0 rgba(255, 255, 255, 0.72);
+    }
+
+    main::before,
+    main::after {
+      content: "";
+      position: absolute;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    main::before {
+      inset: 0 auto auto 0;
+      width: min(46vw, 560px);
+      height: 280px;
+      background:
+        radial-gradient(circle at 18% 24%, rgba(15, 139, 141, 0.18), transparent 38%),
+        linear-gradient(135deg, rgba(24, 91, 117, 0.12), transparent 72%);
+    }
+
+    main::after {
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(24, 91, 117, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(24, 91, 117, 0.03) 1px, transparent 1px);
+      background-size: 48px 48px;
+      mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.55), transparent 36%);
+    }
+
+    main > * {
+      position: relative;
+      z-index: 1;
+    }
+
+    h1, h2, h3 {
+      margin: 0;
+      font-family: "Times New Roman", "Songti SC", "STSong", Georgia, serif;
+      letter-spacing: 0;
+    }
+
+    .brand {
+      display: grid;
+      gap: 10px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.18);
+    }
+
+    .brand-mark {
+      width: 46px;
+      height: 46px;
+      display: grid;
+      place-items: center;
+      color: #fff;
+      font-weight: 800;
+      background: linear-gradient(135deg, #0f8b8d, #185b75);
+      border-radius: 16px;
+      box-shadow: 0 14px 24px rgba(15, 139, 141, 0.22);
+    }
+
+    .brand strong { font-size: 17px; line-height: 1.25; }
+    .brand span { color: #aac3b8; font-size: 12px; }
+
+    .nav-toggle {
+      position: absolute;
+      top: 18px;
+      right: 18px;
+      width: 34px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      color: #dff4f3;
+      background: rgba(255, 255, 255, 0.10);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 999px;
+      cursor: pointer;
+      transition: background 160ms ease, transform 160ms ease;
+    }
+
+    .nav-toggle::after,
+    .shell.nav-collapsed nav a::after {
+      content: attr(aria-label);
+      position: absolute;
+      top: 50%;
+      z-index: 20;
+      min-width: max-content;
+      padding: 8px 12px;
+      color: #123044;
+      background: rgba(255, 255, 255, 0.96);
+      border: 1px solid rgba(135, 166, 179, 0.28);
+      border-radius: 12px;
+      box-shadow: 0 14px 30px rgba(16, 35, 50, 0.16);
+      font-family: "Noto Sans SC", "PingFang SC", sans-serif;
+      font-size: 13px;
+      font-weight: 800;
+      line-height: 1;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 140ms ease, transform 140ms ease;
+    }
+
+    .nav-toggle::after {
+      right: calc(100% + 10px);
+      transform: translate(-6px, -50%);
+    }
+
+    .nav-toggle:hover,
+    .nav-toggle:focus-visible {
+      outline: none;
+      background: rgba(255, 255, 255, 0.18);
+      transform: translateY(-1px);
+    }
+
+    .nav-toggle:hover::after,
+    .nav-toggle:focus-visible::after {
+      opacity: 1;
+      transform: translate(0, -50%);
+    }
+
+    .nav-toggle svg { transition: transform 180ms ease; }
+    .shell.nav-collapsed .nav-toggle svg { transform: rotate(180deg); }
+
+    nav {
+      display: grid;
+      gap: 6px;
+      margin-top: 18px;
+    }
+
+    nav a {
+      display: block;
+      padding: 9px 10px;
+      color: #d6e7df;
+      text-decoration: none;
+      border-radius: 8px;
+      font-size: 13px;
+    }
+
+    nav a:hover,
+    nav a:focus-visible,
+    nav a.is-active {
+      outline: none;
+      color: #fff;
+      background: rgba(15, 139, 141, 0.22);
+    }
+
+    .aside-foot {
+      position: absolute;
+      left: 18px;
+      right: 18px;
+      bottom: 18px;
+      padding-top: 14px;
+      border-top: 1px solid rgba(255, 255, 255, 0.18);
+      color: #aac3b8;
+      font-size: 12px;
+    }
+
+    .shell.nav-collapsed aside {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 10px;
+      border-radius: 28px;
+    }
+
+    .shell.nav-collapsed .brand {
+      order: 1;
+      width: 100%;
+      display: grid;
+      place-items: center;
+      padding: 0 0 4px;
+    }
+
+    .shell.nav-collapsed .brand-mark {
+      width: 46px;
+      height: 46px;
+      font-size: 18px;
+      box-shadow: 0 12px 24px rgba(15, 139, 141, 0.18);
+    }
+
+    .shell.nav-collapsed .nav-toggle {
+      position: relative;
+      top: auto;
+      right: auto;
+      order: 2;
+      flex: 0 0 auto;
+      width: 42px;
+      height: 34px;
+      margin: 0;
+      color: #e9fbfa;
+      background: rgba(255, 255, 255, 0.13);
+      border-color: rgba(255, 255, 255, 0.20);
+      border-radius: 14px;
+    }
+
+    .shell.nav-collapsed .nav-toggle::after {
+      left: calc(100% + 12px);
+      right: auto;
+      transform: translate(6px, -50%);
+    }
+
+    .shell.nav-collapsed .nav-toggle:hover::after,
+    .shell.nav-collapsed .nav-toggle:focus-visible::after {
+      transform: translate(0, -50%);
+    }
+
+    .shell.nav-collapsed nav {
+      order: 3;
+      width: 100%;
+      display: grid;
+      grid-template-columns: 1fr;
+      justify-items: center;
+      gap: 8px;
+      margin-top: 2px;
+      padding-top: 14px;
+      border-top: 1px solid rgba(255, 255, 255, 0.14);
+      counter-reset: nav-item;
+    }
+
+    .shell.nav-collapsed nav a {
+      position: relative;
+      width: 44px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      padding: 0;
+      border-radius: 14px;
+      color: rgba(221, 242, 241, 0.86);
+      background: rgba(255, 255, 255, 0.055);
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      font-size: 0;
+      line-height: 1;
+    }
+
+    .shell.nav-collapsed nav a::before {
+      counter-increment: nav-item;
+      content: counter(nav-item, decimal-leading-zero);
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      font-family: "Noto Sans SC", "PingFang SC", sans-serif;
+      font-size: 11px;
+      font-weight: 800;
+      line-height: 1;
+    }
+
+    .shell.nav-collapsed nav a::after {
+      content: attr(data-tooltip);
+      left: calc(100% + 12px);
+      transform: translate(6px, -50%);
+    }
+
+    .shell.nav-collapsed nav a:hover::after,
+    .shell.nav-collapsed nav a:focus-visible::after {
+      opacity: 1;
+      transform: translate(0, -50%);
+    }
+
+    .shell.nav-collapsed nav a:hover,
+    .shell.nav-collapsed nav a:focus-visible,
+    .shell.nav-collapsed nav a.is-active {
+      background: linear-gradient(135deg, rgba(15, 139, 141, 0.72), rgba(24, 91, 117, 0.88));
+      border-color: rgba(146, 227, 223, 0.42);
+      color: #fff;
+      box-shadow: 0 10px 20px rgba(5, 20, 28, 0.22);
+    }
+
+    .shell.nav-collapsed .brand strong,
+    .shell.nav-collapsed .brand span,
+    .shell.nav-collapsed .aside-foot { display: none; }
+
+    .hero,
+    section,
+    .metric,
+    .panel,
+    .callout,
+    .step,
+    .risk-card,
+    .chart-card,
+    .table-wrap,
+    .signature {
+      border: 1px solid rgba(135, 166, 179, 0.22);
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(248, 251, 252, 0.94)),
+        rgba(255, 255, 255, 0.9);
+      box-shadow:
+        0 16px 34px rgba(16, 35, 50, 0.07),
+        inset 0 1px 0 rgba(255, 255, 255, 0.72);
+    }
+
+    .hero {
+      position: relative;
+      overflow: hidden;
+      min-height: 284px;
+      padding: 30px;
+      border-radius: 30px;
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      inset: 0 0 0 auto;
+      width: 44%;
+      background:
+        linear-gradient(135deg, transparent 0 38%, rgba(15, 139, 141, 0.1) 38% 39%, transparent 39% 100%),
+        linear-gradient(45deg, transparent 0 48%, rgba(24, 91, 117, 0.12) 48% 49%, transparent 49% 100%);
+      background-size: 120px 120px;
+      opacity: 0.75;
+      pointer-events: none;
+    }
+
+    .hero > * {
+      position: relative;
+      z-index: 1;
+    }
+
+    .hero h1 {
+      max-width: 1120px;
+      margin: 0 auto;
+      text-align: center;
+      font-size: clamp(32px, 4vw, 56px);
+      line-height: 1.12;
+    }
+
+    .lead {
+      width: min(100%, 1040px);
+      margin: 18px auto 0;
+      color: var(--text);
+      font-size: 16px;
+      text-align: justify;
+      text-align-last: left;
+      text-justify: inter-ideograph;
+    }
+
+    .meta-grid,
+    .metric-grid,
+    .grid-2,
+    .chart-grid,
+    .decision,
+    .signature-grid {
+      display: grid;
+      gap: 14px;
+    }
+
+    .meta-grid {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      margin-top: 30px;
+    }
+
+    .meta-item {
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      background: rgba(255, 255, 255, 0.68);
+    }
+
+    .label,
+    .muted {
+      color: var(--muted);
+    }
+
+    .value {
+      display: block;
+      margin-top: 8px;
+      font-weight: 800;
+      font-size: 16px;
+    }
+
+    .metric-grid {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      margin: 24px 0;
+    }
+
+    .metric {
+      padding: 20px;
+      border-radius: 20px;
+    }
+
+    .metric strong {
+      display: block;
+      margin-top: 8px;
+      font-size: 42px;
+      line-height: 1;
+      color: var(--green-2);
+    }
+
+    .metric.danger strong { color: var(--red); }
+    .metric.warn strong { color: var(--amber); }
+
+    section {
+      margin-top: 22px;
+      padding: 26px;
+      border-radius: 30px;
+    }
+
+    .section-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: end;
+      margin-bottom: 20px;
+    }
+
+    .section-kicker {
+      color: var(--green-2);
+      font-weight: 900;
+      font-size: 12px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    h2 { margin-top: 6px; font-size: 28px; }
+    h3 { font-size: 18px; }
+
+    .grid-2,
+    .chart-grid,
+    .decision {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    }
+
+    .panel,
+    .callout,
+    .step,
+    .risk-card,
+    .chart-card,
+    .signature {
+      border-radius: 20px;
+      padding: 18px;
+    }
+
+    .callout {
+      border-left: 6px solid var(--red);
+    }
+
+    .callout.warn { border-left-color: var(--amber); }
+
+    .flow-steps {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .step b {
+      display: inline-grid;
+      place-items: center;
+      width: 32px;
+      height: 32px;
+      margin-bottom: 12px;
+      color: #fff;
+      background: var(--green);
+      border-radius: 9px;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      padding: 0;
+      border-radius: 20px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 720px;
+    }
+
+    th,
+    td {
+      padding: 13px 14px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+      font-size: 13px;
+    }
+
+    th {
+      color: var(--muted);
+      background: rgba(15, 139, 141, 0.06);
+      font-weight: 800;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      color: var(--green-2);
+      background: rgba(15, 139, 141, 0.10);
+      font-weight: 800;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .tag.warn { color: var(--amber); background: rgba(180, 139, 69, 0.16); }
+    .tag.danger { color: var(--red); background: rgba(194, 59, 56, 0.12); }
+    .tag.info { color: var(--blue); background: rgba(24, 91, 117, 0.11); }
+
+    .bar-list {
+      display: grid;
+      gap: 12px;
+    }
+
+    .bar-meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      margin-bottom: 6px;
+      font-weight: 800;
+      font-size: 13px;
+    }
+
+    .bar-track {
+      height: 10px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: rgba(15, 139, 141, 0.08);
+    }
+
+    .bar-fill {
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--green), var(--green-2));
+    }
+
+    .line-chart {
+      position: relative;
+      min-height: 220px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background:
+        linear-gradient(var(--line) 1px, transparent 1px),
+        linear-gradient(90deg, var(--line) 1px, transparent 1px);
+      background-size: 100% 25%, 25% 100%;
+    }
+
+    .line-chart svg {
+      width: 100%;
+      height: 220px;
+      display: block;
+    }
+
+    .legend {
+      display: flex;
+      gap: 16px;
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .legend i {
+      display: inline-block;
+      width: 20px;
+      height: 4px;
+      margin-right: 6px;
+      border-radius: 999px;
+      vertical-align: middle;
+    }
+
+    .heatmap {
+      display: grid;
+      gap: 4px;
+      min-width: 760px;
+    }
+
+    .heatmap-cell {
+      min-height: 36px;
+      padding: 8px;
+      border-radius: 4px;
+      background: rgba(15, 139, 141, 0.08);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .risk-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .decision-card {
+      min-height: 150px;
+      padding: 22px;
+      border-radius: 22px;
+      color: #fff;
+      background:
+        radial-gradient(circle at top right, rgba(255,255,255,0.2), transparent 36%),
+        linear-gradient(135deg, var(--green-2), #0d2333);
+    }
+
+    .signature-grid {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      margin-top: 14px;
+    }
+
+    .print-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      margin-top: 22px;
+    }
+
+    .button {
+      border: 0;
+      border-radius: 999px;
+      padding: 10px 16px;
+      color: #fff;
+      background: var(--green-2);
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    @media (max-width: 1120px) {
+      .page { width: min(100% - 24px, 860px); padding-top: 12px; }
+      .shell,
+      .shell.nav-collapsed { grid-template-columns: 1fr; }
+      aside,
+      .shell.nav-collapsed aside {
+        display: block;
+        min-height: 0;
+        padding: 22px;
+        border-radius: 30px;
+      }
+      .nav-toggle { display: none; }
+      .shell.nav-collapsed .brand { place-items: start; padding-bottom: 22px; }
+      .shell.nav-collapsed .brand strong,
+      .shell.nav-collapsed .brand span,
+      .shell.nav-collapsed nav,
+      .shell.nav-collapsed .aside-foot { display: block; }
+      .shell.nav-collapsed nav { display: grid; }
+      .meta-grid,
+      .metric-grid,
+      .grid-2,
+      .chart-grid,
+      .decision,
+      .risk-grid,
+      .signature-grid,
+      .flow-steps { grid-template-columns: 1fr; }
+      main { padding: 16px; }
+      .hero { padding: 22px; }
+    }
+
+    @media print {
+      body { background: #fff; }
+      aside, .print-bar { display: none; }
+      .page { width: 100%; padding: 0; }
+      .shell { display: block; }
+      main { padding: 0; border: 0; box-shadow: none; }
+      main::before, main::after { display: none; }
+      section, .hero, .metric { box-shadow: none; break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="shell" id="reportShell">
+      <aside aria-label="报告导航">
+        <button class="nav-toggle" type="button" id="navToggle" aria-label="收起报告目录" aria-expanded="true" title="收起/展开目录">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M10 3.5 5.5 8 10 12.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <div class="brand">
+          <div class="brand-mark">调</div>
+          <strong>标准化调度方案</strong>
+          <span>MPC Dispatch Brief</span>
+        </div>
+        <nav>
+          <a href="#overview" title="方案总览" data-tooltip="方案总览">方案总览</a>
+          <a href="#scenario" title="触发条件" data-tooltip="触发条件">触发条件</a>
+          <a href="#scope" title="控制范围" data-tooltip="控制范围">控制范围</a>
+          <a href="#targets" title="目标约束" data-tooltip="目标约束">目标约束</a>
+          <a href="#actions" title="执行口令" data-tooltip="执行口令">执行口令</a>
+          <a href="#process" title="过程曲线" data-tooltip="过程曲线">过程曲线</a>
+          <a href="#risk" title="风险闭环" data-tooltip="风险闭环">风险闭环</a>
+          <a href="#decision" title="执行结论" data-tooltip="执行结论">执行结论</a>
+        </nav>
+        <div class="aside-foot">
+          <div>模板版本：STD-DISPATCH-01 + MPC</div>
+          <div id="asideTask">任务：-</div>
+        </div>
+      </aside>
+
+      <main id="reportRoot"></main>
+    </div>
+  </div>
+
+  <script>
+    (() => {
+      const data = window.HYDROS_DISPATCH_REPORT_DATA;
+      if (!data) {
+        throw new Error("HYDROS_DISPATCH_REPORT_DATA 未加载，请确认 standard-dispatch-report.data.js 位于模板同目录。");
+      }
+
+      const root = document.getElementById("reportRoot");
+      const steps = data.steps || [];
+      const summary = data.summary || {};
+      const firstStep = steps[0]?.step ?? "-";
+      const finalStep = steps.at(-1)?.step ?? "-";
+      const stationStats = data.stationStats || [];
+      const rankedGates = data.rankedGates || [];
+      const waterStations = data.waterStations || [];
+      const worstStation = stationStats[0] || {};
+      const closestStation = [...stationStats].sort((a, b) => (a.avgAbsError || 0) - (b.avgAbsError || 0))[0] || {};
+
+      const esc = (value) => String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;");
+      const fmt = (value, digits = 2) => Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : "-";
+      const pct = (value, max) => `${Math.min(100, Math.max(0, max ? (Number(value) / max) * 100 : 0)).toFixed(1)}%`;
+
+      document.getElementById("asideTask").textContent = `任务：${data.taskId || "-"}`;
+      document.title = `${data.meta?.reportTitle || "标准化调度方案报告"} | MPC 调度复核`;
+
+      const avgErrorByStep = steps.map((step) => {
+        const values = waterStations
+          .map((station) => station.values?.[String(step.step)]?.["1"]?.absError)
+          .filter((value) => Number.isFinite(Number(value)));
+        return [step.step, values.length ? values.reduce((sum, value) => sum + Number(value), 0) / values.length : 0];
+      });
+
+      const sparkline = (points, width = 620, height = 180, padding = 26) => {
+        const values = points.map((item) => Number(item[1])).filter(Number.isFinite);
+        if (!values.length) return "";
+        let min = Math.min(...values);
+        let max = Math.max(...values);
+        if (min === max) { min -= 1; max += 1; }
+        const usableW = width - padding * 2;
+        const usableH = height - padding * 2;
+        return points.map(([_, rawValue], index) => {
+          const value = Number(rawValue);
+          const x = padding + index * (usableW / Math.max(1, points.length - 1));
+          const y = height - padding - ((value - min) / (max - min)) * usableH;
+          return `${x.toFixed(1)},${y.toFixed(1)}`;
+        }).join(" ");
+      };
+
+      const commandRows = rankedGates.slice(0, 6).map((gate, index) => `
+        <tr>
+          <td>${index + 1}</td>
+          <td>step ${firstStep}-${finalStep}</td>
+          <td>${esc(gate.stationName)}</td>
+          <td>${esc(gate.gateName)}</td>
+          <td>执行 H1 开度由 ${fmt(gate.firstOpening)} 调整至 ${fmt(gate.finalOpening)}</td>
+          <td>变化 ${fmt(gate.change)}，峰值 ${fmt(gate.maxOpening)}</td>
+          <td><span class="tag warn">需复核</span></td>
+        </tr>
+      `).join("");
+
+      const comparisonRows = steps.map((step, index) => {
+        const avgError = avgErrorByStep[index]?.[1] || 0;
+        const high = avgError > (summary.avgAbsError || 0);
+        return `
+          <tr>
+            <td>step ${step.step}</td>
+            <td>${fmt(step.loss, 0)}</td>
+            <td>${fmt(step.gateAmplitude)}</td>
+            <td>${step.gateOperations ?? "-"}</td>
+            <td>${fmt(avgError)}</td>
+            <td><span class="tag ${high ? "danger" : "info"}">${high ? "偏差偏高" : "相对较稳"}</span></td>
+          </tr>
+        `;
+      }).join("");
+
+      const keyStations = stationStats.slice(0, 6);
+      const stationBars = keyStations.map((station) => `
+        <div>
+          <div class="bar-meta"><span>${esc(station.stationName)}</span><span>${fmt(station.avgAbsError)} m</span></div>
+          <div class="bar-track"><div class="bar-fill" style="width:${pct(station.avgAbsError, summary.maxAbsError)}"></div></div>
+        </div>
+      `).join("");
+
+      const heatmapHeader = steps.map((step) => `<div class="heatmap-cell muted">${step.step}</div>`).join("");
+      const heatmapRows = keyStations.map((station) => {
+        const cells = steps.map((step) => {
+          const value = waterStations.find((item) => item.nodeId === station.nodeId)?.values?.[String(step.step)]?.["1"]?.absError || 0;
+          const alpha = 0.12 + Math.min(0.76, Number(value) / Math.max(1, summary.maxAbsError || 1) * 0.72);
+          return `<div class="heatmap-cell" title="${esc(station.stationName)} step ${step.step}: ${fmt(value)} m" style="background:rgba(194,59,56,${alpha.toFixed(2)});"></div>`;
+        }).join("");
+        return `<div class="heatmap-cell">${esc(station.stationName)}</div>${cells}`;
+      }).join("");
+
+      const riskCards = stationStats.slice(0, 3).map((station, index) => `
+        <article class="risk-card">
+          <span class="tag ${index === 0 ? "danger" : "warn"}">${index === 0 ? "优先复核" : "持续观察"}</span>
+          <h3 style="margin-top:12px;">${esc(station.stationName)}</h3>
+          <p class="muted">平均偏差 ${fmt(station.avgAbsError)} m，最大偏差 ${fmt(station.maxAbsError)} m，末步偏差 ${fmt(station.finalError)} m。</p>
+        </article>
+      `).join("");
+
+      root.innerHTML = `
+        <header class="hero" id="overview">
+          <h1>${esc(data.meta?.reportTitle || "京石段 MPC 标准化调度方案复核报告")}</h1>
+          <p class="lead">${esc(data.meta?.lead || "本报告基于 MPC 调度输出生成，采用“每次优化只取第一预测步 H1 作为实际执行值，直到下一控制步更新”的口径，重点复核闸门执行开度、水位目标跟踪偏差和需要优先关注的控制闸站。")}</p>
+          <div class="meta-grid">
+            <div class="meta-item"><span class="label">方案状态</span><span class="value">${esc(data.meta?.planStatus || "建议复核后执行")}</span></div>
+            <div class="meta-item"><span class="label">调度步段</span><span class="value">step ${firstStep}-${finalStep}</span></div>
+            <div class="meta-item"><span class="label">主控对象</span><span class="value">${summary.gateCount || 0} 个闸门 / ${summary.stationCount || 0} 个闸站</span></div>
+            <div class="meta-item"><span class="label">生成时间</span><span class="value">${esc(data.meta?.generatedAt || new Date().toISOString().slice(0, 10))}</span></div>
+          </div>
+        </header>
+
+        <section class="metric-grid" aria-label="核心指标">
+          <article class="metric danger"><span class="label">最大水位偏差</span><strong>${fmt(summary.maxAbsError)}</strong><span class="muted">${esc(worstStation.stationName || "-")}</span></article>
+          <article class="metric"><span class="label">平均水位偏差</span><strong>${fmt(summary.avgAbsError)}</strong><span class="muted">按 H1 执行水位统计，共 ${summary.pointCount || 0} 点</span></article>
+          <article class="metric"><span class="label">最大执行开度</span><strong>${fmt(summary.maxOpening)}</strong><span class="muted">来自 MPC 闸门 H1 执行序列</span></article>
+          <article class="metric warn"><span class="label">末步动作数</span><strong>${summary.totalOperations ?? "-"}</strong><span class="muted">末步总调节幅度 ${fmt(summary.totalAmplitude)}</span></article>
+        </section>
+
+        <section id="scenario">
+          <div class="section-head"><div><div class="section-kicker">01 Scenario</div><h2>场景与触发条件</h2></div><p class="muted">说明本次调度方案为什么需要复核。</p></div>
+          <div class="grid-2">
+            <div class="callout"><h3>事件定义</h3><p>本轮为场景 ${esc(data.scenarioId || "-")} 的 MPC 控制输出复核，调度任务 ${esc(data.taskId || "-")} 已生成 ${summary.planCount || 0} 组滚动方案。</p></div>
+            <div class="callout warn"><h3>核心问题</h3><p>按闸前水位 water_level 对 target_water_level 统计，平均绝对偏差为 ${fmt(summary.avgAbsError)} m，最大偏差为 ${fmt(summary.maxAbsError)} m，需要调度人员确认目标口径与现场控制面是否一致。</p></div>
+          </div>
+          <div class="flow-steps">
+            ${["读取方案", "锁定口径", "计算偏差", "筛选闸门", "形成口令", "滚动校核"].map((title, index) => `<div class="step"><b>${String(index + 1).padStart(2, "0")}</b><h3>${title}</h3><p class="muted">${["解析 MPC 输出和对象拓扑。", "只取 H1 作为实际执行值。", "逐步计算实际水位与目标水位差值。", "按执行开度变化幅度筛选重点动作闸门。", "将 H1 开度序列转写为可执行调度动作清单。", "下一控制步更新后重新取 H1。"][index]}</p></div>`).join("")}
+          </div>
+        </section>
+
+        <section id="scope">
+          <div class="section-head"><div><div class="section-kicker">02 Scope</div><h2>控制范围与对象映射</h2></div><p class="muted">把算法对象转换成可读的闸站与闸门清单。</p></div>
+          <div class="table-wrap"><table><thead><tr><th>序号</th><th>闸站</th><th>闸门</th><th>初始 H1</th><th>末步 H1</th><th>变化</th></tr></thead><tbody>
+            ${rankedGates.slice(0, 12).map((gate, index) => `<tr><td>${index + 1}</td><td>${esc(gate.stationName)}</td><td>${esc(gate.gateName)}</td><td>${fmt(gate.firstOpening)}</td><td>${fmt(gate.finalOpening)}</td><td>${fmt(gate.change)}</td></tr>`).join("")}
+          </tbody></table></div>
+        </section>
+
+        <section id="targets">
+          <div class="section-head"><div><div class="section-kicker">03 Targets</div><h2>调度目标与约束</h2></div><p class="muted">把 MPC 输出转成现场可复核目标。</p></div>
+          <div class="grid-2">
+            <div class="panel"><h3>目标优先级</h3><ul><li>优先复核闸前水位与目标水位的偏差口径。</li><li>优先关注 ${esc(worstStation.stationName || "偏差最大闸站")} 与开度变化最大的闸门。</li><li>按 step 滚动执行 H1，不提前执行 H2/H3。</li></ul></div>
+            <div class="panel"><h3>执行约束</h3><ul><li>闸门开度必须满足设备可操作范围。</li><li>若目标偏差持续扩大，应触发人工复核。</li><li>每次控制更新后重新生成执行值。</li></ul></div>
+          </div>
+        </section>
+
+        <section>
+          <div class="section-head"><div><div class="section-kicker">04 Comparison</div><h2>方案对比</h2></div><p class="muted">按滚动控制步比较目标函数、动作幅度和水位偏差。</p></div>
+          <div class="table-wrap"><table><thead><tr><th>控制步</th><th>loss</th><th>总调节幅度</th><th>动作数</th><th>H1 平均水位偏差</th><th>判断</th></tr></thead><tbody>${comparisonRows}</tbody></table></div>
+        </section>
+
+        <section id="actions">
+          <div class="section-head"><div><div class="section-kicker">05 Commands</div><h2>推荐调度动作清单</h2></div><p class="muted">现场执行优先看这一张表。</p></div>
+          <div class="table-wrap"><table><thead><tr><th>执行顺序</th><th>时间窗口</th><th>站点</th><th>设备</th><th>建议动作</th><th>控制意图</th><th>确认口径</th></tr></thead><tbody>${commandRows}</tbody></table></div>
+        </section>
+
+        <section id="process">
+          <div class="section-head"><div><div class="section-kicker">06 Process</div><h2>关键过程曲线与动作热区</h2></div><p class="muted">显示调度优化过程和目标跟踪偏差。</p></div>
+          <div class="chart-grid">
+            <div class="chart-card">
+              <div class="section-head"><h3>loss 与总调节幅度</h3><span class="tag info">滚动优化</span></div>
+              <div class="line-chart"><svg viewBox="0 0 620 180" role="img"><polyline points="${sparkline(steps.map((step) => [step.step, step.loss]))}" fill="none" stroke="#10735a" stroke-width="4" stroke-linecap="round" /><polyline points="${sparkline(steps.map((step) => [step.step, step.gateAmplitude]))}" fill="none" stroke="#b36a10" stroke-width="4" stroke-linecap="round" /></svg></div>
+              <div class="legend"><span><i style="background:#10735a"></i>loss</span><span><i style="background:#b36a10"></i>gate_amplitude</span></div>
+            </div>
+            <div class="chart-card">
+              <div class="section-head"><h3>水位偏差排名</h3><span class="tag warn">H1 执行值</span></div>
+              <div class="bar-list">${stationBars}</div>
+            </div>
+          </div>
+          <div class="chart-card table-wrap" style="margin-top:14px;">
+            <div class="section-head"><h3>闸站偏差热区</h3><span class="tag warn">颜色越深，偏差越大</span></div>
+            <div class="heatmap" style="grid-template-columns: 180px repeat(${steps.length}, minmax(86px, 1fr));"><div class="heatmap-cell muted">闸站 / 控制步</div>${heatmapHeader}${heatmapRows}</div>
+          </div>
+        </section>
+
+        <section id="risk">
+          <div class="section-head"><div><div class="section-kicker">07 Risk Loop</div><h2>风险识别与滚动策略</h2></div><p class="muted">不仅给结果，也给下一步动作边界。</p></div>
+          <div class="risk-grid">${riskCards}</div>
+        </section>
+
+        <section id="decision">
+          <div class="section-head"><div><div class="section-kicker">08 Decision</div><h2>执行建议与签批</h2></div><p class="muted">形成可落地、可追责的最终口径。</p></div>
+          <div class="decision">
+            <div class="decision-card"><h3>建议复核后按 H1 序列滚动执行</h3><p>当前 MPC 调度方案已形成 ${summary.planCount || 0} 个控制更新点，闸门执行开度序列完整。由于闸前水位相对目标偏差较大，建议先确认目标水位控制断面，再按 H1 执行值逐步下发。</p></div>
+            <div class="panel"><h3>一句话口令</h3><p>本轮调度按 step ${firstStep}-${finalStep} 滚动执行 MPC 第一预测步 H1；优先复核 ${esc(worstStation.stationName || "-")} 等偏差闸站，确认目标口径后再下发开度变化最大的闸门动作。</p></div>
+          </div>
+          <div class="signature-grid"><div class="signature"><span class="label">编制</span><strong>调度算法岗</strong></div><div class="signature"><span class="label">复核</span><strong>水力模型岗</strong></div><div class="signature"><span class="label">审核</span><strong>调度值长</strong></div><div class="signature"><span class="label">执行</span><strong>现场运行岗</strong></div></div>
+        </section>
+
+        <div class="print-bar"><p class="muted">基于标准化调度方案模板生成，数据来自 MPC 仿真结果。</p><button class="button" type="button" onclick="window.print()">打印 / 导出 PDF</button></div>
+      `;
+
+      const shell = document.getElementById("reportShell");
+      const toggle = document.getElementById("navToggle");
+      const navLinks = Array.from(document.querySelectorAll("nav a"));
+      const storageKey = "standard-dispatch-nav-collapsed";
+      const wideQuery = window.matchMedia("(min-width: 1121px)");
+      const applyNavState = () => {
+        const collapsed = wideQuery.matches && localStorage.getItem(storageKey) === "1";
+        shell.classList.toggle("nav-collapsed", collapsed);
+        toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+        toggle.setAttribute("aria-label", collapsed ? "展开报告目录" : "收起报告目录");
+        toggle.title = collapsed ? "展开目录" : "收起目录";
+      };
+      const updateActiveNav = () => {
+        const activeHash = window.location.hash || "#overview";
+        navLinks.forEach((link) => link.classList.toggle("is-active", link.getAttribute("href") === activeHash));
+      };
+      applyNavState();
+      updateActiveNav();
+      toggle.addEventListener("click", () => {
+        const collapsed = wideQuery.matches && !shell.classList.contains("nav-collapsed");
+        localStorage.setItem(storageKey, collapsed ? "1" : "0");
+        applyNavState();
+      });
+      wideQuery.addEventListener("change", applyNavState);
+      window.addEventListener("hashchange", updateActiveNav);
+    })();
+  </script>
+</body>
+</html>

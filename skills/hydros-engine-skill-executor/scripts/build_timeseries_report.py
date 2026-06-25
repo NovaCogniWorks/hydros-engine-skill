@@ -704,7 +704,11 @@ def clone_series_with_business_meta(base_item: dict[str, Any], child: dict[str, 
             "childRole": child["childRole"],
             "childOrder": child["childOrder"],
             "displayName": f"{child['childRole']}：{source_label}",
-            "legendName": f"{child['businessObjectName']} / {child['childRole']}",
+            "legendName": (
+                f"{child['businessObjectName']} / {source_label}"
+                if child["sourceObjectType"] == "Gate" and child["childRole"] == "闸门设备"
+                else f"{child['businessObjectName']} / {child['childRole']}"
+            ),
             "defaultSelected": bool(child.get("defaultSelected")),
         }
     )

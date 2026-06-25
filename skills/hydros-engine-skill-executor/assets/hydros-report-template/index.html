@@ -2490,6 +2490,10 @@
         }
 
         function getSeriesDisplayName(item) {
+          if (item.objectType === "Gate" && item.childRole === "闸门设备") {
+            if (item.businessObjectName && item.sourceName) return `${item.businessObjectName} / ${item.sourceName}`;
+            return item.displayName || item.sourceName || item.legendName || item.name;
+          }
           return item.legendName || item.displayName || item.name;
         }
 
@@ -2499,7 +2503,7 @@
         }
 
         function buildAdaptiveChartLayout(seriesCount, legendSelected = {}) {
-          const showLegend = seriesCount > 1;
+          const showLegend = seriesCount > 0;
           const legendRows = seriesCount > 12 ? 2 : 1;
           return {
             grid: {
