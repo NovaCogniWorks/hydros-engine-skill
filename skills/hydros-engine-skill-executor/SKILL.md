@@ -1,7 +1,7 @@
 ---
 name: hydros-engine-skill-executor
 description: |
-  水力仿真引擎全流程编排工具。通过调用 hydros-engine-mdm 获取场景建模元数据，再调用 hydros-engine-executor 完成仿真任务创建、进度跟踪、时序结果导出与读取、异常分析、图表输出，并生成 HTML 汇报报告、Markdown 报告、拓扑可视化页或渠道纵剖面页。
+  水力仿真引擎全流程编排工具。通过线上 Hydros Engine MCP 统一入口完成场景查询、仿真任务创建、进度跟踪、时序结果导出与读取、异常分析、图表输出，并生成 HTML 汇报报告、Markdown 报告、拓扑可视化页或渠道纵剖面页。
 
   当用户提到水力仿真、场景分析、仿真任务、水位流量分析、渠道仿真、hydros 引擎、仿真结果可视化、拓扑图、纵剖面等相关内容时触发。即使用户只是模糊地说”跑一下仿真””看看数据””分析一下结果””做个分析页面””获取拓扑””画纵剖面”，也应该触发此 skill。
 ---
@@ -27,25 +27,26 @@ description: |
 
 在进入任何仿真流程前，先确认以下前置条件：
 
-1. **MCP 服务检查**：同时检查 `hydros-engine-executor` 和 `hydros-engine-mdm` 两个 MCP 服务是否都已配置且可用。不同 AI 助手的 MCP 配置文件位置：
+1. **MCP 服务检查**：检查 Hydros Engine MCP 是否已配置且可用。当前线上已验证的 MCP URL 是 `https://mcp.hydroos.pub/`；客户端里的 server 名称可继续使用 `hydros-engine-executor`。不同 AI 助手的 MCP 配置文件位置：
    - Claude Code: `.claude.json` 或 `~/.claude.json`
    - Codex: `~/.codex/config.toml`
    - Copaw: `workspaces/agent.json`
-   其中 `hydros-engine-executor` 负责仿真任务链路，`hydros-engine-mdm` 作为场景建模元数据、拓扑和 `objects.yaml` 相关流程的前置条件。两个服务的配置结构和 Header 完全一致，只需要把服务名和 URL 后缀分别配置为 `hydros-engine-executor` 与 `hydros-engine-mdm`。这样可以及早发现连接问题，避免在后续流程中遇到意外失败。
+   历史文档中的 `https://hydroos.cn/mcps/hydros-engine-executor` 和 `https://hydroos.cn/mcps/hydros-engine-mdm` 已不再作为新配置推荐。当前生产环境通过统一 MCP endpoint 暴露场景查询、仿真执行、结果导出和 resource 读取能力。
 
 2. **Token 配置**：检查用户是否已配置 Bearer token。如果 token 缺失，引导用户：
-   - 访问 `https://hydroos.cn/playground/` 注册或登录
-   - 在”账号管理”中获取 API token
-   - 将 token 写入本机 MCP 配置，并同时用于 `hydros-engine-executor` 和 `hydros-engine-mdm`
+   - 获取 Hydros API token
+   - 将 token 写入本机 MCP 配置或环境变量，例如 `MCP_TOKEN` / `HYDROS_API_TOKEN`
+   - MCP Header 保留 `Execution-Source`、`Production-Code` 和 `Accept`
 
-3. **使用正确的工具链**：仿真执行、进度跟踪和结果导出优先走已注册的 `hydros-engine-executor` MCP 工具。场景建模元数据、拓扑和 `objects.yaml` 相关动作开始前，先确认 `hydros-engine-mdm` 已接通；如果缺失，先报告“元数据前置条件不足”，不要静默跳过。
+3. **使用正确的工具链**：场景查询、仿真执行、进度跟踪、结果导出和结果读取优先走已注册的 Hydros Engine MCP 工具。不要回退到旧 `/mcps/...` URL 或猜测式业务 REST 路径。
 
 4. **结果下载默认路径**：凡是用户要求"下载结果文件""落盘到本地""保存结果文件"，默认走标准下载链：
     - 调用 `get_timeseries_data` 启动结果导出任务
     - 持续轮询 `get_export_status`，直到导出与 Excel 上传结果为 `COMPLETED`
-    - 从 `get_export_status` 的完成结果中提取 `resource_uri` 或实际下载地址
-    - 使用标准 HTTP GET 直接下载到本地文件
-    - 对 `.csv` 结果可直接写盘；对 `.xlsx` 结果优先落成真实 Excel 文件
+    - 从 `get_export_status` 的完成结果中优先提取 `resource_uri`
+    - 对 `hydroengine://downloads/...` 这类 URI，优先通过 MCP `resources/read` 读取结果，再落盘或解析
+    - 只有当返回的是明确可访问的 HTTP 下载地址时，才使用标准 HTTP GET 直接下载到本地文件
+    - 不要默认把 HTTPS `/s3/...` 地址当作可直接下载文件；这类地址可能需要 JWT，MCP token 不一定可用
     - 不要把大段结果文本通过终端交互会话、`cat > file`、分块粘贴或聊天输出中转来落盘，这类方式容易被截断，生成坏文件。
 
 **详细连接排查指南**：如遇连接问题，参考 [references/mcp-connection-guide.md](references/mcp-connection-guide.md)。
@@ -59,10 +60,10 @@ description: |
 - 始终使用中文与用户沟通，技术术语和代码标识保持原文。
 - 凡是执行本 skill 目录下的 Python 脚本，一律使用 `python3`，不要使用 `python`。
 - 先调用 `subscribe_to_simulation_events` 建立 SSE 事件订阅通道，再创建仿真任务。这样可以确保任务创建后的进度事件能被正确接收，避免错过关键状态更新。
-- `biz_scenario_id` 和 `biz_scenario_config_url` 成对使用，且只能来自 `hydros-engine-mdm` 的 `biz_scenario_id_lists` 返回结果。这样可以保证场景配置的一致性和有效性。
+- `biz_scenario_id` 和 `biz_scenario_config_url` 成对使用，且只能来自 MCP `biz_scenario_id_lists` 返回结果。这样可以保证场景配置的一致性和有效性。
 - 用户选定场景后，在参数确认前先拉取并缓存一份 `objects.yaml`，再基于这份本地文件输出场景拓扑总结。下载方式要与脚本实现保持一致：先从场景 YAML 读取 `hydros_objects_modeling_url`，对 URL 做规范化编码，再通过标准 HTTP GET 下载，最后以 UTF-8 一次性写入本地缓存文件。这样后续生成纵剖面图时可以直接复用，避免重复拉取和口径漂移。
-- 场景建模元数据、拓扑和 `objects.yaml` 属于元数据链路。进入这部分前，先确认 `hydros-engine-mdm` 已配置可用；若未配置，明确告诉用户当前缺少元数据前置条件，不要假设拓扑正确或跳过说明继续产出结果。
-- 用户选定场景后，调用 `hydros-engine-mdm` 的 `get_scenario_events` 查询预置事件，与默认参数一起展示。这让用户全面了解场景配置，一次性确认所有关键参数。
+- 场景建模元数据、拓扑和 `objects.yaml` 属于元数据链路。进入这部分前，先确认统一 MCP endpoint 已配置可用；若相关工具不可用，明确说明当前缺少元数据能力，不要假设拓扑正确或跳过说明继续产出结果。
+- 用户选定场景后，如 MCP 暴露 `get_scenario_events`，调用它查询预置事件，并与默认参数一起展示。这让用户全面了解场景配置，一次性确认所有关键参数。
 - 用户只回复场景 ID 或”选这个”时，视为”选定场景”而非”立即启动”。先展示默认参数供确认，避免使用错误配置启动任务。
 - 创建 live 仿真任务后，持续监测到终态（`COMPLETED` 或 `FAILED`）。中途停止会导致用户无法及时了解任务结果。
 - `create_simulation_task` 的关键返回值通常嵌套在 `result.data` 下，`biz_scene_instance_id`、`total_steps`、`task_status` 等字段优先从 `result.data` 里读取，不要假设它们平铺在顶层。
@@ -82,7 +83,7 @@ description: |
 - **终态判定补充**：如果 `get_task_step` 已显示 `current_step >= total_steps`，但 `task_status` 仍是 `STEPPING` / `READY` / 其他非终态，不要立刻把任务当成已完成，也不要立刻启动结果导出；应继续短轮询 `get_task_step` 直到状态真正切到 `COMPLETED`，若随后转为 `FAILED` 或长时间不收敛，再调用 `get_task_status` 留存失败原因或最终状态。
 - `get_timeseries_data` 现在只负责启动结果导出任务，不保证立即可下载。后续必须轮询 `get_export_status(biz_scene_instance_id)`，直到状态为 `COMPLETED`。
 - 只有当 `get_export_status` 返回 `COMPLETED` 且给出 `resource_uri` 或下载地址时，才允许进入下载步骤。若状态为 `FAILED`，立即报告“结果导出失败”，不要继续生成任何图表或报告。
-- 当目标是“下载结果文件到本地”而不是立刻做报告时，也必须走同一条标准链路：`get_timeseries_data -> get_export_status 轮询 -> resource_uri/下载地址 -> 标准 HTTP GET 下载到本地 -> 本地一次性校验`。不要把结果内容通过终端标准输入、交互式 `cat`、消息复制粘贴等方式中转。
+- 当目标是“下载结果文件到本地”而不是立刻做报告时，也必须走同一条标准链路：`get_timeseries_data -> get_export_status 轮询 -> resource_uri/下载地址 -> resources/read 或标准 HTTP GET -> 本地一次性校验`。不要把结果内容通过终端标准输入、交互式 `cat`、消息复制粘贴等方式中转。
 - 如果本地已经存在同名结果文件，覆盖前先核对文件大小或数据行数；如发现明显偏小、数据行数异常少，优先视为“落盘被截断”，重新按标准链路完整下载，不要在坏文件基础上追加写入。
 - 如果结果文件下载、读取、写盘或完整性校验任一步失败，立即报告“结果下载失败”，并停止后续分析、图表和报告生成。不要回退到任何默认数据、历史缓存、旧结果文件或明显残缺的数据文件继续产出结果。
 - 如果用户要做 HTML 报告或其他 HTML 页面，先读 [references/hydros-html-prompt.md](references/hydros-html-prompt.md)。
@@ -91,17 +92,15 @@ description: |
 - 需要完整版 HTML 报告、结果曲线展示或可直接打开的单文件页面时，优先复用 [assets/hydros-report-template/index.html](assets/hydros-report-template/index.html) 模板，并按当前脚本实现把真实 payload 内联到 `simulation_report.html`。
 - 当用户明确要“报告”“完整报告”“HTML 报告”“汇报页”时，不要先交付临时分析报告、手写摘要页或简版 HTML 作为最终产物；如果本地结果文件尚未就位，先完成 `get_timeseries_data -> get_export_status 轮询 -> resource_uri/下载地址 -> 落盘结果文件 -> build_timeseries_report.py`，再输出遵循模板的正式报告。
 - HTML 正式报告应尽量包含结果曲线图产物和渠道纵剖面图；若 `chart1_water_level.png`、`chart2_water_flow.png`、`chart4_gate_opening.png`、`chart5_disturbance_flow.png`、`chart7_longitudinal_profile.png` 中有缺失，仍可交付 HTML，但必须在报告正文里显式写明缺失项、缺失原因和影响范围，不能把缺图问题只留在聊天回复里解释。
-- 正式 HTML 报告生成完成后，默认通过 Hydros OpenAPI 匿名文件上传接口直接上传本地 `simulation_report.html`，并把接口返回结果作为交付结果的一部分；除非用户明确只要本地文件，否则不要停在“本地已生成 HTML”这一步。
-- HTML 报告上传统一使用 `curl --form` 直传到 `https://hydroos.cn/openapi/engine/api/v1/file/anonymous/upload/<biz_scene_instance_id>`；如果接口返回 `ACCESS_UNAUTHORIZED` 或其他失败响应，明确报告“远端上传失败”和接口错误，不要伪装成本地报告失败。
+- 正式 HTML 报告生成完成后，默认先交付本地 `simulation_report.html`。如当前环境提供并验证了报告上传工具或 API，再上传并把接口返回结果作为交付结果的一部分；不要继续使用旧 `hydroos.cn` 匿名上传地址作为默认动作。
+- 如果远端上传失败，明确报告“本地报告生成成功，远端上传失败”和接口错误，不要伪装成本地报告失败。
 - 直传命令模板如下。`Content-Type: multipart/form-data; boundary=...` 由 `curl --form` 自动生成，通常不要手写固定 boundary，避免请求头与 multipart 请求体不一致：
 
     ```bash
+    # 示例：仅在已确认当前环境存在可用上传接口时使用。
     curl --location --request POST \
-      "https://hydroos.cn/openapi/engine/api/v1/file/anonymous/upload/<biz_scene_instance_id>" \
-      --header "User-Agent: Apifox/1.0.0 (https://apifox.com)" \
+      "https://api.hydroos.pub/engine/api/v1/file/anonymous/upload/<biz_scene_instance_id>" \
       --header "Accept: */*" \
-      --header "Host: hydroos.cn" \
-      --header "Connection: keep-alive" \
       --form "file=@\"output/<biz_scene_instance_id>/report/simulation_report.html\""
     ```
 
@@ -139,39 +138,39 @@ description: |
 4. 向用户解释：`sse_client_id` 绑定 SSE 事件订阅通道，后续创建任务、跟踪进度都依赖它。
 
 异常处理：
-- 连接失败时，提示用户检查 `hydros-engine-executor` 和 `hydros-engine-mdm` 是否都已配置。mdm 配置与 executor 相同，只是服务名和 URL 后缀改为 `hydros-engine-mdm`。
-- 如果场景建模元数据、拓扑或 `objects.yaml` 相关步骤失败，同时提示用户检查 `hydros-engine-mdm` MCP 配置是否完整。
+- 连接失败时，提示用户检查 Hydros Engine MCP 是否已配置为 `https://mcp.hydroos.pub/`，并确认 token 与必需 Header 完整。
+- 如果场景建模元数据、拓扑或 `objects.yaml` 相关步骤失败，先说明元数据能力暂不可用，再继续可执行的仿真主链路；不要把旧 `hydros-engine-mdm` 双服务配置作为新用户的修复建议。
 - 如果后续报 “SSE通道未建立”，用同一个 `sse_client_id` 重新订阅。
 
 ### 阶段二：查询与选择场景
 
-1. 调用 `hydros-engine-mdm` 的 `biz_scenario_id_lists`。
+1. 调用 MCP `biz_scenario_id_lists`。
 2. 将场景整理为 markdown 表格，至少包含：序号、场景 ID、场景名称、核心能力。
 3. 保存每个场景的 `biz_scenario_config_url`，后续创建任务时必须使用。
 4. 给出推荐场景，优先描述中包含“测试”或“SDK”的场景，其次选依赖较少的场景。
-5. 一旦用户明确选定某个场景（例如只回复场景 ID、场景名称，或说“就这个”“选这个”），在进入阶段三前，先确认 `hydros-engine-mdm` 前置配置已完成，再基于场景 YAML 里的 `hydros_objects_modeling_url` 拉取并缓存 `objects.yaml`，再默认补一段简要拓扑总结。
+5. 一旦用户明确选定某个场景（例如只回复场景 ID、场景名称，或说“就这个”“选这个”），在进入阶段三前，基于场景 YAML 里的 `hydros_objects_modeling_url` 拉取并缓存 `objects.yaml`，再默认补一段简要拓扑总结。
    下载方式固定为：
-   - 先确认 `hydros-engine-mdm` 已配置可用，再读取场景 YAML，提取 `hydros_objects_modeling_url`
+   - 读取场景 YAML，提取 `hydros_objects_modeling_url`
    - 对下载地址做 URL 规范化，兼容中文路径和特殊字符
    - 通过标准 HTTP GET 直接下载 `objects.yaml`
    - 以 UTF-8 文本形式一次性写入本地缓存文件，供本轮后续步骤复用
-6. 在进入阶段三前，调用 `hydros-engine-mdm` 的 `get_scenario_events` 查询该场景支持注入的预置事件，并整理为简要事件清单；后续参数确认时必须和默认仿真参数一起展示给用户选择。
+6. 在进入阶段三前，如 MCP 提供 `get_scenario_events`，调用它查询该场景支持注入的预置事件，并整理为简要事件清单；后续参数确认时和默认仿真参数一起展示给用户选择。若工具不可用，明确说明“当前无法读取场景预置事件，仅展示仿真参数”。
 
 场景拓扑简要总结要求：
 - 至少给出 `waterway_id`、主水网/渠道名称、对象总览（如 `UnifiedCanal`、`CrossSection`、`DisturbanceNode`、`GateStation`、`Gate` 的数量或主要成员）。
 - 用 1 到 3 句话概括主链路拓扑，例如“主渠从 QD-1 依次连接到 QD-14，中间穿插若干分水口、退水闸和 2 个闸站”。
 - 点出关键控制节点或特殊对象，例如 `ZM1`、`ZM2`、主要分水口、退水闸、入口断面。
 - 这是“简单总结”，默认放在场景确认反馈里即可，不要等用户追问后才补。
-- 如果 `objects.yaml` 暂时不可读，也要明确说明“当前无法读取对象拓扑，只展示场景基本信息”；如果根因是元数据链路未接通，要同时指出 `hydros-engine-mdm` 前置条件缺失，不要静默跳过。
+- 如果 `objects.yaml` 暂时不可读，也要明确说明“当前无法读取对象拓扑，只展示场景基本信息”；不要静默跳过。
 - 已成功拉取的 `objects.yaml` 默认视为本轮会话资产，后续生成纵剖面、拓扑页或正式报告时优先复用这份本地文件，不要再次重复拉取。
 
 场景预置事件展示要求：
-- 优先调用 `hydros-engine-mdm` 的 `get_scenario_events`，按场景 ID 查询支持注入的预置事件。
+- 优先调用 MCP `get_scenario_events`，按场景 ID 查询支持注入的预置事件。
 - 展示事件清单时必须带序号，默认使用 `1. 2. 3.` 这种连续编号，方便用户按序号选择或引用。
 - 至少展示每个事件的名称/类型、作用对象、触发步或触发时间、是否默认启用。
 - 这部分默认放在参数确认之前，与 `total_steps`、`sim_step_size`、`output_step_size` 同时出现，供用户一起决定是否按默认配置启动。
-- 如果 `hydros-engine-mdm / get_scenario_events` 返回空列表，要明确写“该场景当前无可注入预置事件”。
-- 如果当前环境暂时无法调用 `hydros-engine-mdm / get_scenario_events`，要明确写“当前无法读取场景预置事件，仅展示仿真参数”，不要静默跳过。
+- 如果 `get_scenario_events` 返回空列表，要明确写“该场景当前无可注入预置事件”。
+- 如果当前环境暂时无法调用 `get_scenario_events`，要明确写“当前无法读取场景预置事件，仅展示仿真参数”，不要静默跳过。
 
 异常处理：
 - `401 ACCESS_UNAUTHORIZED`：提示用户检查认证。
@@ -193,7 +192,7 @@ description: |
 参数确认规则：
 
 - 首次创建任务时，展示场景默认仿真参数（`total_steps`、`sim_step_size`、`output_step_size`），询问用户是否需要调整。
-- 首次创建任务时，还要同步展示通过 `hydros-engine-mdm / get_scenario_events` 查询到的预置事件清单，并让用户一并确认“是否按默认事件配置启动”。
+- 首次创建任务时，如可读取预置事件，还要同步展示通过 `get_scenario_events` 查询到的预置事件清单，并让用户一并确认“是否按默认事件配置启动”。
 - 如果用户在同一条消息中已经给出了所有参数（如”用默认参数启动”、”步数 800”），直接创建任务，不再额外确认。
 - 如果用户只给出场景 ID / 场景名称，而没有明确说”用默认参数启动””直接运行”或没有显式提供参数值，必须先停在参数确认这一步，不能自动创建任务。
 
@@ -203,7 +202,7 @@ description: |
 
 1. **WebFetch**: 尝试用 WebFetch 直接获取 `biz_scenario_config_url` 的内容
 2. **Bash + curl**: 如果 WebFetch 失败（网络限制、企业安全策略等），用 `curl -s <url>` 获取
-3. **MCP 水网对象**: 如果 HTTP 请求都失败，尝试调用 `hydros-engine-mdm` 的 `get_waterway_lists` 获取水网配置（可能包含相关参数）
+3. **MCP 水网对象**: 如果 HTTP 请求都失败，尝试调用 MCP `get_waterway_lists` 获取水网配置（可能包含相关参数）
 4. **合理默认值**: 如果以上都失败，使用京石段场景的典型默认值：
    - `total_steps`: 1200
    - `sim_step_size`: 120（秒）
@@ -215,7 +214,7 @@ description: |
 2. 先确认阶段二的“场景拓扑简要总结”已经输出；如果还没输出，必须先补这段总结，再继续下面步骤。
 3. 先确认阶段二的“场景预置事件清单”已经输出；如果还没输出，必须先补这段清单，再继续下面步骤。
 4. 尝试获取场景配置参数（按上述降级策略）。
-5. 调用 `hydros-engine-mdm` 的 `get_scenario_events` 获取该场景支持注入的预置事件；如果失败，必须在反馈中明确说明。
+5. 如 MCP 提供 `get_scenario_events`，调用它获取该场景支持注入的预置事件；如果失败，必须在反馈中明确说明。
 6. 向用户展示仿真参数和预置事件供确认，格式示例：
    > 准备启动场景 [场景名称]，请确认参数：
    > - 总步数: 1200（默认）
@@ -229,7 +228,7 @@ description: |
 
    反例：如果用户上一条消息只有 `100001`，这表示”选择场景 100001”，此时仍然必须先发上面的确认消息，不能直接调用 `create_simulation_task`。
    反例：如果用户已经展示了默认参数，但还没有给出 `objects.yaml` 简要拓扑总结，也不能直接调用 `create_simulation_task`。
-   反例：如果用户已经展示了默认参数，但还没有给出 `hydros-engine-mdm / get_scenario_events` 返回的预置事件清单，也不能直接调用 `create_simulation_task`。
+   反例：如果当前 MCP 明确支持 `get_scenario_events`，但还没有给出预置事件清单，也不能直接调用 `create_simulation_task`。
 7. 用户确认后，调用 `create_simulation_task`。
 8. 保存并展示：
    - `biz_scene_instance_id`
@@ -338,8 +337,8 @@ INIT -> WAITING_AGENTS -> READY -> STEPPING -> COMPLETED
     - 如果步数未达标、步数查询异常、或结果获取返回任务失败/未完成，再调用 `get_task_status({ biz_scene_instance_id, sse_client_id })` 查询全量状态并记录原因
     - 调用 `get_timeseries_data(biz_scene_instance_id)` 启动结果导出任务
     - 持续轮询 `get_export_status(biz_scene_instance_id)`，直到状态为 `COMPLETED` 或 `FAILED`
-    - 当状态为 `COMPLETED` 时，提取 `resource_uri` 或实际下载地址
-    - 优先使用标准 HTTP GET 将结果文件一次性落盘到本地：
+    - 当状态为 `COMPLETED` 时，优先提取 `resource_uri`；只有明确给出可访问下载地址时再提取 HTTP 下载地址
+    - 对 `hydroengine://downloads/...` 这类 `resource_uri`，优先通过 MCP `resources/read` 读取结果，再落盘或解析。只有当返回的是明确可访问的 HTTP 下载地址时，才使用标准 HTTP GET 将结果文件一次性落盘到本地：
 
     ```bash
     curl -L \
@@ -372,16 +371,14 @@ INIT -> WAITING_AGENTS -> READY -> STEPPING -> COMPLETED
    - **Markdown 报告**：图文并茂，每张图表配套文字分析
    - **目录结构**：统一落盘到 `output/<biz_scene_instance_id>/`；其中 `report/` 存放报告，`charts/` 存放图表，`data/` 存放结果文件、`objects.yaml` 和分析中间文件
    - **数据验证**：比较期望与实际的时长/点数，不一致时在报告中说明
-   - **上传交付**：当 HTML 正式报告生成完成后，使用 Hydros OpenAPI 匿名上传接口直传本地 `simulation_report.html` 文件；优先把接口返回的报告地址或资源信息交付给用户，同时保留本地 `simulation_report.html`
-   - **上传命令**：
+   - **上传交付**：当 HTML 正式报告生成完成后，默认先交付本地 `simulation_report.html`。如当前环境提供并验证了报告上传工具或 API，再上传并把接口返回结果作为交付结果的一部分。
+   - **上传命令示例**：
 
      ```bash
+     # 仅在当前环境确认该上传接口可用时执行。
      curl --location --request POST \
-       "https://hydroos.cn/openapi/engine/api/v1/file/anonymous/upload/<biz_scene_instance_id>" \
-       --header "User-Agent: Apifox/1.0.0 (https://apifox.com)" \
+       "https://api.hydroos.pub/engine/api/v1/file/anonymous/upload/<biz_scene_instance_id>" \
        --header "Accept: */*" \
-       --header "Host: hydroos.cn" \
-       --header "Connection: keep-alive" \
        --form "file=@\"output/<biz_scene_instance_id>/report/simulation_report.html\""
      ```
 

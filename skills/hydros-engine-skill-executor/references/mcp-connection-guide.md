@@ -1,182 +1,191 @@
 # Hydro Engine MCP 连接指南
 
-本文档提供详细的 MCP 连接排查和配置指南。
+本文档记录当前线上已验证的 Hydros Engine MCP 连接方式、排查步骤和常见问题。
 
-## 双服务前置条件
+## 当前生产入口
 
-进入 executor skill 前，至少要确认两类 MCP 配置都已存在并可用：
+最新生产 MCP endpoint：
 
-- `hydros-engine-executor`
-  用于仿真任务创建、进度跟踪、结果导出和倍速调整。
-- `hydros-engine-mdm`
-  用于场景建模元数据、拓扑和 `objects.yaml` 相关前置检查。
+```text
+https://mcp.hydroos.pub/
+```
 
-说明：
-- `hydros-engine-executor` 和 `hydros-engine-mdm` 的配置结构和 Header 完全一致，只需要替换服务名和 URL 后缀。
-- executor URL 为 `https://hydroos.cn/mcps/hydros-engine-executor`。
-- mdm URL 为 `https://hydroos.cn/mcps/hydros-engine-mdm`。
-- 如果场景拓扑、建模元数据或 `objects.yaml` 相关步骤报错，不要只检查 executor，也要一起检查 mdm 配置。
-
-## 连接方式
-
-### 正确连接方式
-
-- **executor URL**: `https://hydroos.cn/mcps/hydros-engine-executor`
-- **mdm URL**: `https://hydroos.cn/mcps/hydros-engine-mdm`
-- **协议**: `JSON-RPC 2.0 over HTTP POST`
-- **必需 Header**:
-  - `Authorization: Bearer <token>`
-  - `Content-Type: application/json`
-  - `Execution-Source: codex`
-  - `Production-Code: copaw`
-  - `Accept: application/json,text/event-stream`
+历史入口 `https://hydroos.cn/mcps/hydros-engine-executor` 和 `https://hydroos.cn/mcps/hydros-engine-mdm` 已不再作为新文档推荐配置。当前线上环境通过统一 MCP endpoint 暴露场景查询、仿真执行、进度跟踪、结果导出和 resource 读取能力。
 
 说明：
-- `hydros-engine-executor` 和 `hydros-engine-mdm` 是标准 MCP 服务名，不要误写成 `hydro-engine-mcp`
-- 配置里的 URL 不要带尾部空格
 
-### 标准工作流
+- AI 客户端直接配置 `https://mcp.hydroos.pub/`。
+- `api.hydroos.pub` 是 MCP server 背后访问 hydros-data / hydros-accounts / hydros-engine 的业务域名。
+- 场景配置中仍可能返回 `hydroos.cn/s3/...` 历史静态资源地址，当前保持兼容，不等同于 MCP endpoint。
 
-1. `initialize` - 初始化 MCP 连接
-2. `subscribe_to_simulation_events` - 订阅仿真事件
-3. `create_simulation_task` / `get_task_step` - 执行仿真并轻量跟踪当前步数与已接收事件摘要
-4. `get_timeseries_data` - 启动结果导出任务
-5. `get_export_status` - 轮询导出与 Excel 上传状态，拿到 `resource_uri` 或下载地址
+## 必需 Header
 
-说明：常规进度跟踪只使用 `get_task_step({ biz_scene_instance_id, sse_client_id })`。只有仿真出错、步数查询异常、或需要留存失败原因时，才调用 `get_task_status({ biz_scene_instance_id, sse_client_id })` 获取全量状态记录。
-事件说明：运行中通过 `get_task_step.received_hydro_events` 判断是否有事件发生。只有生成报告、事件复盘、异常排查，或用户明确要求查看工况事件详情时，才调用 `get_simulation_scenario_events(biz_scene_instance_id)` 获取完整事件记录。
+```text
+Authorization: Bearer <token>
+Content-Type: application/json
+Execution-Source: <client>
+Production-Code: copaw
+Accept: application/json, text/event-stream
+```
 
-## 连接排查
+`Execution-Source` 建议按客户端设置：
 
-### MCP 配置文件位置
+| 客户端 | 推荐值 |
+| --- | --- |
+| Codex | `codex` |
+| OpenHands | `openhands` |
+| Claude Code | `claude` |
+| Copaw | `copaw` |
 
-不同 AI 助手的 MCP 配置文件位置：
+## 配置示例
 
-| AI 助手 | 配置文件位置 |
-|--------|-------------|
-| Claude Code | `.claude.json` 或 `~/.claude.json` |
-| Codex | `~/.codex/config.toml` |
-| Copaw | `workspaces/agent.json` |
+### Codex
 
-检查 `hydros-engine-executor` 和 `hydros-engine-mdm` 两个 MCP 服务是否都在配置文件中正确配置。两个服务的 Header 相同，URL 只差最后的服务名后缀。
+```toml
+[mcp_servers.hydros-engine-executor]
+url = "https://mcp.hydroos.pub/"
+bearer_token_env_var = "MCP_TOKEN"
 
-JSON 形态配置示例：
+[mcp_servers.hydros-engine-executor.headers]
+Execution-Source = "codex"
+Production-Code = "copaw"
+Accept = "application/json, text/event-stream"
+```
+
+如果当前 Codex 版本使用不同 TOML schema，保持同样的 URL、Bearer token 和 Header 即可。
+
+### OpenHands
+
+```bash
+openhands mcp add hydros-engine-executor \
+  --transport http \
+  --header "Authorization: Bearer ${HYDROS_API_TOKEN}" \
+  --header "Execution-Source: openhands" \
+  --header "Production-Code: copaw" \
+  --header "Accept: application/json, text/event-stream" \
+  https://mcp.hydroos.pub/
+```
+
+如果本机统一使用 `MCP_TOKEN`：
+
+```bash
+openhands mcp add hydros-engine-executor \
+  --transport http \
+  --header "Authorization: Bearer ${MCP_TOKEN}" \
+  --header "Execution-Source: openhands" \
+  --header "Production-Code: copaw" \
+  --header "Accept: application/json, text/event-stream" \
+  https://mcp.hydroos.pub/
+```
+
+### JSON 形态示例
 
 ```json
 {
   "mcpServers": {
     "hydros-engine-executor": {
       "type": "http",
-      "url": "https://hydroos.cn/mcps/hydros-engine-executor",
+      "url": "https://mcp.hydroos.pub/",
       "headers": {
         "Authorization": "Bearer <token>",
         "Execution-Source": "codex",
         "Production-Code": "copaw",
-        "Accept": "application/json,text/event-stream"
-      }
-    },
-    "hydros-engine-mdm": {
-      "type": "http",
-      "url": "https://hydroos.cn/mcps/hydros-engine-mdm",
-      "headers": {
-        "Authorization": "Bearer <token>",
-        "Execution-Source": "codex",
-        "Production-Code": "copaw",
-        "Accept": "application/json,text/event-stream"
+        "Accept": "application/json, text/event-stream"
       }
     }
   }
 }
 ```
 
-如果当前客户端使用 TOML 或其他格式，不要直接粘贴 JSON；按该客户端语法配置同名的两个 server。
+## HTTP 直连排查
 
-### HTTP 直连排查
-
-当需要排查连接问题时，分别探测两个 MCP 入口：
+只在排查问题时直连。正常使用应优先走已注册的 MCP 工具。
 
 ```bash
-curl -X POST https://hydroos.cn/mcps/hydros-engine-executor \
+curl -X POST https://mcp.hydroos.pub/ \
   -H "Authorization: Bearer <token>" \
   -H "Execution-Source: codex" \
   -H "Production-Code: copaw" \
-  -H "Accept: application/json,text/event-stream" \
+  -H "Accept: application/json, text/event-stream" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"initialize","params":{},"id":1}'
+```
 
-curl -X POST https://hydroos.cn/mcps/hydros-engine-mdm \
+连接成功后，再用 `tools/list` 检查工具是否可见：
+
+```bash
+curl -X POST https://mcp.hydroos.pub/ \
   -H "Authorization: Bearer <token>" \
   -H "Execution-Source: codex" \
   -H "Production-Code: copaw" \
-  -H "Accept: application/json,text/event-stream" \
+  -H "Accept: application/json, text/event-stream" \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"initialize","params":{},"id":2}'
+  -d '{"jsonrpc":"2.0","method":"tools/list","params":{},"id":2}'
 ```
 
-**注意事项**：
-- 只排查 MCP 入口 `https://hydroos.cn/mcps/hydros-engine-executor` 和 `https://hydroos.cn/mcps/hydros-engine-mdm`
-- 不要误打业务网页或猜测式 REST 路径（如 `https://hydroos.cn/api/scenario/lists`）
-- 这类业务地址通常返回 HTML，不是可用的 JSON/MCP 响应
+## 标准工作流
 
-### 常见错误及解决方案
+1. `initialize` 初始化 MCP 连接。
+2. `tools/list` 确认可用工具。
+3. `biz_scenario_id_lists` 获取场景清单。
+4. `subscribe_to_simulation_events` 建立仿真事件订阅。
+5. `create_simulation_task` 创建仿真任务。
+6. `get_task_step` 轮询当前步数、状态和轻量事件摘要。
+7. 仅在失败或需要完整状态时调用 `get_task_status`。
+8. `get_timeseries_data` 启动结果导出。
+9. `get_export_status` 轮询导出状态，等待 `COMPLETED`。
+10. 使用返回的 `resource_uri` 通过 MCP `resources/read` 读取结果。
+11. 基于真实结果生成图表和 HTML 报告。
 
-| 错误码/现象 | 原因 | 解决方案 |
-|------------|------|---------|
-| `406 Not Acceptable` | 缺少 `Content-Type` 或 `Accept` header | 确保请求包含 `Content-Type: application/json` 和 `Accept: application/json,text/event-stream` |
-| `401 Unauthorized` | Token 或业务 Header 缺失 | 检查 `Authorization`、`Execution-Source`、`Production-Code` 是否完整且值正确 |
-| `32602` | 参数缺失 | 检查是否漏传 `biz_scene_instance_id` 或 `sse_client_id` 等必需参数 |
-| 返回 HTML | URL 错误 | 使用 `/mcps` 端点，不是 `/api/xxx` |
-| 连接超时 | 使用了不兼容的客户端库 | 避免使用 SSE 客户端库做初始化，使用标准 HTTP POST |
-| 场景拓扑或 `objects.yaml` 读取失败 | `hydros-engine-mdm` 未配置或未生效 | 回到配置文件检查 `hydros-engine-mdm` 是否存在、服务名是否正确、当前环境是否已加载 |
-| `get_export_status` 一直非 `COMPLETED` | 导出或 Excel 上传尚未完成 | 持续轮询；在 `COMPLETED` 前不要尝试下载结果文件 |
-| `get_export_status` 返回 `FAILED` | 导出链路失败 | 停止后续下载和报告生成，优先报告失败原因 |
+## 结果读取规则
 
-## 连接避坑指南
+当前推荐结果 URI 形式：
 
-### 错误方式 1：使用 SSE 客户端库直连
+```text
+hydroengine://downloads/<file_name>.xlsx
+```
 
-**问题**：使用 SSE 客户端库直接连 `https://hydroos.cn/mcps/hydros-engine-executor` 做初始化探测，容易卡住或超时。
+处理规则：
 
-**原因**：MCP 初始化使用 JSON-RPC 2.0 over HTTP POST，不是 SSE stream。
+- `get_export_status` 未返回 `COMPLETED` 前，不要下载或生成报告。
+- 如果返回 `resource_uri`，优先通过 MCP `resources/read` 读取。
+- 不要默认把 HTTPS `/s3/...` 地址当作可直接下载文件；这类地址可能要求 JWT，MCP token 未必能访问。
+- 如果 `resources/read` 返回 workbook 文本或 Markdown 表格，可先落盘或解析后再生成报告。
 
-**正确方式**：优先使用已安装的 `hydros-engine-executor` 工具，并检查 MCP 服务是否可用。
+## 常见错误
 
-### 错误方式 2：误用业务 API 路径
+| 现象 | 原因 | 处理 |
+| --- | --- | --- |
+| `404 Not Found` | 仍在使用旧 `/mcps/...` 路径 | 改用 `https://mcp.hydroos.pub/` |
+| `406 Not Acceptable` | 缺少 `Accept` 或 `Content-Type` | 添加 `Accept: application/json, text/event-stream` 和 `Content-Type: application/json` |
+| `401 Unauthorized` | token 缺失、过期或 Header 不完整 | 检查 `Authorization`、`Execution-Source`、`Production-Code` |
+| `32602` | JSON-RPC 参数缺失或字段名错误 | 检查工具 schema，尤其是 `biz_scene_instance_id`、`sse_client_id` |
+| 结果 HTTPS 下载提示未认证 | `/s3/...` 需要 JWT | 改用 `resource_uri` + `resources/read` |
+| 仿真步进超时 | 步长设置过细或场景计算压力过大 | 优先使用场景默认参数，避免过小 `step_resolution` |
+| `get_export_status` 返回 `FAILED` | 导出链路失败 | 停止后续下载和报告生成，报告失败原因 |
 
-**问题**：误用 `https://hydroos.cn/api/scenario/lists` 这类路径，返回的通常是 HTML 页面。
+## Token 检查
 
-**原因**：这些是业务网页路径，不是 MCP 端点。
+如果未配置 token，应直接报告 token 缺失并停止调用 MCP。不要把空 token、示例 token 或历史 token 写入文档或日志。
 
-**正确方式**：使用 skill 中定义的 MCP 工具，例如 `hydros-engine-mdm` 下的 `biz_scenario_id_lists`、`get_scenario_events`，以及 `hydros-engine-executor` 下的执行类工具。
+推荐环境变量：
 
-### 错误方式 3：缺少必需 Header
+```bash
+export MCP_TOKEN="<your-token>"
+```
 
-**问题**：直连 `https://hydroos.cn/mcps/hydros-engine-executor` 时缺少 `Accept: application/json,text/event-stream`，返回 `406 Not Acceptable`。
+OpenHands 文档也可以使用：
 
-**原因**：服务端需要明确的 Accept header 来确定响应格式。
+```bash
+export HYDROS_API_TOKEN="<your-token>"
+```
 
-**正确方式**：带齐 `Authorization`、`Execution-Source`、`Production-Code`、`Content-Type`、`Accept` 后再排查。
+## 推荐排查顺序
 
-## Token 配置
-
-### 获取 Token
-
-1. 访问 `https://hydroos.cn/playground/`
-2. 完成注册或登录
-3. 在"账号管理"中获取 API token
-4. 将 token 同时配置到 `hydros-engine-executor` 和 `hydros-engine-mdm` 的 `Authorization: Bearer <token>`
-5. 两个服务都保留业务 Header：`Execution-Source: codex`、`Production-Code: copaw`
-
-### Token 验证
-
-如果用户尚未配置 token（`Authorization token: ""`），应：
-1. 直接报告 token 缺失
-2. 停止后续步骤
-3. 引导用户按上述流程获取 token
-
-## 推荐连接流程
-
-1. **检查 MCP 安装**：确认 `hydros-engine-executor` 和 `hydros-engine-mdm` 都已安装并可连通
-2. **轻量探测**：检查 MCP 服务是否可用
-3. **使用工具链**：仿真执行走已安装的 `hydros-engine-executor` 工具链；场景、事件和拓扑元数据走 `hydros-engine-mdm`
-4. **仅在排查时直连**：只在需要排查问题时才使用 HTTP 直连，且必须带齐必需 Header
+1. 确认配置 URL 是 `https://mcp.hydroos.pub/`。
+2. 确认 token 环境变量存在且客户端实际加载。
+3. 确认 Header 包含 `Execution-Source`、`Production-Code`、`Accept`。
+4. 调 `initialize`。
+5. 调 `tools/list`。
+6. 调 `biz_scenario_id_lists`。
+7. 再进入仿真任务链路。

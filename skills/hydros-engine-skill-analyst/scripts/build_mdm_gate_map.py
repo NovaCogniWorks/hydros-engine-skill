@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-从 MDM 水网模型、仿真结果和历史 Excel 构建 GateStation 对比映射。
+从 Hydros 水网元数据、仿真结果和历史 Excel 构建 GateStation 对比映射。
 
-该脚本不调用 MCP。调用方应先通过 hydros-engine-mdm 获取 waterway 模型，
+该脚本不调用 MCP。调用方应先通过 Hydros Engine MCP 元数据工具获取 waterway 模型，
 保存为 JSON 或 objects.yaml，再把文件传给本脚本。
 """
 
