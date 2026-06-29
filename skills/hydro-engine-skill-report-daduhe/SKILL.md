@@ -88,6 +88,7 @@ description: |
 - 如果结果文件下载、读取、写盘或完整性校验任一步失败，立即报告“结果下载失败”，并停止后续分析、图表和报告生成。不要回退到任何默认数据、历史缓存、旧结果文件或明显残缺的数据文件继续产出结果。
 - 如果用户要做 HTML 报告或其他 HTML 页面，先读 [references/hydros-html-prompt.md](references/hydros-html-prompt.md)。
 - 如果需要理解数据结构、聚合口径或指标映射，先读 [references/hydros-data-contract.md](references/hydros-data-contract.md)。
+- 如果场景是 `200060`（梯级电站），在阶段五默认追加“水轮机出力”校核；识别条件固定为 `device_type = Turbine` 且 `command_type = output_power`，并把它视为正式结果解读的必检项。
 - 如果需要快速交付一个可直接打开的页面，优先复用模板资产，而不是从零开始。
 - 需要完整版 HTML 报告、结果曲线展示或可直接打开的单文件页面时，优先复用 [assets/hydros-report-template/index.html](assets/hydros-report-template/index.html) 模板，并按当前脚本实现把真实 payload 内联到 `simulation_report.html`。
 - 当用户明确要“报告”“完整报告”“HTML 报告”“汇报页”时，不要先交付临时分析报告、手写摘要页或简版 HTML 作为最终产物；如果本地结果文件尚未就位，先完成 `get_timeseries_data -> get_export_status 轮询 -> resource_uri/下载地址 -> 落盘结果文件 -> build_timeseries_report.py`，再输出遵循模板的正式报告。
@@ -352,6 +353,7 @@ INIT -> WAITING_AGENTS -> READY -> STEPPING -> COMPLETED
     - 如果用户后续要生成 HTML 报告、Markdown 报告、拓扑页或纵剖面页，则在这一步一并基于场景 YAML 下载并缓存 `objects.yaml`；下载方式同样是"读取 `hydros_objects_modeling_url` -> 规范化 URL -> 标准 HTTP GET 下载 -> 以 UTF-8 一次性写入本地缓存文件"；若本轮前面已经缓存过，则优先复用，不要重复拉取
     - 如果结果文件下载失败、写盘失败，或校验后判断为坏文件/残缺文件，则直接报告阶段五失败并停止，不允许继续生成图表、异常分析或任何正式报告
     - 传递用户显式提供的仿真参数给脚本，避免写死默认值
+    - 如果场景是 `200060`，导出结果后必须检查是否存在 `device_type = Turbine` 且 `command_type = output_power` 的记录；若缺失，明确报告“结果导出未包含水轮机出力数据 / 结果导出不完整”，不要静默跳过
 
 2. **完整事件记录**：
     - 生成正式报告、事件复盘或运行过程记录时，调用 `get_simulation_scenario_events(biz_scene_instance_id)` 获取完整工况事件。
@@ -359,18 +361,18 @@ INIT -> WAITING_AGENTS -> READY -> STEPPING -> COMPLETED
     - 若结果曲线出现突变、仿真异常、MPC 控制结果异常，或需要解释某个事件对对象/时序的影响，调用完整事件查询做关联分析。
     - 不要把 `get_simulation_scenario_events` 放入阶段四高频轮询；阶段四只用 `received_hydro_events` 轻量判断事件是否发生。
 
-3. **统计摘要**：生成总记录数、采样步数、对象数、指标数、异常点数量。
+3. **统计摘要**：生成总记录数、采样步数、对象数、指标数、异常点数量；若场景是 `200060`，额外统计水轮机出力序列数、缺失情况和最大出力变化机组。
 
-4. **图表生成**：用 `scripts/generate_charts.py` 生成水位、流量、闸门开度和分水口流量等图表。注意 y 轴自适应收紧。
+4. **图表生成**：用 `scripts/generate_charts.py` 生成水位、流量、闸门开度和分水口流量等图表。注意 y 轴自适应收紧。若场景是 `200060`，额外生成水轮机出力曲线图，并把它视为正式报告图表的一部分。
 
 5. **异常分析**：用 `scripts/analyze_anomalies.py` 检测负压、流速异常、水头损失等。
 
 6. **报告生成**：
    - **默认产出**：HTML 报告 + Markdown 报告（除非用户明确只要其中一种）
-   - **HTML 报告**：对齐 `assets/hydros-report-template/index.html` 完整版结构，包含纵剖面与时序曲线联动
+  - **HTML 报告**：对齐 `assets/hydros-report-template/index.html` 完整版结构，包含纵剖面与时序曲线联动；对 `200060` 必须额外展示水轮机出力曲线
    - **Markdown 报告**：图文并茂，每张图表配套文字分析
    - **目录结构**：统一落盘到 `output/<biz_scene_instance_id>/`；其中 `report/` 存放报告，`charts/` 存放图表，`data/` 存放结果文件、`objects.yaml` 和分析中间文件
-   - **数据验证**：比较期望与实际的时长/点数，不一致时在报告中说明
+  - **数据验证**：比较期望与实际的时长/点数，不一致时在报告中说明；对 `200060` 还要验证是否包含 `Turbine/output_power` 数据，缺失时必须在 HTML/Markdown 正文和聊天结论里同时说明
    - **上传交付**：当 HTML 正式报告生成完成后，默认先交付本地 `simulation_report.html`。如当前环境提供并验证了报告上传工具或 API，再上传并把接口返回结果作为交付结果的一部分。
    - **上传命令示例**：
 

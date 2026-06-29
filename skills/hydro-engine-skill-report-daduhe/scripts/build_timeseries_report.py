@@ -36,6 +36,9 @@ from build_longitudinal_profile import split_object_blocks
 from lib.timeseries_loader import load_timeseries_dataframe
 from lib.url_utils import normalize_remote_url
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 
 ROOT = Path(__file__).resolve().parent.parent
 PROJECT_ROOT = ROOT.parent.parent
@@ -44,6 +47,7 @@ CHART_SCRIPT = ROOT / "scripts" / "generate_charts.py"
 WATER_LEVEL_DROP_WARN_RATE_M_PER_H = 0.15
 WATER_LEVEL_DROP_CONTROL_RATE_M_PER_H = 0.3
 GATE_OPENING_MIN_EFFECTIVE_CHANGE_M = 0.03
+TURBINE_OUTPUT_REQUIRED_SCENARIOS = {"200060"}
 
 
 @dataclass
@@ -239,6 +243,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--sim-step-size", type=int, default=None, help="计算步长，单位秒")
     parser.add_argument("--output-step-size", type=int, default=None, help="输出步长，单位秒")
     parser.add_argument("--llm-name", default=None, help="当前使用的模型名称；如 gpt-5.4 / claude-sonnet")
+    parser.add_argument("--mpc-results-json", default=None, help="可选传入 get_mpc_simulation_results 的 JSON 响应，用于补齐梯级电站场景的水轮机出力")
     return parser.parse_args(argv)
 
 
@@ -415,6 +420,203 @@ def build_gate_series(df: pd.DataFrame, excluded_steps: set[int] | None = None, 
     else:
         series.sort(key=lambda item: item["name"])
     return series
+
+
+def build_turbine_output_series(
+    df: pd.DataFrame,
+    excluded_steps: set[int] | None = None,
+    sort_key_func=None,
+) -> list[dict[str, Any]]:
+    series = []
+    turbine_df = select_turbine_output_rows(df)
+    if excluded_steps:
+        turbine_df = turbine_df[~turbine_df["data_index"].astype(int).isin(excluded_steps)].copy()
+
+    group_columns = ["object_name"]
+    if "device_name" in turbine_df.columns:
+        group_columns.append("device_name")
+    if "object_id" in turbine_df.columns:
+        group_columns.append("object_id")
+
+    for group_key, group in turbine_df.groupby(group_columns, sort=False, dropna=False):
+        if len(group_columns) == 3:
+            object_name, device_name, object_id = group_key
+        elif len(group_columns) == 2:
+            object_name, device_name = group_key
+            object_id = None
+        else:
+            object_name = group_key
+            device_name = None
+            object_id = None
+
+        ordered = group.sort_values("data_index")
+        if ordered.empty:
+            continue
+        display_name = str(device_name or object_name or "未命名水轮机")
+        item: dict[str, Any] = {
+            "name": str(object_name or display_name),
+            "displayName": display_name,
+            "legendName": display_name,
+            "sourceName": str(object_name or display_name),
+            "sourceObjectType": "Turbine",
+            "objectType": "Turbine",
+            "metricsCode": "output_power",
+            "seriesId": f"output_power|turbine|{display_name}",
+            "filterType": "电站",
+            "filterTypeLabel": "电站",
+            "businessCategory": "电站",
+            "businessObjectName": display_name,
+            "businessObjectLabel": display_name,
+            "defaultSelected": True,
+            "data": [[int(step), round_number(value, 3)] for step, value in zip(ordered["data_index"], ordered["value"])],
+            "minValue": round_number(ordered["value"].min(), 3),
+            "maxValue": round_number(ordered["value"].max(), 3),
+            "range": round_number(ordered["value"].max() - ordered["value"].min(), 3),
+        }
+        numeric_object_id = pd.to_numeric(pd.Series([object_id]), errors="coerce").iloc[0]
+        if pd.notna(numeric_object_id):
+            item["objectId"] = int(numeric_object_id)
+            item["businessObjectId"] = int(numeric_object_id)
+        series.append(item)
+
+    if sort_key_func:
+        series.sort(key=lambda item: sort_key_func(item["displayName"]))
+    else:
+        series.sort(key=lambda item: item["displayName"])
+    return series
+
+
+def select_turbine_output_rows(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame(columns=df.columns)
+
+    masks: list[pd.Series] = []
+    if "device_type" in df.columns and "command_type" in df.columns:
+        masks.append(
+            (df["device_type"].fillna("").astype(str) == "Turbine")
+            & (df["command_type"].fillna("").astype(str) == "output_power")
+        )
+    if "object_type" in df.columns and "metrics_code" in df.columns:
+        masks.append(
+            (df["object_type"].fillna("").astype(str) == "Turbine")
+            & (df["metrics_code"].fillna("").astype(str) == "output_power")
+        )
+
+    if not masks:
+        return pd.DataFrame(columns=df.columns)
+
+    mask = masks[0].copy()
+    for item in masks[1:]:
+        mask = mask | item
+    return df[mask].copy()
+
+
+def load_mpc_payload(mpc_results_json: str | None) -> dict[str, Any] | None:
+    if not mpc_results_json:
+        return None
+
+    payload = json.loads(Path(mpc_results_json).read_text(encoding="utf-8-sig"))
+    if "result" in payload and isinstance(payload["result"], dict):
+        result = payload["result"]
+        if isinstance(result.get("content"), list) and result["content"]:
+            text = result["content"][0].get("text")
+            if text:
+                return json.loads(text)
+    if "data" in payload:
+        return payload
+    return None
+
+
+def augment_dataframe_with_mpc_turbine_output(
+    df: pd.DataFrame,
+    mpc_results_json: str | None,
+    output_step_size: int | None,
+) -> tuple[pd.DataFrame, int]:
+    payload = load_mpc_payload(mpc_results_json)
+    if not payload:
+        return df, 0
+
+    records = payload.get("data") or []
+    if not records:
+        return df, 0
+
+    working_df = df.copy()
+    for column in ["device_type", "command_type", "device_name"]:
+        if column not in working_df.columns:
+            working_df[column] = ""
+
+    simulation_start = pd.to_datetime(working_df.get("source_time"), errors="coerce").dropna().min()
+    runtime_started = pd.to_datetime(working_df.get("gmt_create"), errors="coerce").dropna().min()
+    effective_output_step_size = int(output_step_size or 0) if output_step_size is not None else 0
+    if effective_output_step_size <= 0:
+        effective_output_step_size = 3600
+
+    biz_scenario_id = str(working_df["biz_scenario_id"].dropna().iloc[0])
+    biz_scene_instance_id = str(working_df["biz_scenario_instance_id"].dropna().iloc[0])
+    tenant_id = str(working_df["tenant_id"].dropna().iloc[0]) if "tenant_id" in working_df.columns and not working_df["tenant_id"].dropna().empty else ""
+    waterway_id = str(working_df["waterway_id"].dropna().iloc[0]) if "waterway_id" in working_df.columns and not working_df["waterway_id"].dropna().empty else ""
+
+    append_rows: list[dict[str, Any]] = []
+    for item in records:
+        step = item.get("step")
+        if step is None:
+            continue
+        for detail in item.get("hydro_mpc_details") or []:
+            if str(detail.get("command_type") or "") != "output_power":
+                continue
+            node_id = detail.get("node_id")
+            object_id = detail.get("object_id")
+            display_name = f"Turbine-{node_id}-{object_id}"
+            source_time = None
+            if pd.notna(simulation_start):
+                source_time = (simulation_start + timedelta(seconds=int(step) * effective_output_step_size)).isoformat()
+            append_rows.append(
+                {
+                    "attributes": None,
+                    "back_water_flow": None,
+                    "back_water_level": None,
+                    "biz_scenario_id": biz_scenario_id,
+                    "biz_scenario_instance_id": biz_scene_instance_id,
+                    "data_index": int(step),
+                    "edge_node_code": None,
+                    "front_water_flow": None,
+                    "front_water_level": None,
+                    "gmt_create": runtime_started.isoformat() if pd.notna(runtime_started) else None,
+                    "gmt_modified": runtime_started.isoformat() if pd.notna(runtime_started) else None,
+                    "id": None,
+                    "is_deleted": False,
+                    "metrics_code": "output_power",
+                    "value": detail.get("value"),
+                    "object_id": object_id,
+                    "object_name": display_name,
+                    "object_status": None,
+                    "object_type": "Turbine",
+                    "position_code": "none",
+                    "source_agent_type": None,
+                    "source_id": "MPC",
+                    "source_time": source_time,
+                    "source_type": "MPC",
+                    "tenant_id": tenant_id,
+                    "waterway_id": waterway_id,
+                    "device_type": "Turbine",
+                    "command_type": "output_power",
+                    "device_name": display_name,
+                }
+            )
+
+    if not append_rows:
+        return working_df, 0
+
+    append_df = pd.DataFrame(append_rows)
+    for column in working_df.columns:
+        if column not in append_df.columns:
+            append_df[column] = None
+    for column in append_df.columns:
+        if column not in working_df.columns:
+            working_df[column] = None
+    append_df = append_df[working_df.columns]
+    working_df = pd.concat([working_df, append_df], ignore_index=True)
+    return working_df, len(append_df)
 
 
 BUSINESS_CATEGORY_ORDER = {"渠道": 0, "闸站": 1, "倒虹吸": 2, "分水口": 3, "其他": 9}
@@ -704,11 +906,7 @@ def clone_series_with_business_meta(base_item: dict[str, Any], child: dict[str, 
             "childRole": child["childRole"],
             "childOrder": child["childOrder"],
             "displayName": f"{child['childRole']}：{source_label}",
-            "legendName": (
-                f"{child['businessObjectName']} / {source_label}"
-                if child["sourceObjectType"] == "Gate" and child["childRole"] == "闸门设备"
-                else f"{child['businessObjectName']} / {child['childRole']}"
-            ),
+            "legendName": f"{child['businessObjectName']} / {child['childRole']}",
             "defaultSelected": bool(child.get("defaultSelected")),
         }
     )
@@ -1000,10 +1198,18 @@ def build_report_data(
 
     metric_counts = {key: int(value) for key, value in df["metrics_code"].value_counts().to_dict().items()}
     object_type_counts = {key: int(value) for key, value in df["object_type"].value_counts().to_dict().items()}
+    scenario_requires_turbine_output = scenario_id in TURBINE_OUTPUT_REQUIRED_SCENARIOS
 
     flow_df = df[df["metrics_code"] == "water_flow"].copy()
     level_df = df[df["metrics_code"] == "water_level"].copy()
     gate_df = df[(df["object_type"] == "Gate") & (df["metrics_code"] == "gate_opening")].copy()
+    turbine_power_df = select_turbine_output_rows(df)
+    if not turbine_power_df.empty:
+        metric_counts["output_power"] = int(len(turbine_power_df))
+        object_type_counts["Turbine"] = int(len(turbine_power_df))
+    elif scenario_requires_turbine_output:
+        metric_counts.setdefault("output_power", 0)
+        object_type_counts.setdefault("Turbine", 0)
     placeholder_level_steps = detect_placeholder_steps(level_df)
     placeholder_flow_steps = detect_placeholder_steps(flow_df)
     placeholder_level_steps = preserve_only_available_sample(level_df, placeholder_level_steps)
@@ -1015,15 +1221,18 @@ def build_report_data(
     level_display_df = level_df[~level_df["data_index"].astype(int).isin(placeholder_level_steps)].copy()
     flow_display_df = flow_df[~flow_df["data_index"].astype(int).isin(placeholder_flow_steps)].copy()
     gate_display_df = gate_df[~gate_df["data_index"].astype(int).isin(display_excluded_steps)].copy()
+    turbine_power_display_df = turbine_power_df[~turbine_power_df["data_index"].astype(int).isin(display_excluded_steps)].copy()
     excluded_steps_by_metric = {
         "water_level": set(placeholder_level_steps),
         "water_flow": set(placeholder_flow_steps),
         "gate_opening": set(display_excluded_steps),
+        "output_power": set(display_excluded_steps),
     }
     expected_steps_by_metric = {
         "water_level": set(int(step) for step in level_display_df["data_index"].unique().tolist()),
         "water_flow": set(int(step) for step in flow_display_df["data_index"].unique().tolist()),
         "gate_opening": set(int(step) for step in gate_display_df["data_index"].unique().tolist()),
+        "output_power": set(int(step) for step in turbine_power_display_df["data_index"].unique().tolist()),
     }
 
     negative_flow = flow_display_df[flow_display_df["value"] < 0].copy()
@@ -1032,6 +1241,7 @@ def build_report_data(
     constant_flow_groups = []
     dynamic_gate_groups = []
     completeness_issues = []
+    turbine_output_missing = scenario_requires_turbine_output and turbine_power_df.empty
 
     for (object_name, metric, object_type), group in df.groupby(["object_name", "metrics_code", "object_type"], sort=False):
         expected_steps = expected_steps_by_metric.get(metric, set(raw_unique_steps))
@@ -1075,6 +1285,14 @@ def build_report_data(
         .assign(range=lambda frame: frame["max"] - frame["min"])
         .sort_values("range", ascending=False)
     )
+    turbine_power_range = (
+        turbine_power_display_df.groupby("object_name")["value"]
+        .agg(["min", "max", "mean", "std"])
+        .assign(range=lambda frame: frame["max"] - frame["min"])
+        .sort_values("range", ascending=False)
+        if not turbine_power_display_df.empty
+        else pd.DataFrame()
+    )
 
     highlight_flow_name = None
     highlight_flow_type = None
@@ -1088,6 +1306,13 @@ def build_report_data(
         ]
     highlight_flow_window_text = describe_variation_window(highlight_flow_group)
     highlight_flow_display_name = highlight_flow_name or "流量结果序列"
+    highlight_turbine_name = None
+    highlight_turbine_stats = None
+    highlight_turbine_group = pd.DataFrame(columns=turbine_power_display_df.columns)
+    if not turbine_power_range.empty:
+        highlight_turbine_name = turbine_power_range.index[0]
+        highlight_turbine_stats = turbine_power_range.iloc[0]
+        highlight_turbine_group = turbine_power_display_df[turbine_power_display_df["object_name"] == highlight_turbine_name]
     highlight_flow_range_value = (
         float(highlight_flow_stats["range"])
         if highlight_flow_stats is not None and pd.notna(highlight_flow_stats["range"])
@@ -1173,6 +1398,30 @@ def build_report_data(
                 "metric": "water_flow",
                 "finding": f"{len(constant_flow_groups)} 个对象保持恒定非零流量，典型对象包括 {names}。",
                 "advice": "若本次目的是做稳态校核可以接受；若要观察动态响应，建议注入事件或调整边界条件。",
+            }
+        )
+
+    if turbine_output_missing:
+        anomaly_items.append(
+            {
+                "priority": "高",
+                "object": "梯级电站场景 200060",
+                "metric": "output_power",
+                "finding": "当前结果导出未包含 device_type=Turbine 且 command_type=output_power 的水轮机出力记录。",
+                "advice": "将本次结果视为导出不完整；需要补齐水轮机出力后，再进行梯级电站场景的正式结果解读与对外汇报。",
+            }
+        )
+    elif highlight_turbine_name is not None and highlight_turbine_stats is not None:
+        anomaly_items.append(
+            {
+                "priority": "低",
+                "object": highlight_turbine_name,
+                "metric": "output_power",
+                "finding": (
+                    f"水轮机出力最大变化幅度为 {round_number(highlight_turbine_stats['range'])}，"
+                    f"最小 {round_number(highlight_turbine_stats['min'])}、最大 {round_number(highlight_turbine_stats['max'])}。"
+                ),
+                "advice": "建议结合机组调度策略、上游来水和尾水位过程，复核该机组出力变化是否符合预期。",
             }
         )
 
@@ -1317,8 +1566,23 @@ def build_report_data(
             f"以降低局部变化误判风险，并为后续设计复核和调度判断提供支撑。"
         ),
     ]
+    if scenario_requires_turbine_output:
+        summary_paragraphs.insert(
+            1,
+            (
+                "由于当前场景属于梯级电站场景 200060，本轮结果解读额外要求校核水轮机出力链路。"
+                + (
+                    (
+                        f"本次已识别到 {turbine_power_display_df['object_name'].nunique()} 台机组的出力序列，"
+                        f"其中 {highlight_turbine_name} 的出力变化幅度最大，为 {round_number(highlight_turbine_stats['range'])}。"
+                    )
+                    if not turbine_power_display_df.empty and highlight_turbine_stats is not None
+                    else "但当前导出结果未包含 `device_type=Turbine` 且 `command_type=output_power` 的机组出力记录，应视为导出不完整。"
+                )
+            ),
+        )
     if runtime_config.expected_sample_count is not None and runtime_config.expected_sample_count != raw_sampled_point_count:
-        summary_paragraphs[1] += (
+        summary_paragraphs[-1] += (
             f" 同时，按本次设置原本应看到约 {runtime_config.expected_sample_count} 次结果输出，"
             f"而结果文件实际仅导出 {raw_sampled_point_count} 次结果输出，说明结果文件的时间信息存在异常。"
         )
@@ -1362,12 +1626,29 @@ def build_report_data(
         {
             "title": "异常情况",
             "body": (
-                f"{leading_zero_flow_name} 最为特殊，全程结果均为 0，需先核查是正常停运、关闭状态，还是配置或取数异常。"
-                if leading_zero_flow_name
-                else (
-                    f"当前最特殊的现象出现在 {highlight_flow_name}，其变化幅度明显高于其他对象，"
-                    "需要结合工况进一步复核。"
+                (
+                    "梯级电站场景要求展示水轮机出力，但当前导出结果缺少 `Turbine/output_power` 记录，应先补齐导出数据后再做正式结论。"
+                    if turbine_output_missing
+                    else (
+                        f"{leading_zero_flow_name} 最为特殊，全程结果均为 0，需先核查是正常停运、关闭状态，还是配置或取数异常。"
+                        if leading_zero_flow_name
+                        else (
+                            f"当前最特殊的现象出现在 {highlight_flow_name}，其变化幅度明显高于其他对象，"
+                            "需要结合工况进一步复核。"
+                        )
+                    )
                 )
+            ),
+        },
+        {
+            "title": "机组出力",
+            "body": (
+                (
+                    f"已识别 {turbine_power_display_df['object_name'].nunique()} 台水轮机出力序列，"
+                    f"其中 {highlight_turbine_name} 的出力变化幅度最大，为 {round_number(highlight_turbine_stats['range'])}。"
+                )
+                if not turbine_power_display_df.empty and highlight_turbine_stats is not None
+                else "当前结果未识别到可用于分析的水轮机出力序列。"
             ),
         },
         {
@@ -1416,6 +1697,15 @@ def build_report_data(
         ),
         "若后续要做动态评估，可叠加工况事件注入，观察闸门动作对沿程水位和分水口流量的传递影响。",
     ]
+    if scenario_requires_turbine_output:
+        recommendations.insert(
+            0,
+            (
+                "优先核对结果导出链路是否包含 `device_type=Turbine`、`command_type=output_power` 的机组出力记录。"
+                if turbine_output_missing
+                else "结合梯级电站调度目标复核机组出力过程，确认各台水轮机的负荷分配与水位流量过程是否一致。"
+            ),
+        )
 
     mini_table = []
     for _, row in (
@@ -1450,14 +1740,22 @@ def build_report_data(
         if dynamic_gate_groups
         else "闸门运行状态总体平稳"
     )
+    if scenario_requires_turbine_output:
+        overall_control_text += (
+            "，且已纳入机组出力校核"
+            if not turbine_output_missing
+            else "，但机组出力数据缺失"
+        )
     overall_risk_text = (
         "局部节点仍需结合零流量和变化较大区段继续复核"
         if zero_flow_groups or highlight_flow_stats is not None
         else "当前未见突出的局部异常"
     )
+    if turbine_output_missing:
+        overall_risk_text = "当前结果导出缺少梯级电站场景要求的水轮机出力数据，正式结论存在信息缺口"
     overall_judgement_text = (
         "当前结果未见明显整体失稳迹象"
-        if asset_status["complete"] and not runtime_config.has_unreliable_time_axis and negative_flow.empty
+        if asset_status["complete"] and not runtime_config.has_unreliable_time_axis and negative_flow.empty and not turbine_output_missing
         else "当前结果还需结合缺失图表或时间轴情况继续核查"
     )
 
@@ -1472,6 +1770,12 @@ def build_report_data(
     if dynamic_gate_groups:
         risk_area_names.append(dynamic_gate_groups[0][0])
         risk_findings.append("控制动作存在阶段切换")
+    if turbine_output_missing:
+        risk_area_names.append("梯级电站机组出力")
+        risk_findings.append("缺少水轮机出力导出记录")
+    elif highlight_turbine_name:
+        risk_area_names.append(highlight_turbine_name)
+        risk_findings.append("机组出力变化需要与调度策略联动核查")
 
     risk_area_text = "、".join(dict.fromkeys(risk_area_names[:3])) if risk_area_names else "当前未发现集中的高风险区域"
     risk_finding_text = "、".join(dict.fromkeys(risk_findings[:3])) if risk_findings else "以局部变化区段复核为主"
@@ -1530,6 +1834,9 @@ def build_report_data(
             "water_level_series_count": int(level_df.groupby(["object_name", "object_type"]).ngroups),
             "water_flow_series_count": int(flow_df.groupby(["object_name", "object_type"]).ngroups),
             "gate_series_count": int(gate_df.groupby("object_name").ngroups),
+            "turbine_output_series_count": int(turbine_power_df.groupby("object_name").ngroups) if not turbine_power_df.empty else 0,
+            "turbine_output_required": scenario_requires_turbine_output,
+            "turbine_output_missing": turbine_output_missing,
             "report_asset_complete": asset_status["complete"],
             "missing_report_assets": asset_status["missing"],
         },
@@ -1602,6 +1909,7 @@ def build_report_data(
                 df, "water_flow", business_children, set(placeholder_flow_steps), sort_key_func
             ),
             "gateSeries": build_business_gate_series(df, business_children, set(display_excluded_steps), sort_key_func),
+            "turbinePowerSeries": build_turbine_output_series(df, set(display_excluded_steps), sort_key_func),
         },
         "chartInterpretations": {
             "level": {
@@ -1634,6 +1942,23 @@ def build_report_data(
                 "placeholder_steps": display_excluded_steps,
                 "dynamic_gate_count": dynamic_gate_count,
             },
+            "turbine": {
+                "analysis": (
+                    (
+                        f"已识别 {int(turbine_power_df.groupby('object_name').ngroups)} 台水轮机的出力结果曲线，"
+                        f"{highlight_turbine_name} 的出力变化幅度最大，为 {round_number(highlight_turbine_stats['range'])}。"
+                    )
+                    if not turbine_power_df.empty and highlight_turbine_stats is not None
+                    else (
+                        "梯级电站场景要求展示水轮机出力，但当前导出结果未包含 `device_type=Turbine`、`command_type=output_power` 记录。"
+                        if scenario_requires_turbine_output
+                        else "当前结果未包含可用于展示的水轮机出力序列。"
+                    )
+                ),
+                "placeholder_steps": display_excluded_steps,
+                "required": scenario_requires_turbine_output,
+                "missing": turbine_output_missing,
+            },
         },
         "analysisSummary": {
             "step_values": unique_steps,
@@ -1661,6 +1986,9 @@ def build_report_data(
             "display_sampled_point_count": display_sampled_point_count,
             "metric_counts": metric_counts,
             "object_type_counts": object_type_counts,
+            "turbine_output_required": scenario_requires_turbine_output,
+            "turbine_output_missing": turbine_output_missing,
+            "turbine_output_series_count": int(turbine_power_df.groupby("object_name").ngroups) if not turbine_power_df.empty else 0,
             "top_flow_variation": {
                 "object_name": highlight_flow_name,
                 "object_type": highlight_flow_type,
@@ -1668,6 +1996,13 @@ def build_report_data(
                 "max": round_number(highlight_flow_max_value),
                 "range": round_number(highlight_flow_range_value),
                 "description": describe_series_points(highlight_flow_group),
+            },
+            "top_turbine_output_variation": {
+                "object_name": highlight_turbine_name,
+                "min": round_number(float(highlight_turbine_stats["min"])) if highlight_turbine_stats is not None and pd.notna(highlight_turbine_stats["min"]) else None,
+                "max": round_number(float(highlight_turbine_stats["max"])) if highlight_turbine_stats is not None and pd.notna(highlight_turbine_stats["max"]) else None,
+                "range": round_number(float(highlight_turbine_stats["range"])) if highlight_turbine_stats is not None and pd.notna(highlight_turbine_stats["range"]) else None,
+                "description": describe_series_points(highlight_turbine_group),
             },
             "top_level_variation": {
                 "object_name": highlight_level_name,
@@ -1693,6 +2028,10 @@ def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
     profile = payload["longitudinalProfile"]
     asset_status = payload["analysisSummary"].get("report_assets", {})
     missing_assets = asset_status.get("missing", [])
+    turbine_required = bool(analysis.get("turbine_output_required"))
+    turbine_missing = bool(analysis.get("turbine_output_missing"))
+    turbine_series_count = int(analysis.get("turbine_output_series_count") or 0)
+    has_turbine_chart = "chart6_turbine_output_power.png" not in missing_assets
     anomaly_rows = "\n".join(
         f"| {item['priority']} | {item['object']} | {item['metric']} | {item['finding']} | {item['advice']} |"
         for item in payload["anomalies"]
@@ -1718,6 +2057,17 @@ def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
             f"- 报告图表产物存在缺失：`{'`、`'.join(missing_assets)}`。\n"
             "- HTML 页面已显式标注该问题；相关图表维度应按缺失范围降级解读，不应视为“完整图表已全部产出”。"
         )
+    turbine_section_markdown = ""
+    if turbine_required or turbine_series_count > 0:
+        turbine_section_markdown = f"""
+### 5. 水轮机出力
+
+{"![水轮机出力时序](../charts/chart6_turbine_output_power.png)" if has_turbine_chart else "本次未生成可用的水轮机出力图表。"}
+
+{payload['chartInterpretations']['turbine']['analysis']} 当前共识别 `{turbine_series_count}` 条机组出力序列。
+"""
+        if turbine_missing:
+            turbine_section_markdown += "\n本次导出结果未包含梯级电站场景要求的水轮机出力记录，应视为导出不完整。\n"
     if "不可靠" in str(payload["meta"].get("time_axis_note", "")):
         conclusion_axis_line = (
             "- 本次结果文件在数值层面可用于结果分析，但时间信息不完整；"
@@ -1764,6 +2114,7 @@ def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
 - 指标数：`{payload['meta']['metric_count']}`
 - 结果覆盖步段：{payload['meta'].get('sample_step_note') or f"第 `{analysis['step_values'][0]}` 次至第 `{analysis['step_values'][-1]}` 次输出"}，共输出 `{payload['meta']['sampled_point_count']}` 次结果
 - 配置总输出步数：`{payload['meta']['total_steps']}`
+{"- 水轮机出力校核：" + ("缺失，需补充导出" if turbine_missing else f"已识别 {turbine_series_count} 条序列") if (turbine_required or turbine_series_count > 0) else ""}
 
 ## 执行摘要
 
@@ -1819,6 +2170,8 @@ def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
 
 分流/退水节点侧呈现“少数动态、多数恒定”的特征。部分节点全程为零或维持恒定流量，更像稳态配水结果而非持续调节过程。
 
+{turbine_section_markdown}
+
 {profile_markdown}
 
 ## 结论
@@ -1853,7 +2206,11 @@ def write_html_assets(report_dir: Path, data_dir: Path, payload: dict[str, Any])
     )
 
 
-def validate_required_report_assets(charts_dir: Path, profile_dataset: Any) -> dict[str, Any]:
+def validate_required_report_assets(
+    charts_dir: Path,
+    profile_dataset: Any,
+    require_turbine_output: bool = False,
+) -> dict[str, Any]:
     required_chart_names = [
         "chart1_water_level.png",
         "chart2_water_flow.png",
@@ -1861,6 +2218,8 @@ def validate_required_report_assets(charts_dir: Path, profile_dataset: Any) -> d
         "chart5_disturbance_flow.png",
         "chart7_longitudinal_profile.png",
     ]
+    if require_turbine_output:
+        required_chart_names.append("chart6_turbine_output_power.png")
     missing = [name for name in required_chart_names if not (charts_dir / name).exists()]
     if profile_dataset is None and "chart7_longitudinal_profile.png" not in missing:
         missing.append("chart7_longitudinal_profile.png")
@@ -1893,6 +2252,16 @@ def main() -> None:
         scenario_meta,
         args,
     )
+    scenario_id = str(df["biz_scenario_id"].iloc[0])
+    if scenario_id in TURBINE_OUTPUT_REQUIRED_SCENARIOS and select_turbine_output_rows(df).empty and args.mpc_results_json:
+        df, appended_turbine_rows = augment_dataframe_with_mpc_turbine_output(
+            df,
+            args.mpc_results_json,
+            runtime_config.output_step_size,
+        )
+        if appended_turbine_rows:
+            df.to_csv(working_csv_path, index=False, encoding="utf-8")
+            print(f"已通过 MPC 结果补齐水轮机出力记录: {appended_turbine_rows} 条")
 
     chart_command = [sys.executable, str(CHART_SCRIPT), str(working_csv_path), str(paths["charts"])]
     if runtime_config.total_steps is not None:
@@ -1933,7 +2302,11 @@ def main() -> None:
         profile_error = str(exc)
         print(f"纵剖面未生成: {profile_error}")
 
-    asset_status = validate_required_report_assets(paths["charts"], profile_dataset)
+    asset_status = validate_required_report_assets(
+        paths["charts"],
+        profile_dataset,
+        require_turbine_output=scenario_id in TURBINE_OUTPUT_REQUIRED_SCENARIOS,
+    )
 
     charts_stats = paths["charts"] / "analysis_stats.json"
     if charts_stats.exists():

@@ -31,8 +31,13 @@
   - `CrossSection`：断面
   - `Gate`：闸门
   - `DisturbanceNode`：分水口/退水闸
+  - `Turbine`：水轮机/机组
 - `metrics_code`
   指标编码。决定图表类型和异常规则。
+- `device_type`
+  设备类型。部分场景的设备控制结果不一定体现在 `object_type` 或 `metrics_code` 中，需额外用它做筛选。
+- `command_type`
+  控制量类型。设备控制结果场景里，常需要和 `device_type` 组合判断真正的指标口径。
 - `data_index`
   优先视为离散时间轴。但在部分结果文件导出里，它可能是“输出序号”而不是真实计算步号；如果用户显式给出了 `total_steps`、`sim_step_size`、`output_step_size`，必须优先使用这些参数作为时间口径，不要写死默认值。仿真覆盖总时长固定按 `total_steps * output_step_size` 推导，不使用 `sim_step_size`。
 - `step_index`
@@ -85,7 +90,19 @@ object_name + metrics_code
 - `water_level`
 - `water_flow`
 - `gate_opening` 或同类开度指标
+- `output_power` 或设备控制结果中的同义机组出力指标
 - 其他场景特定指标
+
+## 场景特例：200060 梯级电站
+
+当 `biz_scenario_id = 200060` 时，把水轮机出力视为默认必检指标。
+
+- 识别条件：`device_type = Turbine` 且 `command_type = output_power`
+- 展示名称：`水轮机出力 (output_power)`
+- 推荐主键：`object_name + command_type`
+- 推荐对象标签：优先使用 `object_name`，若缺失再退回 `device_name`
+- 导出校验：如果 `200060` 结果文件里没有任何 `Turbine/output_power` 记录，应明确报告“结果导出不完整”，不能静默跳过
+- 报告要求：HTML 报告、Markdown 报告、分析摘要和图表产物都应纳入该指标
 
 ## 推荐图表映射
 
@@ -105,6 +122,13 @@ object_name + metrics_code
 - 主图：阶梯图或柱状图
 - 对比：多闸门并列柱状图
 
+### output_power
+
+- 主图：折线图
+- 对比：多机组叠加折线图
+- 推荐场景：梯级电站、泵站/机组联合调度结果
+- 关键要求：在 `200060` 场景下默认展示；缺失时要显式报缺，不允许静默省略
+
 ## 推荐异常规则
 
 ### 高优先级
@@ -120,6 +144,10 @@ object_name + metrics_code
   规则：整个序列恒为 0
 - 恒定流量
   规则：方差为 0 或低于阈值
+- 水轮机出力缺失
+  规则：`biz_scenario_id = 200060` 且结果中不存在 `device_type = Turbine`、`command_type = output_power` 的记录
+- 水轮机出力异常波动
+  规则：同一机组相邻输出步的出力变化幅度异常大，或长期保持异常常值，需要结合调度策略复核
 
 ### 低优先级
 
@@ -137,6 +165,8 @@ object_name + metrics_code
 流量 (water_flow)
 闸门 (Gate)
 断面 (CrossSection)
+水轮机出力 (output_power)
+水轮机 (Turbine)
 ```
 
 ## 输出前检查

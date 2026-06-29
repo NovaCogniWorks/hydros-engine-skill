@@ -873,6 +873,25 @@
                   <div id="gateChart" class="chart-canvas chart-canvas--compact mt-2"></div>
                   <div id="gateInterpretation" class="soft-panel mt-3 rounded-[18px] px-4 py-3 text-sm leading-7 text-ink/72"></div>
                 </div>
+                <div class="soft-panel rounded-[24px] p-4">
+                  <h3 id="turbineCardTitle" class="text-base font-semibold">水轮机出力响应</h3>
+                  <p id="turbineCardDesc" class="mt-1 text-sm text-ink/62">用于梯级电站场景校核机组出力过程与调度目标是否一致。</p>
+                  <div class="curve-filter-panel mt-2 flex flex-col gap-2">
+                    <div class="curve-filter-row">
+                      <select id="turbineTypeSelect" class="shrink-0 rounded-lg border border-line px-3 py-1.5 text-xs text-ink/72 focus:outline-primary"></select>
+                      <input id="turbineSearchInput" class="curve-search-input" type="search" placeholder="搜索电站、机组名称或设备编号" />
+                      <div class="curve-select-menu">
+                        <button id="turbineSelectAll" type="button" class="curve-select-all-button">全选</button>
+                        <div class="curve-select-options" role="menu" aria-label="水轮机出力曲线批量选择">
+                          <button type="button" class="curve-select-option" data-select-scope="all">全选</button>
+                        </div>
+                      </div>
+                    </div>
+                    <div id="turbineObjectList" class="curve-object-list"></div>
+                  </div>
+                  <div id="turbineChart" class="chart-canvas chart-canvas--compact mt-2"></div>
+                  <div id="turbineInterpretation" class="soft-panel mt-3 rounded-[18px] px-4 py-3 text-sm leading-7 text-ink/72"></div>
+                </div>
               </div>
             </article>
 
@@ -1082,6 +1101,7 @@
         bedFill: "rgba(135, 96, 61, 0.16)",
         crest: "#637487",
         gate: "#111827",
+        turbine: "#c96a19",
         plotBackground: "rgba(244, 249, 250, 0.72)",
         panelFill: "rgba(255, 255, 255, 0.92)",
         panelStroke: "rgba(135, 166, 179, 0.32)",
@@ -1091,6 +1111,7 @@
         water_level: "水位",
         water_flow: "流量",
         gate_opening: "闸门开度",
+        output_power: "水轮机出力",
         data_index: "采样时间步",
         step_index: "计算时间步",
         source_time: "源业务时间",
@@ -1269,6 +1290,7 @@
         interactionState.api.updateLevelChart?.(interactionState.currentStep);
         interactionState.api.updateFlowChart?.(interactionState.currentStep);
         interactionState.api.updateGateChart?.(interactionState.currentStep);
+        interactionState.api.updateTurbineChart?.(interactionState.currentStep);
       }
 
       function setCurrentStepByIndex(index) {
@@ -2355,10 +2377,12 @@
         const levelChart = registerChart(createChart("levelChart"), "levelChart");
         const flowChart = registerChart(createChart("flowChart"), "flowChart");
         const gateChart = registerChart(createChart("gateChart"), "gateChart");
+        const turbineChart = registerChart(createChart("turbineChart"), "turbineChart");
 
         const levelSeries = reportData.charts.levelSeries || [];
         const flowSeries = reportData.charts.flowSeries || [];
         const gateSeries = reportData.charts.gateSeries || [];
+        const turbineSeries = reportData.charts.turbinePowerSeries || [];
 
         document.getElementById("levelCardTitle").textContent = `${localizedTermLabel("water_level")}结果曲线`;
         document.getElementById("levelCardTitle").title = "water_level";
@@ -2372,9 +2396,13 @@
         document.getElementById("gateCardTitle").title = "gate_opening";
         document.getElementById("gateCardDesc").textContent = `共 ${gateSeries.length} 条序列，支持多闸站、多闸门设备同时展示。`;
         document.getElementById("gateCardDesc").title = "gate_opening";
+        document.getElementById("turbineCardTitle").textContent = `${localizedTermLabel("output_power")}结果曲线`;
+        document.getElementById("turbineCardTitle").title = "output_power";
+        document.getElementById("turbineCardDesc").textContent = `共 ${turbineSeries.length} 条序列，默认用于梯级电站场景的机组出力校核。`;
+        document.getElementById("turbineCardDesc").title = "output_power";
 
-        const typeLabels = { CrossSection: '断面', DisturbanceNode: '分水口/退水闸', Gate: '闸门' };
-        const categoryOrder = ["渠道", "闸站", "倒虹吸", "分水口", "其他"];
+        const typeLabels = { CrossSection: '断面', DisturbanceNode: '分水口/退水闸', Gate: '闸门', Turbine: '水轮机' };
+        const categoryOrder = ["渠道", "闸站", "电站", "倒虹吸", "分水口", "其他"];
         const chartInterpretations = reportData.chartInterpretations || {};
 
         function formatCheckNumber(value, digits = 3) {
@@ -2469,6 +2497,27 @@
           );
         }
 
+        function analyzeTurbineOutputChange(selectedSeries) {
+          let minValue = null;
+          let maxValue = null;
+          let maxRamp = null;
+          selectedSeries.forEach((series) => {
+            const points = normalizeSeriesPoints(series);
+            points.forEach((point) => {
+              minValue = minValue == null ? point.value : Math.min(minValue, point.value);
+              maxValue = maxValue == null ? point.value : Math.max(maxValue, point.value);
+            });
+            for (let index = 1; index < points.length; index += 1) {
+              const ramp = Math.abs(points[index].value - points[index - 1].value);
+              maxRamp = maxRamp == null ? ramp : Math.max(maxRamp, ramp);
+            }
+          });
+          if (minValue == null || maxValue == null) {
+            return "水轮机出力检查：当前未选中有效机组出力曲线。";
+          }
+          return `水轮机出力检查：当前选中机组出力范围 ${formatCheckNumber(minValue)} ~ ${formatCheckNumber(maxValue)}，最大相邻步变化 ${formatCheckNumber(maxRamp || 0)}。`;
+        }
+
         function renderCurveInterpretation(elementId, interpretation, selectedSeries, selectedType) {
           const element = document.getElementById(elementId);
           if (!element) return;
@@ -2478,6 +2527,9 @@
           }
           if (elementId === "gateInterpretation") {
             dynamicChecks.push(analyzeGateOpeningChange(selectedSeries));
+          }
+          if (elementId === "turbineInterpretation") {
+            dynamicChecks.push(analyzeTurbineOutputChange(selectedSeries));
           }
           element.innerHTML = [interpretation?.analysis, ...dynamicChecks]
             .filter(Boolean)
@@ -2490,10 +2542,6 @@
         }
 
         function getSeriesDisplayName(item) {
-          if (item.objectType === "Gate" && item.childRole === "闸门设备") {
-            if (item.businessObjectName && item.sourceName) return `${item.businessObjectName} / ${item.sourceName}`;
-            return item.displayName || item.sourceName || item.legendName || item.name;
-          }
           return item.legendName || item.displayName || item.name;
         }
 
@@ -2503,7 +2551,7 @@
         }
 
         function buildAdaptiveChartLayout(seriesCount, legendSelected = {}) {
-          const showLegend = seriesCount > 0;
+          const showLegend = seriesCount > 1;
           const legendRows = seriesCount > 12 ? 2 : 1;
           return {
             grid: {
@@ -2856,6 +2904,12 @@
         const gateLegendSelected = {};
         bindLegendSelection(gateChart, gateLegendSelected, () => updateGateChart(interactionState.currentStep));
 
+        const turbineTypeSelect = document.getElementById("turbineTypeSelect");
+        const turbineObjectList = document.getElementById("turbineObjectList");
+        const getSelectedTurbine = buildBusinessFilter(turbineSeries, turbineTypeSelect, turbineObjectList, '电站');
+        const turbineLegendSelected = {};
+        bindLegendSelection(turbineChart, turbineLegendSelected, () => updateTurbineChart(interactionState.currentStep));
+
         function updateLevelChart(step = interactionState.currentStep) {
           const selectedIndices = getSelectedLevel();
           const selectedSeriesMeta = selectedIndices.map((index) => levelSeries[index]);
@@ -3002,6 +3056,7 @@
         levelTypeSelect.addEventListener("filter-changed", updateLevelChart);
         flowTypeSelect.addEventListener("filter-changed", updateFlowChart);
         gateTypeSelect.addEventListener("filter-changed", updateGateChart);
+        turbineTypeSelect.addEventListener("filter-changed", updateTurbineChart);
 
         function updateGateChart(step = interactionState.currentStep) {
           const selectedIndices = getSelectedGate();
@@ -3081,13 +3136,93 @@
           }, true);
         }
 
+        function updateTurbineChart(step = interactionState.currentStep) {
+          const selectedIndices = getSelectedTurbine();
+          const selectedSeriesMeta = selectedIndices.map((index) => turbineSeries[index]);
+          renderCurveInterpretation("turbineInterpretation", chartInterpretations.turbine, selectedSeriesMeta, turbineTypeSelect.value);
+          const turbineChartSeries = selectedSeriesMeta.map((item, index) =>
+            buildLineSeries(
+              getSeriesDisplayName(item),
+              item.data
+                .map((point) => [normalizeStepValue(point[0]), point[1]])
+                .filter((point) => Number.isFinite(point[0])),
+              index,
+              { color: chartTheme.turbine, lineWidth: 2.3 }
+            )
+          );
+          syncLegendSelection(turbineChart, turbineLegendSelected);
+          const visibleSeriesMeta = getLegendVisibleSeriesMeta(selectedSeriesMeta, turbineLegendSelected);
+          const bounds = computeAxisBounds(
+            visibleSeriesMeta.map((series) => series.data.map((point) => point[1])),
+            { paddingRatio: 0.12, minPadding: 0.02 }
+          );
+          const stepBounds = computeAxisExtent(
+            visibleSeriesMeta.map((series) => series.data.map((point) => normalizeStepValue(point[0]) ?? point[0]))
+          );
+          const layout = buildAdaptiveChartLayout(selectedSeriesMeta.length, turbineLegendSelected);
+
+          turbineChart.setOption({
+            animationDuration: 500,
+            grid: layout.grid,
+            tooltip: {
+              trigger: "axis",
+              axisPointer: { type: "line", lineStyle: { color: chartTheme.crosshair, type: "dashed" } },
+              formatter: buildTooltipFormatter(""),
+            },
+            legend: layout.legend,
+            dataZoom: [
+              { type: "inside", xAxisIndex: 0, filterMode: "none" },
+              { type: "slider", xAxisIndex: 0, height: 18, bottom: 6, borderColor: "transparent", fillerColor: "rgba(201, 106, 25, 0.16)" },
+            ],
+            xAxis: {
+              type: "value",
+              name: reportData.meta?.axis_label || "步长",
+              min: stepBounds.min,
+              max: stepBounds.max,
+              nameLocation: "middle",
+              nameGap: 40,
+              nameTextStyle: {
+                color: "rgba(16, 35, 50, 0.78)",
+                fontSize: 13,
+                fontWeight: 600,
+                padding: [8, 0, 0, 0],
+              },
+              axisLine: { show: true, lineStyle: { color: chartTheme.grid, width: 1.2 } },
+              axisTick: { show: true, inside: true, lineStyle: { color: chartTheme.grid } },
+              axisLabel: { show: true, color: chartTheme.text, fontSize: 11, margin: 12, hideOverlap: false },
+              splitLine: { show: false },
+            },
+            yAxis: {
+              type: "value",
+              name: localizedTermLabel("output_power"),
+              min: bounds.min,
+              max: bounds.max,
+              nameLocation: "middle",
+              nameGap: 52,
+              nameRotate: 90,
+              nameTextStyle: {
+                color: "rgba(16, 35, 50, 0.78)",
+                fontSize: 13,
+                fontWeight: 600,
+              },
+              axisLine: { show: true, lineStyle: { color: chartTheme.grid, width: 1.2 } },
+              axisTick: { show: true, inside: true, lineStyle: { color: chartTheme.grid } },
+              axisLabel: { show: true, color: chartTheme.text, hideOverlap: false },
+              splitLine: { lineStyle: { color: chartTheme.grid } },
+            },
+            series: turbineChartSeries,
+          }, true);
+        }
+
         interactionState.api.updateLevelChart = updateLevelChart;
         interactionState.api.updateFlowChart = updateFlowChart;
         interactionState.api.updateGateChart = updateGateChart;
+        interactionState.api.updateTurbineChart = updateTurbineChart;
 
         updateLevelChart(interactionState.currentStep);
         updateFlowChart(interactionState.currentStep);
         updateGateChart(interactionState.currentStep);
+        updateTurbineChart(interactionState.currentStep);
       }
 
       function renderTimelineControls() {

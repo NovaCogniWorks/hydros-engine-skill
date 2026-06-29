@@ -6,12 +6,13 @@
     python generate_charts.py <timeseries_data.json> [output_dir]
         [--total-steps N] [--sim-step-size SECONDS] [--output-step-size SECONDS]
 
-生成 5 张分析图表:
+生成 6 张分析图表:
   1. 关键断面水位时序图
   2. 关键断面流量时序图
   3. 负流量专项分析图
   4. 闸门开度时序图
   5. 分水口流量分析图
+  6. 水轮机出力时序图
 """
 
 import json
@@ -22,6 +23,9 @@ import argparse
 from collections import defaultdict, Counter
 
 from lib.timeseries_loader import load_timeseries_records
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 try:
     import matplotlib
@@ -109,6 +113,31 @@ def group_data(records):
     return groups
 
 
+def is_turbine_output_record(record):
+    has_device_command = (
+        str(record.get('device_type') or '') == 'Turbine'
+        and str(record.get('command_type') or '') == 'output_power'
+    )
+    has_object_metric = (
+        str(record.get('object_type') or '') == 'Turbine'
+        and str(record.get('metrics_code') or '') == 'output_power'
+    )
+    return has_device_command or has_object_metric
+
+
+def group_turbine_output(records):
+    """按水轮机对象名称分组出力序列"""
+    groups = defaultdict(list)
+    for record in records:
+        if not is_turbine_output_record(record):
+            continue
+        object_name = record.get('object_name') or record.get('device_name') or record.get('name') or '未命名水轮机'
+        groups[str(object_name)].append((record['data_index'], record['value']))
+    for key in groups:
+        groups[key].sort(key=lambda item: item[0])
+    return groups
+
+
 def get_stats(records):
     """生成统计摘要"""
     metrics = Counter(r['metrics_code'] for r in records)
@@ -121,6 +150,12 @@ def get_stats(records):
 
     wl_vals = [r['value'] for r in records if r['metrics_code'] == 'water_level']
     wf_vals = [r['value'] for r in records if r['metrics_code'] == 'water_flow']
+    turbine_vals = [r['value'] for r in records if is_turbine_output_record(r)]
+    turbine_objects = sorted({
+        str(r.get('object_name') or r.get('device_name') or r.get('name') or '未命名水轮机')
+        for r in records
+        if is_turbine_output_record(r)
+    })
 
     return {
         'total_records': len(records),
@@ -131,6 +166,9 @@ def get_stats(records):
         'object_type_distribution': dict(obj_types),
         'water_level_range': (min(wl_vals), max(wl_vals)) if wl_vals else None,
         'water_flow_range': (min(wf_vals), max(wf_vals)) if wf_vals else None,
+        'turbine_output_range': (min(turbine_vals), max(turbine_vals)) if turbine_vals else None,
+        'turbine_output_objects': turbine_objects,
+        'turbine_output_series_count': len(turbine_objects),
         'negative_flow_count': len(neg_flow),
         'negative_flow_objects': sorted(neg_objects),
         'min_negative_flow': min(r['value'] for r in neg_flow) if neg_flow else None,
@@ -178,6 +216,28 @@ def auto_detect_disturbance_nodes(groups):
         name for (name, metric, otype) in groups
         if otype == 'DisturbanceNode' and metric == 'water_flow'
     ))
+
+
+def chart6_turbine_output(turbine_groups, output_dir, axis_label):
+    """图6: 水轮机出力时序"""
+    if not turbine_groups:
+        print("图6 跳过: 未检测到水轮机出力数据")
+        return
+    fig, ax = plt.subplots(figsize=(14, 6))
+    for name in sorted(turbine_groups):
+        steps, vals = zip(*turbine_groups[name])
+        ax.plot(steps, vals, label=name, linewidth=1.8)
+    ax.axhline(y=0, color='#B91C1C', linestyle='--', alpha=0.4, label='零出力线')
+    ax.set_xlabel(axis_label, fontsize=12)
+    ax.set_ylabel('出力', fontsize=12)
+    ax.set_title('水轮机出力时序变化', fontsize=14, fontweight='bold')
+    ax.legend(loc='best', fontsize=9)
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    path = os.path.join(output_dir, 'chart6_turbine_output_power.png')
+    plt.savefig(path, dpi=150)
+    plt.close()
+    print(f"图6 已生成: {path}")
 
 
 def chart1_water_level(groups, output_dir, axis_label, sections=None):
@@ -319,6 +379,7 @@ def main():
 
     records = load_data(data_path)
     groups = group_data(records)
+    turbine_groups = group_turbine_output(records)
     stats = get_stats(records)
     axis_info = resolve_axis_info(
         records,
@@ -346,6 +407,7 @@ def main():
     print(f"  横轴口径: {axis_info['note']}")
     print(f"  水位范围: {stats['water_level_range']}")
     print(f"  流量范围: {stats['water_flow_range']}")
+    print(f"  水轮机出力范围: {stats['turbine_output_range']}")
     print(f"  负流量: {stats['negative_flow_count']} 条, 涉及 {len(stats['negative_flow_objects'])} 个对象")
 
     # 生成图表
@@ -357,6 +419,7 @@ def main():
     chart3_negative_flow(groups, output_dir, axis_info['label'])
     chart4_gate_opening(groups, output_dir, axis_info['label'])
     chart5_disturbance_flow(groups, output_dir, axis_info['label'])
+    chart6_turbine_output(turbine_groups, output_dir, axis_info['label'])
 
     print(f"\n所有图表已生成到: {output_dir}")
 
