@@ -244,6 +244,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--output-step-size", type=int, default=None, help="输出步长，单位秒")
     parser.add_argument("--llm-name", default=None, help="当前使用的模型名称；如 gpt-5.4 / claude-sonnet")
     parser.add_argument("--mpc-results-json", default=None, help="可选传入 get_mpc_simulation_results 的 JSON 响应，用于补齐梯级电站场景的水轮机出力")
+    parser.add_argument("--scenario-events-json", default=None, help="可选传入 get_simulation_scenario_events 的 JSON 响应，用于在报告中展示工况事件")
     return parser.parse_args(argv)
 
 
@@ -621,6 +622,276 @@ def load_mpc_payload(mpc_results_json: str | None) -> dict[str, Any] | None:
     if "data" in payload:
         return payload
     return None
+
+
+def load_scenario_events_payload(scenario_events_json: str | None) -> list[dict[str, Any]]:
+    if not scenario_events_json:
+        return []
+
+    payload = json.loads(Path(scenario_events_json).read_text(encoding="utf-8-sig"))
+    if "result" in payload and isinstance(payload["result"], dict):
+        result = payload["result"]
+        if isinstance(result.get("structuredContent"), dict):
+            structured = result["structuredContent"]
+            if isinstance(structured.get("result"), dict):
+                payload = structured["result"]
+            else:
+                payload = structured
+        elif isinstance(result.get("content"), list) and result["content"]:
+            text = result["content"][0].get("text")
+            if text:
+                payload = json.loads(text)
+            else:
+                payload = result
+        else:
+            payload = result
+    if isinstance(payload, dict) and isinstance(payload.get("data"), list):
+        return [item for item in payload["data"] if isinstance(item, dict)]
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    return []
+
+
+def build_scenario_events_payload(
+    events: list[dict[str, Any]],
+    simulation_start_dt: datetime | None,
+    sim_step_size: int | None,
+) -> dict[str, Any]:
+    if not events:
+        return {
+            "available": False,
+            "count": 0,
+            "summary": "本次报告未拿到可展示的工况事件明细。",
+            "items": [],
+        }
+
+    items: list[dict[str, Any]] = []
+    for event in events:
+        auto_step = event.get("auto_schedule_at_step")
+        step_text = f"第 {auto_step} 步" if auto_step is not None else "未提供步号"
+        scheduled_time_text = None
+        if simulation_start_dt is not None and auto_step is not None and sim_step_size:
+            try:
+                scheduled_dt = simulation_start_dt + timedelta(seconds=int(auto_step) * int(sim_step_size))
+                scheduled_time_text = format_datetime_text(scheduled_dt)
+            except Exception:
+                scheduled_time_text = None
+        series_items = event.get("object_time_series") or []
+        first_series = series_items[0] if series_items and isinstance(series_items[0], dict) else None
+        series_summary = None
+        if first_series:
+            sample_count = len(first_series.get("time_series") or [])
+            series_summary = (
+                f"{first_series.get('object_name') or '-'} / "
+                f"{first_series.get('metrics_code') or '-'} / "
+                f"{sample_count} 点"
+            )
+        items.append(
+            {
+                "name": str(event.get("hydro_event_name") or "未命名事件"),
+                "description": str(event.get("hydro_event_description") or event.get("description") or "未提供说明"),
+                "eventId": str(event.get("hydro_event_id") or "-"),
+                "priority": str(event.get("priority") or "未提供"),
+                "injectMode": str(event.get("inject_mode") or "未提供"),
+                "stepText": step_text,
+                "scheduledTime": scheduled_time_text,
+                "seriesSummary": series_summary,
+            }
+        )
+
+    names = "、".join(item["name"] for item in items[:3])
+    summary = f"本次工况共识别到 {len(items)} 个已注入事件，主要包括 {names}。"
+    if any(item.get("scheduledTime") for item in items):
+        summary += " 报告同时给出了事件注入步号和可推导的注入时间。"
+    else:
+        summary += " 由于部分事件缺少完整时间元数据，报告优先展示注入步号。"
+    return {
+        "available": True,
+        "count": len(items),
+        "summary": summary,
+        "items": items,
+    }
+
+
+def _build_event_step_windows(unique_steps: list[int], event_step: int, window_size: int = 3) -> tuple[list[int], list[int], int | None]:
+    if not unique_steps:
+        return [], [], None
+
+    anchor_step = min(unique_steps, key=lambda step: abs(int(step) - int(event_step)))
+    anchor_index = unique_steps.index(anchor_step)
+    before_steps = unique_steps[max(0, anchor_index - window_size):anchor_index]
+    after_steps = unique_steps[anchor_index:min(len(unique_steps), anchor_index + window_size + 1)]
+    return before_steps, after_steps, anchor_step
+
+
+def _format_event_response_delta(metric_code: str, delta: float) -> str:
+    unit_map = {
+        "water_level": "m",
+        "water_flow": "m³/s",
+        "gate_opening": "m",
+        "output_power": "MW",
+    }
+    label_map = {
+        "water_level": "水位",
+        "water_flow": "流量",
+        "gate_opening": "闸门开度",
+        "output_power": "机组出力",
+    }
+    trend = "抬升" if delta > 0 and metric_code == "water_level" else "增加" if delta > 0 else "下降" if metric_code == "water_level" else "减小"
+    return f"{label_map.get(metric_code, metric_code)}{trend} {abs(delta):.2f} {unit_map.get(metric_code, '')}".strip()
+
+
+def build_event_response_payload(
+    df: pd.DataFrame,
+    events: list[dict[str, Any]],
+    simulation_start_dt: datetime | None,
+    sim_step_size: int | None,
+) -> dict[str, Any]:
+    if not events:
+        return {"available": False, "summary": "", "items": []}
+
+    focus_metrics = {"water_level", "water_flow", "gate_opening", "output_power"}
+    focus_types = {"CrossSection", "GateStation", "Gate", "Turbine"}
+    candidate_df = df[
+        df["metrics_code"].isin(focus_metrics)
+        & df["object_type"].isin(focus_types)
+        & df["data_index"].notna()
+        & df["value"].notna()
+    ].copy()
+    if candidate_df.empty:
+        return {
+            "available": False,
+            "summary": "结果文件缺少可用于事件前后响应分析的关键断面/站点序列。",
+            "items": [],
+        }
+
+    candidate_df["data_index"] = candidate_df["data_index"].astype(int)
+    unique_steps = sorted(int(step) for step in candidate_df["data_index"].dropna().unique().tolist())
+    grouped_series: dict[tuple[str, str, str], pd.DataFrame] = {}
+    for key, group in candidate_df.groupby(["object_name", "object_type", "metrics_code"], sort=False):
+        grouped_series[(str(key[0]), str(key[1]), str(key[2]))] = group.sort_values("data_index").copy()
+
+    items: list[dict[str, Any]] = []
+    total_response_count = 0
+    for event in events:
+        try:
+            event_step = int(event.get("auto_schedule_at_step"))
+        except (TypeError, ValueError):
+            event_step = None
+        if event_step is None:
+            items.append(
+                {
+                    "eventName": str(event.get("hydro_event_name") or "未命名事件"),
+                    "eventStep": None,
+                    "summary": "该事件缺少注入步号，暂时无法对齐结果序列做前后响应分析。",
+                    "responses": [],
+                }
+            )
+            continue
+
+        before_steps, after_steps, anchor_step = _build_event_step_windows(unique_steps, event_step)
+        if not before_steps or len(after_steps) < 2:
+            items.append(
+                {
+                    "eventName": str(event.get("hydro_event_name") or "未命名事件"),
+                    "eventStep": event_step,
+                    "summary": "事件附近的结果输出点不足，暂时无法形成稳定的前后窗口对比。",
+                    "responses": [],
+                }
+            )
+            continue
+
+        response_candidates: list[dict[str, Any]] = []
+        for (object_name, object_type, metric_code), group in grouped_series.items():
+            before_slice = group[group["data_index"].isin(before_steps)]
+            after_slice = group[group["data_index"].isin(after_steps)]
+            if before_slice.empty or after_slice.empty:
+                continue
+            before_mean = float(before_slice["value"].mean())
+            after_mean = float(after_slice["value"].mean())
+            delta = after_mean - before_mean
+            abs_delta = abs(delta)
+            if metric_code == "water_level" and abs_delta < 0.02:
+                continue
+            if metric_code == "water_flow" and abs_delta < 0.5:
+                continue
+            if metric_code == "gate_opening" and abs_delta < 0.02:
+                continue
+            if metric_code == "output_power" and abs_delta < 0.5:
+                continue
+            response_candidates.append(
+                {
+                    "objectName": object_name,
+                    "objectType": object_type,
+                    "metricCode": metric_code,
+                    "beforeMean": round_number(before_mean),
+                    "afterMean": round_number(after_mean),
+                    "delta": round_number(delta),
+                    "absDelta": abs_delta,
+                    "responseText": _format_event_response_delta(metric_code, delta),
+                }
+            )
+
+        if not response_candidates:
+            items.append(
+                {
+                    "eventName": str(event.get("hydro_event_name") or "未命名事件"),
+                    "eventStep": event_step,
+                    "anchorStep": anchor_step,
+                    "summary": "事件前后未识别出明显超过阈值的断面/站点响应，整体更接近平稳传递。",
+                    "responses": [],
+                }
+            )
+            continue
+
+        metric_priority = {"water_flow": 0, "water_level": 1, "output_power": 2, "gate_opening": 3}
+        top_by_metric: list[dict[str, Any]] = []
+        seen_metrics: set[str] = set()
+        for candidate in sorted(
+            response_candidates,
+            key=lambda item: (metric_priority.get(str(item["metricCode"]), 99), -float(item["absDelta"]), str(item["objectName"])),
+        ):
+            metric_code = str(candidate["metricCode"])
+            if metric_code in seen_metrics:
+                continue
+            seen_metrics.add(metric_code)
+            top_by_metric.append(candidate)
+            if len(top_by_metric) >= 4:
+                break
+        top_by_metric.sort(key=lambda item: (-float(item["absDelta"]), str(item["objectName"])))
+        total_response_count += len(top_by_metric)
+
+        headline = "；".join(
+            f"{item['objectName']}（{item['objectType']}）{item['responseText']}"
+            for item in top_by_metric[:3]
+        )
+        items.append(
+            {
+                "eventName": str(event.get("hydro_event_name") or "未命名事件"),
+                "eventStep": event_step,
+                "anchorStep": anchor_step,
+                "beforeSteps": before_steps,
+                "afterSteps": after_steps,
+                "summary": (
+                    f"以事件步号 {event_step} 为中心，对比前 {len(before_steps)} 个与后 {len(after_steps)} 个输出步后，"
+                    f"最明显的响应出现在 {headline}。"
+                ),
+                "responses": top_by_metric,
+            }
+        )
+
+    available_count = sum(1 for item in items if item.get("responses"))
+    summary = (
+        f"共对 {len(items)} 个工况事件尝试做前后窗口响应分析，其中 {available_count} 个事件识别出了明确的断面/站点响应，"
+        f"合计提炼 {total_response_count} 条关键响应观察。"
+        if items
+        else "当前没有可用于事件响应分析的工况事件。"
+    )
+    return {
+        "available": bool(available_count),
+        "summary": summary,
+        "items": items,
+    }
 
 
 def select_coupled_section_names(df: pd.DataFrame, count: int = 4) -> list[str]:
@@ -2144,6 +2415,7 @@ def build_report_data(
     location_map: dict[str, float] | None = None,
     objects_yaml_text: str | None = None,
     mpc_results_json: str | None = None,
+    scenario_events_json: str | None = None,
 ) -> dict[str, Any]:
     location_map = location_map or {}
     sort_key_func = create_object_sort_key(location_map)
@@ -2433,6 +2705,18 @@ def build_report_data(
         else unique_steps[-1]
     )
     simulation_start_dt = parse_datetime_text(scenario_meta["biz_start_time"]) if scenario_meta else None
+    scenario_events_raw = load_scenario_events_payload(scenario_events_json)
+    scenario_events_payload = build_scenario_events_payload(
+        scenario_events_raw,
+        simulation_start_dt,
+        step_resolution_seconds,
+    )
+    scenario_event_responses = build_event_response_payload(
+        df,
+        scenario_events_raw,
+        simulation_start_dt,
+        step_resolution_seconds,
+    )
     output_interval_seconds = runtime_config.output_step_size
     # Hydros total duration is counted in output intervals; sim_step_size is only
     # the internal calculation step and must not be used for coverage duration.
@@ -2858,6 +3142,8 @@ def build_report_data(
         "summaryParagraph": summary_paragraph,
         "summaryParagraphs": summary_paragraphs,
         "summaryBullets": summary_bullets,
+        "scenarioEvents": scenario_events_payload,
+        "scenarioEventResponses": scenario_event_responses,
         "anomalies": anomaly_items,
         "recommendations": recommendations,
         "riskBars": [
@@ -2873,6 +3159,7 @@ def build_report_data(
             {"label": "计算步长", "value": sim_step_size_text},
             {"label": "输出步长", "value": output_step_text},
             {"label": "仿真时长", "value": simulation_duration_text},
+            {"label": "工况事件数", "value": str(scenario_events_payload["count"])},
             {"label": "结果文件覆盖时长", "value": format_seconds_text(sampled_duration_seconds) or "无法推导"},
             {"label": "时长差值", "value": format_seconds_text(duration_gap_seconds) or "无法推导"},
             {"label": "结果覆盖步段", "value": f"{runtime_config.sample_step_note}（共输出 {display_sampled_point_count} 次结果）"},
@@ -3030,6 +3317,8 @@ def build_report_data(
 def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
     analysis = payload["analysisSummary"]
     profile = payload["longitudinalProfile"]
+    scenario_events = payload.get("scenarioEvents", {})
+    scenario_event_responses = payload.get("scenarioEventResponses", {})
     asset_status = payload["analysisSummary"].get("report_assets", {})
     missing_assets = asset_status.get("missing", [])
     anomaly_rows = "\n".join(
@@ -3105,6 +3394,52 @@ def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
         if gate_dynamic_count > 0
         else f"当前未识别到 ≥ {GATE_OPENING_MIN_EFFECTIVE_CHANGE_M} m 的有效开度阶跃，整体更接近静态或微调工况。"
     )
+    scenario_events_markdown = ""
+    if scenario_events.get("available"):
+        event_rows = "\n".join(
+            f"| {item['name']} | {item['stepText']} | {item.get('scheduledTime') or '-'} | {item['priority']} | {item['description']} |"
+            for item in scenario_events.get("items", [])
+        )
+        response_lookup = {
+            str(item.get("eventName") or ""): item
+            for item in scenario_event_responses.get("items", [])
+            if isinstance(item, dict)
+        }
+        response_blocks = []
+        for item in scenario_events.get("items", []):
+            response_info = response_lookup.get(str(item.get("name") or ""))
+            if not response_info:
+                continue
+            response_lines = "\n".join(
+                f"- `{resp['objectName']}`（{resp['objectType']} / {resp['metricCode']}）：事件前均值 `{resp['beforeMean']}`，事件后均值 `{resp['afterMean']}`，变化 `{resp['delta']}`"
+                for resp in response_info.get("responses", [])
+            )
+            if not response_lines:
+                response_lines = "- 当前未识别出超过阈值的关键断面/站点响应。"
+            response_blocks.append(
+                f"""### {item['name']} 的前后响应解读
+
+{response_info.get('summary') or '当前未形成可读的前后窗口响应解读。'}
+
+{response_lines}
+"""
+            )
+        response_markdown = "\n".join(response_blocks)
+        scenario_events_markdown = f"""
+## 工况事件
+
+{scenario_events.get('summary')}
+
+| 事件 | 注入步号 | 推导时间 | 优先级 | 说明 |
+| --- | --- | --- | --- | --- |
+{event_rows}
+
+### 事件前后关键断面/站点响应
+
+{scenario_event_responses.get('summary') or '当前未形成可展示的事件前后响应分析。'}
+
+{response_markdown}
+"""
     markdown = f"""# {payload['meta']['report_title']}
 
 ## 概况
@@ -3150,6 +3485,8 @@ def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
 | 优先级 | 对象 | 指标 | 现象 | 建议 |
 | --- | --- | --- | --- | --- |
 {anomaly_rows}
+
+{scenario_events_markdown}
 
 ## 图表分析
 
@@ -3355,6 +3692,7 @@ def main() -> None:
         location_map,
         objects_yaml_text,
         args.mpc_results_json,
+        args.scenario_events_json,
     )
     write_html_assets(paths["report"], paths["data"], payload)
     write_markdown_report(paths["report"], payload)

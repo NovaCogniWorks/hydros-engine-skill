@@ -733,6 +733,24 @@
               </div>
             </article>
 
+            <article id="scenarioEventSection" class="section-shell min-w-0 rounded-[30px] p-5 lg:col-span-2 lg:col-start-1 lg:row-start-4">
+              <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <h2 class="mt-2 text-2xl font-semibold">工况事件</h2>
+                  <p class="mt-2 text-sm text-ink/58">展示本次仿真实际注入或触发的关键工况事件。</p>
+                </div>
+              </div>
+              <div class="soft-panel mt-5 rounded-[24px] px-5 py-5">
+                <p id="scenarioEventSummary" class="text-sm leading-7 text-ink/76"></p>
+                <div id="scenarioEventList" class="mt-4 space-y-3"></div>
+                <div class="mt-5 border-t border-line pt-5">
+                  <h3 class="text-base font-semibold">事件前后关键断面/站点响应</h3>
+                  <p id="scenarioEventImpactSummary" class="mt-2 text-sm leading-7 text-ink/72"></p>
+                  <div id="scenarioEventImpactList" class="mt-4 space-y-3"></div>
+                </div>
+              </div>
+            </article>
+
             <article id="longitudinalSection" class="section-shell min-w-0 rounded-[30px] p-5 lg:col-span-2 lg:col-start-1 lg:row-start-2">
                 <div>
                 <h2 class="mt-2 text-2xl font-semibold">渠道纵剖面</h2>
@@ -798,7 +816,7 @@
               </div>
             </article>
 
-            <article class="section-shell min-w-0 rounded-[30px] p-5 lg:col-span-2 lg:col-start-1 lg:row-start-3">
+            <article class="section-shell min-w-0 rounded-[30px] p-5 lg:col-span-2 lg:col-start-1 lg:row-start-5">
               <div>
                 <h2 class="mt-2 text-2xl font-semibold">结果曲线</h2>
                 <p class="mt-2 text-sm text-ink/58">
@@ -908,7 +926,7 @@
               </div>
             </article>
 
-            <article class="section-shell min-w-0 rounded-[30px] p-5 lg:col-span-2 lg:col-start-1 lg:row-start-4">
+            <article class="section-shell min-w-0 rounded-[30px] p-5 lg:col-span-2 lg:col-start-1 lg:row-start-6">
               <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
                 <div>
                   <h2 class="mt-2 text-2xl font-semibold">异常与建议</h2>
@@ -1393,6 +1411,75 @@
           .join("");
       }
 
+      function renderScenarioEvents() {
+        const section = document.getElementById("scenarioEventSection");
+        const summary = document.getElementById("scenarioEventSummary");
+        const list = document.getElementById("scenarioEventList");
+        const impactSummary = document.getElementById("scenarioEventImpactSummary");
+        const impactList = document.getElementById("scenarioEventImpactList");
+        const eventInfo = reportData.scenarioEvents || {};
+        const responseInfo = reportData.scenarioEventResponses || {};
+        if (!eventInfo.available || !Array.isArray(eventInfo.items) || !eventInfo.items.length) {
+          section.hidden = true;
+          return;
+        }
+        summary.textContent = localizeTermText(eventInfo.summary || "");
+        list.innerHTML = eventInfo.items
+          .map(
+            (item) => `
+              <article class="soft-panel rounded-[18px] px-4 py-3">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                  <h3 class="text-sm font-semibold text-primary">${localizeTermText(item.name || "-")}</h3>
+                  <span class="rounded-full border border-line/80 px-2.5 py-1 text-[11px] text-ink/56">${localizeTermText(item.priority || "-")}</span>
+                </div>
+                <div class="mt-2 grid gap-2 text-sm text-ink/72">
+                  <p>${localizeTermText(item.description || "-")}</p>
+                  <p>注入位置：${localizeTermText(item.stepText || "-")}${item.scheduledTime ? ` / ${localizeTermText(item.scheduledTime)}` : ""}</p>
+                  ${item.seriesSummary ? `<p>关联序列：${localizeTermText(item.seriesSummary)}</p>` : ""}
+                </div>
+              </article>
+            `
+          )
+          .join("");
+        impactSummary.textContent = localizeTermText(
+          responseInfo.summary || "当前未形成可展示的事件前后响应分析。"
+        );
+        const responseMap = new Map(
+          (Array.isArray(responseInfo.items) ? responseInfo.items : []).map((item) => [item.eventName, item])
+        );
+        impactList.innerHTML = eventInfo.items
+          .map((item) => {
+            const responseItem = responseMap.get(item.name) || {};
+            const responses = Array.isArray(responseItem.responses) ? responseItem.responses : [];
+            const responseRows = responses.length
+              ? responses
+                  .map(
+                    (resp) => `
+                      <li class="rounded-[14px] border border-line/70 bg-white/70 px-3 py-2">
+                        <span class="font-medium text-primary">${localizeTermText(resp.objectName || "-")}</span>
+                        <span class="text-ink/58">（${localizeTermText(resp.objectType || "-")} / ${localizeTermText(resp.metricCode || "-")}）</span>
+                        ：事件前均值 ${localizeTermText(String(resp.beforeMean ?? "-"))}，事件后均值 ${localizeTermText(String(resp.afterMean ?? "-"))}，变化 ${localizeTermText(String(resp.delta ?? "-"))}
+                      </li>
+                    `
+                  )
+                  .join("")
+              : `<li class="rounded-[14px] border border-dashed border-line/80 bg-white/60 px-3 py-2 text-ink/60">当前未识别出超过阈值的关键响应。</li>`;
+            return `
+              <article class="soft-panel rounded-[18px] px-4 py-3">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                  <h3 class="text-sm font-semibold text-primary">${localizeTermText(item.name || "-")}</h3>
+                  <span class="text-[11px] text-ink/52">${localizeTermText(responseItem.anchorStep ? `对齐输出步 ${responseItem.anchorStep}` : "未对齐输出步")}</span>
+                </div>
+                <p class="mt-2 text-sm leading-7 text-ink/74">${localizeTermText(responseItem.summary || "当前未形成可读的事件前后响应解读。").replace(/\n/g, "<br/>")}</p>
+                <ul class="mt-3 space-y-2 text-sm text-ink/72">
+                  ${responseRows}
+                </ul>
+              </article>
+            `;
+          })
+          .join("");
+      }
+
       function renderSnapshot() {
         const rows = reportData.snapshotRows?.length
           ? reportData.snapshotRows
@@ -1405,9 +1492,9 @@
         document.getElementById("snapshotPanel").innerHTML = rows
           .map(
             (row) => `
-              <div class="flex items-start justify-between gap-4 border-b border-white/10 pb-3 last:border-b-0 last:pb-0">
-                <dt class="text-sm text-white/62">${localizeTermText(row.label)}</dt>
-                <dd class="text-right text-base font-medium">${localizeTermText(row.value)}</dd>
+              <div class="flex flex-col gap-1 border-b border-white/10 pb-3 last:border-b-0 last:pb-0 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+                <dt class="text-sm leading-6 text-white/62 sm:pt-[1px]">${localizeTermText(row.label)}</dt>
+                <dd class="break-words text-sm font-medium leading-6 text-white sm:max-w-[65%] sm:text-right sm:text-base">${localizeTermText(row.value)}</dd>
               </div>
             `
           )
@@ -3768,6 +3855,7 @@
       renderHeadlineCards();
       renderMetaCards();
       renderSummaryBullets();
+      renderScenarioEvents();
       renderSnapshot();
       renderRiskBars();
       renderActions();
