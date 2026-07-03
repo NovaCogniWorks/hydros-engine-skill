@@ -873,24 +873,37 @@
                   <div id="gateChart" class="chart-canvas chart-canvas--compact mt-2"></div>
                   <div id="gateInterpretation" class="soft-panel mt-3 rounded-[18px] px-4 py-3 text-sm leading-7 text-ink/72"></div>
                 </div>
-                <div class="soft-panel rounded-[24px] p-4">
-                  <h3 id="turbineCardTitle" class="text-base font-semibold">水轮机出力响应</h3>
-                  <p id="turbineCardDesc" class="mt-1 text-sm text-ink/62">用于梯级电站场景校核机组出力过程与调度目标是否一致。</p>
+                <div id="couplingComparisonPanel" class="soft-panel rounded-[24px] p-4">
+                  <h3 class="text-base font-semibold">水位-流量联动对比</h3>
+                  <p class="mt-1 text-sm text-ink/62">用于快速确认同一断面内水位与流量的同步或滞后关系。</p>
+                  <div id="couplingComparisonChart" class="chart-canvas chart-canvas--standard mt-3 rounded-[18px] border border-line bg-white/80"></div>
+                  <div id="couplingComparisonText" class="soft-panel mt-3 rounded-[18px] px-4 py-3 text-sm leading-7 text-ink/72"></div>
+                </div>
+                <div id="stationPowerPanel" class="soft-panel rounded-[24px] p-4">
+                  <h3 class="text-base font-semibold">梯级电站来流-出力对比</h3>
+                  <p class="mt-1 text-sm text-ink/62">用于把站级来流代理与总出力过程放到同一视图中复核。</p>
+                  <div id="stationPowerChart" class="chart-canvas chart-canvas--standard mt-3 rounded-[18px] border border-line bg-white/80"></div>
+                  <div id="stationPowerText" class="soft-panel mt-3 rounded-[18px] px-4 py-3 text-sm leading-7 text-ink/72"></div>
+                </div>
+                <div id="stationCompositionPanel" class="soft-panel rounded-[24px] p-4">
+                  <h3 class="text-base font-semibold">梯级总出力构成</h3>
+                  <p class="mt-1 text-sm text-ink/62">用于直观看各电站在总发电任务中的分工、接力与退让关系。</p>
+                  <div id="stationCompositionChart" class="chart-canvas chart-canvas--standard mt-3 rounded-[18px] border border-line bg-white/80"></div>
+                  <div id="stationCompositionText" class="soft-panel mt-3 rounded-[18px] px-4 py-3 text-sm leading-7 text-ink/72"></div>
+                </div>
+                <div id="turbineHeatmapPanel" class="soft-panel rounded-[24px] p-4">
+                  <h3 class="text-base font-semibold">机组分组堆叠面积图</h3>
+                  <p class="mt-1 text-sm text-ink/62">用于从机组层面直观看主力承担、轮换接力与负荷集中度。</p>
                   <div class="curve-filter-panel mt-2 flex flex-col gap-2">
                     <div class="curve-filter-row">
-                      <select id="turbineTypeSelect" class="shrink-0 rounded-lg border border-line px-3 py-1.5 text-xs text-ink/72 focus:outline-primary"></select>
-                      <input id="turbineSearchInput" class="curve-search-input" type="search" placeholder="搜索电站、机组名称或设备编号" />
-                      <div class="curve-select-menu">
-                        <button id="turbineSelectAll" type="button" class="curve-select-all-button">全选</button>
-                        <div class="curve-select-options" role="menu" aria-label="水轮机出力曲线批量选择">
-                          <button type="button" class="curve-select-option" data-select-scope="all">全选</button>
-                        </div>
+                      <select id="turbineHeatmapStationSelect" class="shrink-0 rounded-lg border border-line px-3 py-1.5 text-xs text-ink/72 focus:outline-primary"></select>
+                      <div id="turbineHeatmapStationHint" class="curve-search-input flex items-center rounded-lg border border-line px-3 py-1.5 text-xs text-ink/62">
+                        按站点切换后，仅展示当前站点机组的堆叠构成与站内总出力。
                       </div>
                     </div>
-                    <div id="turbineObjectList" class="curve-object-list"></div>
                   </div>
-                  <div id="turbineChart" class="chart-canvas chart-canvas--compact mt-2"></div>
-                  <div id="turbineInterpretation" class="soft-panel mt-3 rounded-[18px] px-4 py-3 text-sm leading-7 text-ink/72"></div>
+                  <div id="turbineHeatmapChart" class="chart-canvas chart-canvas--standard mt-3 rounded-[18px] border border-line bg-white/80"></div>
+                  <div id="turbineHeatmapText" class="soft-panel mt-3 rounded-[18px] px-4 py-3 text-sm leading-7 text-ink/72"></div>
                 </div>
               </div>
             </article>
@@ -1290,7 +1303,6 @@
         interactionState.api.updateLevelChart?.(interactionState.currentStep);
         interactionState.api.updateFlowChart?.(interactionState.currentStep);
         interactionState.api.updateGateChart?.(interactionState.currentStep);
-        interactionState.api.updateTurbineChart?.(interactionState.currentStep);
       }
 
       function setCurrentStepByIndex(index) {
@@ -2373,16 +2385,542 @@
         };
       }
 
+      function buildStepValueSeries(name, data, color, yAxisIndex = 0, options = {}) {
+        return {
+          name,
+          type: options.type || "line",
+          yAxisIndex,
+          smooth: false,
+          showSymbol: false,
+          symbol: "circle",
+          symbolSize: 5,
+          lineStyle: {
+            width: options.lineWidth || 2,
+            color,
+            type: options.lineType || "solid",
+          },
+          itemStyle: { color },
+          areaStyle: options.area ? { color, opacity: options.areaOpacity || 0.14 } : undefined,
+          stack: options.stack,
+          emphasis: { disabled: true },
+          data: (data || [])
+            .map((point) => [normalizeStepValue(point?.[0]), Number(point?.[1])])
+            .filter((point) => Number.isFinite(point[0]) && Number.isFinite(point[1])),
+        };
+      }
+
+      function formatCheckNumber(value, digits = 3) {
+        const number = Number(value);
+        if (!Number.isFinite(number)) return "-";
+        return Number(number.toFixed(digits)).toString();
+      }
+
+      function buildDualAxisTooltip(params, leftUnit, rightUnit) {
+        const lines = [formatAxisTooltipTitle(params?.[0]?.axisValue)];
+        params.forEach((item) => {
+          const unit = item.seriesName.includes("流量") || item.seriesName.includes("来流") ? rightUnit : leftUnit;
+          lines.push(`${item.marker}${escapeHtml(item.seriesName)}: ${formatCheckNumber(item.value?.[1] ?? item.value)}${unit}`);
+        });
+        return lines.join("<br>");
+      }
+
+      function renderCouplingComparisonChart(chart, payload) {
+        const sections = payload?.sections || [];
+        const series = [];
+        sections.forEach((section, index) => {
+          series.push(
+            buildStepValueSeries(`${section.name} 水位`, section.levelData, colorForIndex(index, 210), 0, { lineWidth: 2.2 })
+          );
+          series.push(
+            buildStepValueSeries(`${section.name} 流量`, section.flowData, colorForIndex(index, 20), 1, {
+              lineWidth: 1.9,
+              lineType: "dashed",
+            })
+          );
+        });
+        const xValues = series.flatMap((item) => item.data.map((point) => point[0]));
+        const levelValues = series.filter((item) => item.yAxisIndex === 0).flatMap((item) => item.data.map((point) => point[1]));
+        const flowValues = series.filter((item) => item.yAxisIndex === 1).flatMap((item) => item.data.map((point) => point[1]));
+        const xBounds = computeAxisExtent(xValues);
+        const levelBounds = computeAxisBounds(levelValues, { paddingRatio: 0.12, minPadding: 0.03 });
+        const flowBounds = computeAxisBounds(flowValues, { paddingRatio: 0.14, minPadding: 0.2 });
+        chart.setOption({
+          animationDuration: 500,
+          grid: { left: 46, right: 54, top: 54, bottom: 54, containLabel: true },
+          tooltip: {
+            trigger: "axis",
+            axisPointer: { type: "cross", lineStyle: { color: chartTheme.crosshair, type: "dashed" } },
+            formatter: (params) => buildDualAxisTooltip(params, " m", " m³/s"),
+          },
+          legend: {
+            type: "scroll",
+            top: 10,
+            left: 24,
+            right: 24,
+            textStyle: { color: chartTheme.textSoft, fontSize: 11 },
+          },
+          dataZoom: [
+            { type: "inside", xAxisIndex: 0, filterMode: "none" },
+            { type: "slider", xAxisIndex: 0, height: 18, bottom: 10, borderColor: "transparent", fillerColor: "rgba(28, 127, 181, 0.14)" },
+          ],
+          xAxis: {
+            type: "value",
+            name: reportData.meta?.axis_label || "步长",
+            min: xBounds.min,
+            max: xBounds.max,
+            nameLocation: "middle",
+            nameGap: 34,
+            axisLine: { lineStyle: { color: chartTheme.grid } },
+            axisLabel: { color: chartTheme.text },
+            splitLine: { show: false },
+          },
+          yAxis: [
+            {
+              type: "value",
+              name: "水位 (m)",
+              min: levelBounds.min,
+              max: levelBounds.max,
+              nameLocation: "middle",
+              nameGap: 42,
+              nameRotate: 90,
+              axisLine: { show: true, lineStyle: { color: chartTheme.grid } },
+              axisLabel: { color: chartTheme.text },
+              splitLine: { lineStyle: { color: chartTheme.grid } },
+            },
+            {
+              type: "value",
+              name: "流量 (m³/s)",
+              min: flowBounds.min,
+              max: flowBounds.max,
+              nameLocation: "middle",
+              nameGap: 42,
+              nameRotate: 90,
+              axisLine: { show: true, lineStyle: { color: chartTheme.grid } },
+              axisLabel: { color: chartTheme.textSoft },
+              splitLine: { show: false },
+            },
+          ],
+          series,
+        }, true);
+      }
+
+      function renderStationPowerChart(chart, payload) {
+        const stations = payload?.stations || [];
+        const series = [];
+        stations.forEach((station, index) => {
+          series.push(
+            buildStepValueSeries(`${station.name} 来流代理`, station.flowData, colorForIndex(index, 170), 0, { lineWidth: 2.1 })
+          );
+          series.push(
+            buildStepValueSeries(`${station.name} 总出力`, station.powerData, colorForIndex(index, 40), 1, {
+              lineWidth: 1.9,
+              lineType: "dashed",
+            })
+          );
+        });
+        const xValues = series.flatMap((item) => item.data.map((point) => point[0]));
+        const flowValues = series.filter((item) => item.yAxisIndex === 0).flatMap((item) => item.data.map((point) => point[1]));
+        const powerValues = series.filter((item) => item.yAxisIndex === 1).flatMap((item) => item.data.map((point) => point[1]));
+        const xBounds = computeAxisExtent(xValues);
+        const flowBounds = computeAxisBounds(flowValues, { paddingRatio: 0.14, minPadding: 0.2 });
+        const powerBounds = computeAxisBounds(powerValues, { paddingRatio: 0.12, minPadding: 0.02 });
+        chart.setOption({
+          animationDuration: 500,
+          grid: { left: 46, right: 54, top: 54, bottom: 54, containLabel: true },
+          tooltip: {
+            trigger: "axis",
+            axisPointer: { type: "cross", lineStyle: { color: chartTheme.crosshair, type: "dashed" } },
+            formatter: (params) => buildDualAxisTooltip(params, "", " m³/s"),
+          },
+          legend: {
+            type: "scroll",
+            top: 10,
+            left: 24,
+            right: 24,
+            textStyle: { color: chartTheme.textSoft, fontSize: 11 },
+          },
+          dataZoom: [
+            { type: "inside", xAxisIndex: 0, filterMode: "none" },
+            { type: "slider", xAxisIndex: 0, height: 18, bottom: 10, borderColor: "transparent", fillerColor: "rgba(180, 139, 69, 0.14)" },
+          ],
+          xAxis: {
+            type: "value",
+            name: reportData.meta?.axis_label || "步长",
+            min: xBounds.min,
+            max: xBounds.max,
+            nameLocation: "middle",
+            nameGap: 34,
+            axisLine: { lineStyle: { color: chartTheme.grid } },
+            axisLabel: { color: chartTheme.text },
+            splitLine: { show: false },
+          },
+          yAxis: [
+            {
+              type: "value",
+              name: "来流代理 (m³/s)",
+              min: flowBounds.min,
+              max: flowBounds.max,
+              nameLocation: "middle",
+              nameGap: 42,
+              nameRotate: 90,
+              axisLine: { show: true, lineStyle: { color: chartTheme.grid } },
+              axisLabel: { color: chartTheme.text },
+              splitLine: { lineStyle: { color: chartTheme.grid } },
+            },
+            {
+              type: "value",
+              name: localizedTermLabel("output_power"),
+              min: powerBounds.min,
+              max: powerBounds.max,
+              nameLocation: "middle",
+              nameGap: 52,
+              nameRotate: 90,
+              axisLine: { show: true, lineStyle: { color: chartTheme.grid } },
+              axisLabel: { color: chartTheme.textSoft },
+              splitLine: { show: false },
+            },
+          ],
+          series,
+        }, true);
+      }
+
+      function renderStationCompositionChart(chart, payload) {
+        const steps = payload?.steps || [];
+        const stations = payload?.stations || [];
+        const totalData = payload?.totalData || [];
+        const series = stations.map((station, index) => ({
+          name: `${station.name}${station.share != null ? ` (${formatCheckNumber(station.share, 1)}%)` : ""}`,
+          type: "line",
+          stack: "total-output",
+          smooth: false,
+          symbol: "none",
+          areaStyle: { opacity: 0.18 },
+          lineStyle: { width: 1.6, color: colorForIndex(index, 90) },
+          itemStyle: { color: colorForIndex(index, 90) },
+          emphasis: { disabled: true },
+          data: station.data || [],
+        }));
+        series.push({
+          name: "梯级总出力",
+          type: "line",
+          smooth: false,
+          symbol: "none",
+          lineStyle: { width: 2.4, color: "#1f2937" },
+          itemStyle: { color: "#1f2937" },
+          emphasis: { disabled: true },
+          data: totalData,
+        });
+        chart.setOption({
+          animationDuration: 500,
+          grid: { left: 46, right: 28, top: 54, bottom: 54, containLabel: true },
+          tooltip: {
+            trigger: "axis",
+            axisPointer: { type: "line", lineStyle: { color: chartTheme.crosshair, type: "dashed" } },
+            formatter: (params) => {
+              const lines = [formatAxisTooltipTitle(steps[params?.[0]?.dataIndex] ?? params?.[0]?.axisValue)];
+              params.forEach((item) => {
+                lines.push(`${item.marker}${escapeHtml(item.seriesName)}: ${formatCheckNumber(item.value)}`);
+              });
+              return lines.join("<br>");
+            },
+          },
+          legend: {
+            type: "scroll",
+            top: 10,
+            left: 24,
+            right: 24,
+            textStyle: { color: chartTheme.textSoft, fontSize: 11 },
+          },
+          dataZoom: [
+            { type: "inside", xAxisIndex: 0, filterMode: "none" },
+            { type: "slider", xAxisIndex: 0, height: 18, bottom: 10, borderColor: "transparent", fillerColor: "rgba(15, 139, 141, 0.14)" },
+          ],
+          xAxis: {
+            type: "category",
+            data: steps.map((step) => String(step)),
+            name: reportData.meta?.axis_label || "步长",
+            nameLocation: "middle",
+            nameGap: 34,
+            axisLine: { lineStyle: { color: chartTheme.grid } },
+            axisLabel: { color: chartTheme.text },
+            splitLine: { show: false },
+          },
+          yAxis: {
+            type: "value",
+            name: localizedTermLabel("output_power"),
+            nameLocation: "middle",
+            nameGap: 52,
+            nameRotate: 90,
+            axisLine: { show: true, lineStyle: { color: chartTheme.grid } },
+            axisLabel: { color: chartTheme.text },
+            splitLine: { lineStyle: { color: chartTheme.grid } },
+          },
+          series,
+        }, true);
+      }
+
+      function renderTurbineHeatmapChart(chart, payload) {
+        const steps = payload?.steps || [];
+        const chartSeries = payload?.series || [];
+        const totalData = payload?.totalData || [];
+        const series = chartSeries.map((item, index) => ({
+          name: `${item.stationName} / ${item.name}`,
+          type: "line",
+          stack: "turbine-output",
+          smooth: false,
+          symbol: "none",
+          areaStyle: { opacity: 0.18 },
+          lineStyle: { width: 1.4, color: colorForIndex(index, 120) },
+          itemStyle: { color: colorForIndex(index, 120) },
+          emphasis: { disabled: true },
+          data: item.data || [],
+        }));
+        series.push({
+          name: "机组总出力",
+          type: "line",
+          smooth: false,
+          symbol: "none",
+          lineStyle: { width: 2.4, color: "#1f2937" },
+          itemStyle: { color: "#1f2937" },
+          emphasis: { disabled: true },
+          data: totalData,
+        });
+
+        chart.setOption({
+          animationDuration: 500,
+          grid: { left: 46, right: 28, top: 54, bottom: 54, containLabel: true },
+          tooltip: {
+            trigger: "axis",
+            axisPointer: { type: "line", lineStyle: { color: chartTheme.crosshair, type: "dashed" } },
+            formatter: (params) => {
+              const lines = [formatAxisTooltipTitle(steps[params?.[0]?.dataIndex] ?? params?.[0]?.axisValue)];
+              params.forEach((item) => {
+                lines.push(`${item.marker}${escapeHtml(item.seriesName)}: ${formatCheckNumber(item.value)}`);
+              });
+              return lines.join("<br>");
+            },
+          },
+          legend: {
+            type: "scroll",
+            top: 10,
+            left: 24,
+            right: 24,
+            textStyle: { color: chartTheme.textSoft, fontSize: 11 },
+          },
+          dataZoom: [
+            { type: "inside", xAxisIndex: 0, filterMode: "none" },
+            { type: "slider", xAxisIndex: 0, height: 18, bottom: 10, borderColor: "transparent", fillerColor: "rgba(201, 106, 25, 0.16)" },
+          ],
+          xAxis: {
+            type: "category",
+            data: steps.map((step) => String(step)),
+            name: reportData.meta?.axis_label || "步长",
+            nameLocation: "middle",
+            nameGap: 34,
+            axisLine: { lineStyle: { color: chartTheme.grid } },
+            axisLabel: { color: chartTheme.text, hideOverlap: true },
+            splitLine: { show: false },
+          },
+          yAxis: {
+            type: "value",
+            name: localizedTermLabel("output_power"),
+            nameLocation: "middle",
+            nameGap: 52,
+            nameRotate: 90,
+            axisLine: { show: true, lineStyle: { color: chartTheme.grid } },
+            axisLabel: { color: chartTheme.text },
+            splitLine: { lineStyle: { color: chartTheme.grid } },
+          },
+          series,
+        }, true);
+      }
+
+      function renderTurbineHeatmapChart(chart, payload) {
+        const steps = payload?.steps || [];
+        const chartSeries = payload?.series || [];
+        const stationSelect = document.getElementById("turbineHeatmapStationSelect");
+        const stationHint = document.getElementById("turbineHeatmapStationHint");
+        const stationNames = Array.from(
+          new Set(
+            ((payload?.stationGroups || []).map((item) => item?.stationName)).concat(
+              chartSeries.map((item) => item?.stationName)
+            )
+          )
+        ).filter(Boolean);
+
+        if (stationSelect) {
+          const currentValue = stationSelect.value;
+          stationSelect.innerHTML = "";
+          stationNames.forEach((stationName, index) => {
+            const option = document.createElement("option");
+            option.value = stationName;
+            option.textContent = index === 0 ? `${stationName}（默认）` : stationName;
+            if ((currentValue && currentValue === stationName) || (!currentValue && index === 0)) {
+              option.selected = true;
+            }
+            stationSelect.appendChild(option);
+          });
+        }
+
+        const renderStationView = () => {
+          const selectedStation = stationSelect?.value || stationNames[0] || "";
+          const filteredSeries = chartSeries.filter((item) => String(item.stationName || "") === selectedStation);
+          const filteredTotalData = steps.map((_, index) =>
+            filteredSeries.reduce((sum, item) => sum + Number(item.data?.[index] || 0), 0)
+          );
+          const series = filteredSeries.map((item, index) => ({
+            name: `${item.stationName} / ${item.name}`,
+            type: "line",
+            stack: "turbine-output",
+            smooth: false,
+            symbol: "none",
+            areaStyle: { opacity: 0.2 },
+            lineStyle: { width: 1.6, color: colorForIndex(index, 120) },
+            itemStyle: { color: colorForIndex(index, 120) },
+            emphasis: { disabled: true },
+            data: item.data || [],
+          }));
+          series.push({
+            name: `${selectedStation} 总出力`,
+            type: "line",
+            smooth: false,
+            symbol: "none",
+            lineStyle: { width: 2.5, color: "#1f2937" },
+            itemStyle: { color: "#1f2937" },
+            emphasis: { disabled: true },
+            data: filteredTotalData,
+          });
+
+          if (stationHint) {
+            stationHint.textContent = selectedStation
+              ? `当前展示：${selectedStation}，仅展示该站机组堆叠与站内总出力。`
+              : "按站点切换后，仅展示当前站点机组的堆叠构成与站内总出力。";
+          }
+
+          chart.setOption({
+            animationDuration: 500,
+            grid: { left: 46, right: 28, top: 54, bottom: 54, containLabel: true },
+            tooltip: {
+              trigger: "axis",
+              axisPointer: { type: "line", lineStyle: { color: chartTheme.crosshair, type: "dashed" } },
+              formatter: (params) => {
+                const lines = [formatAxisTooltipTitle(steps[params?.[0]?.dataIndex] ?? params?.[0]?.axisValue)];
+                params.forEach((item) => {
+                  lines.push(`${item.marker}${escapeHtml(item.seriesName)}: ${formatCheckNumber(item.value)}`);
+                });
+                return lines.join("<br>");
+              },
+            },
+            legend: {
+              type: "scroll",
+              top: 10,
+              left: 24,
+              right: 24,
+              textStyle: { color: chartTheme.textSoft, fontSize: 11 },
+            },
+            dataZoom: [
+              { type: "inside", xAxisIndex: 0, filterMode: "none" },
+              { type: "slider", xAxisIndex: 0, height: 18, bottom: 10, borderColor: "transparent", fillerColor: "rgba(201, 106, 25, 0.16)" },
+            ],
+            xAxis: {
+              type: "category",
+              data: steps.map((step) => String(step)),
+              name: reportData.meta?.axis_label || "步长",
+              nameLocation: "middle",
+              nameGap: 34,
+              axisLine: { lineStyle: { color: chartTheme.grid } },
+              axisLabel: { color: chartTheme.text, hideOverlap: true },
+              splitLine: { show: false },
+            },
+            yAxis: {
+              type: "value",
+              name: localizedTermLabel("output_power"),
+              nameLocation: "middle",
+              nameGap: 52,
+              nameRotate: 90,
+              axisLine: { show: true, lineStyle: { color: chartTheme.grid } },
+              axisLabel: { color: chartTheme.text },
+              splitLine: { lineStyle: { color: chartTheme.grid } },
+            },
+            series,
+          }, true);
+        };
+
+        if (stationSelect && !stationSelect.dataset.bound) {
+          stationSelect.addEventListener("change", renderStationView);
+          stationSelect.dataset.bound = "1";
+        }
+
+        renderStationView();
+      }
+
+      function renderComparisonPanels() {
+        const couplingPanel = document.getElementById("couplingComparisonPanel");
+        const stationPowerPanel = document.getElementById("stationPowerPanel");
+        const stationCompositionPanel = document.getElementById("stationCompositionPanel");
+        const turbineHeatmapPanel = document.getElementById("turbineHeatmapPanel");
+        const couplingInfo = reportData.chartInterpretations?.coupling || {};
+        const stationPowerInfo = reportData.chartInterpretations?.stationPower || {};
+        const stationCompositionInfo = reportData.chartInterpretations?.stationComposition || {};
+        const turbineHeatmapInfo = reportData.chartInterpretations?.turbineHeatmap || {};
+        const couplingChartData = reportData.charts?.couplingComparison || {};
+        const stationPowerChartData = reportData.charts?.stationPowerComparison || {};
+        const stationCompositionChartData = reportData.charts?.stationOutputComposition || {};
+        const turbineHeatmapChartData = reportData.charts?.turbineDispatchHeatmap || {};
+        const couplingText = document.getElementById("couplingComparisonText");
+        const stationPowerText = document.getElementById("stationPowerText");
+        const stationCompositionText = document.getElementById("stationCompositionText");
+        const turbineHeatmapText = document.getElementById("turbineHeatmapText");
+
+        if (couplingPanel) {
+          if (couplingInfo.available === false || !(couplingChartData.sections || []).length) {
+            couplingPanel.classList.add("hidden");
+          } else if (couplingText) {
+            couplingText.innerHTML = `<p>${localizeTermText(couplingInfo.analysis || "已生成水位-流量联动对比图。")}</p>`;
+          }
+        }
+
+        if (stationPowerPanel) {
+          if (!stationPowerInfo.available || !(stationPowerChartData.stations || []).length) {
+            stationPowerPanel.classList.add("hidden");
+          } else if (stationPowerText) {
+            stationPowerText.innerHTML = `<p>${localizeTermText(stationPowerInfo.analysis || "已生成梯级电站来流-出力对比图。")}</p>`;
+          }
+        }
+
+        if (stationCompositionPanel) {
+          if (!stationCompositionInfo.available || !(stationCompositionChartData.stations || []).length) {
+            stationCompositionPanel.classList.add("hidden");
+          } else if (stationCompositionText) {
+            stationCompositionText.innerHTML = `<p>${localizeTermText(stationCompositionInfo.analysis || "已生成梯级总出力构成图。")}</p>`;
+          }
+        }
+
+        if (turbineHeatmapPanel) {
+          if (!turbineHeatmapInfo.available || !(turbineHeatmapChartData.series || []).length) {
+            turbineHeatmapPanel.classList.add("hidden");
+          } else if (turbineHeatmapText) {
+            turbineHeatmapText.innerHTML = `<p>${localizeTermText(turbineHeatmapInfo.analysis || "已生成机组分组堆叠面积图。")}</p>`;
+          }
+        }
+      }
+
       function renderCharts() {
         const levelChart = registerChart(createChart("levelChart"), "levelChart");
         const flowChart = registerChart(createChart("flowChart"), "flowChart");
         const gateChart = registerChart(createChart("gateChart"), "gateChart");
-        const turbineChart = registerChart(createChart("turbineChart"), "turbineChart");
+        const couplingComparisonChart = registerChart(createChart("couplingComparisonChart"), "couplingComparisonChart");
+        const stationPowerChart = registerChart(createChart("stationPowerChart"), "stationPowerChart");
+        const stationCompositionChart = registerChart(createChart("stationCompositionChart"), "stationCompositionChart");
+        const turbineHeatmapChart = registerChart(createChart("turbineHeatmapChart"), "turbineHeatmapChart");
 
         const levelSeries = reportData.charts.levelSeries || [];
         const flowSeries = reportData.charts.flowSeries || [];
         const gateSeries = reportData.charts.gateSeries || [];
-        const turbineSeries = reportData.charts.turbinePowerSeries || [];
+        const couplingComparisonData = reportData.charts.couplingComparison || {};
+        const stationPowerComparisonData = reportData.charts.stationPowerComparison || {};
+        const stationOutputCompositionData = reportData.charts.stationOutputComposition || {};
+        const turbineDispatchHeatmapData = reportData.charts.turbineDispatchHeatmap || {};
 
         document.getElementById("levelCardTitle").textContent = `${localizedTermLabel("water_level")}结果曲线`;
         document.getElementById("levelCardTitle").title = "water_level";
@@ -2396,20 +2934,9 @@
         document.getElementById("gateCardTitle").title = "gate_opening";
         document.getElementById("gateCardDesc").textContent = `共 ${gateSeries.length} 条序列，支持多闸站、多闸门设备同时展示。`;
         document.getElementById("gateCardDesc").title = "gate_opening";
-        document.getElementById("turbineCardTitle").textContent = `${localizedTermLabel("output_power")}结果曲线`;
-        document.getElementById("turbineCardTitle").title = "output_power";
-        document.getElementById("turbineCardDesc").textContent = `共 ${turbineSeries.length} 条序列，默认用于梯级电站场景的机组出力校核。`;
-        document.getElementById("turbineCardDesc").title = "output_power";
-
         const typeLabels = { CrossSection: '断面', DisturbanceNode: '分水口/退水闸', Gate: '闸门', Turbine: '水轮机' };
         const categoryOrder = ["渠道", "闸站", "电站", "倒虹吸", "分水口", "其他"];
         const chartInterpretations = reportData.chartInterpretations || {};
-
-        function formatCheckNumber(value, digits = 3) {
-          const number = Number(value);
-          if (!Number.isFinite(number)) return "-";
-          return Number(number.toFixed(digits)).toString();
-        }
 
         function normalizeSeriesPoints(series) {
           return (series?.data || [])
@@ -2904,12 +3431,6 @@
         const gateLegendSelected = {};
         bindLegendSelection(gateChart, gateLegendSelected, () => updateGateChart(interactionState.currentStep));
 
-        const turbineTypeSelect = document.getElementById("turbineTypeSelect");
-        const turbineObjectList = document.getElementById("turbineObjectList");
-        const getSelectedTurbine = buildBusinessFilter(turbineSeries, turbineTypeSelect, turbineObjectList, '电站');
-        const turbineLegendSelected = {};
-        bindLegendSelection(turbineChart, turbineLegendSelected, () => updateTurbineChart(interactionState.currentStep));
-
         function updateLevelChart(step = interactionState.currentStep) {
           const selectedIndices = getSelectedLevel();
           const selectedSeriesMeta = selectedIndices.map((index) => levelSeries[index]);
@@ -3056,7 +3577,6 @@
         levelTypeSelect.addEventListener("filter-changed", updateLevelChart);
         flowTypeSelect.addEventListener("filter-changed", updateFlowChart);
         gateTypeSelect.addEventListener("filter-changed", updateGateChart);
-        turbineTypeSelect.addEventListener("filter-changed", updateTurbineChart);
 
         function updateGateChart(step = interactionState.currentStep) {
           const selectedIndices = getSelectedGate();
@@ -3136,93 +3656,25 @@
           }, true);
         }
 
-        function updateTurbineChart(step = interactionState.currentStep) {
-          const selectedIndices = getSelectedTurbine();
-          const selectedSeriesMeta = selectedIndices.map((index) => turbineSeries[index]);
-          renderCurveInterpretation("turbineInterpretation", chartInterpretations.turbine, selectedSeriesMeta, turbineTypeSelect.value);
-          const turbineChartSeries = selectedSeriesMeta.map((item, index) =>
-            buildLineSeries(
-              getSeriesDisplayName(item),
-              item.data
-                .map((point) => [normalizeStepValue(point[0]), point[1]])
-                .filter((point) => Number.isFinite(point[0])),
-              index,
-              { color: chartTheme.turbine, lineWidth: 2.3 }
-            )
-          );
-          syncLegendSelection(turbineChart, turbineLegendSelected);
-          const visibleSeriesMeta = getLegendVisibleSeriesMeta(selectedSeriesMeta, turbineLegendSelected);
-          const bounds = computeAxisBounds(
-            visibleSeriesMeta.map((series) => series.data.map((point) => point[1])),
-            { paddingRatio: 0.12, minPadding: 0.02 }
-          );
-          const stepBounds = computeAxisExtent(
-            visibleSeriesMeta.map((series) => series.data.map((point) => normalizeStepValue(point[0]) ?? point[0]))
-          );
-          const layout = buildAdaptiveChartLayout(selectedSeriesMeta.length, turbineLegendSelected);
-
-          turbineChart.setOption({
-            animationDuration: 500,
-            grid: layout.grid,
-            tooltip: {
-              trigger: "axis",
-              axisPointer: { type: "line", lineStyle: { color: chartTheme.crosshair, type: "dashed" } },
-              formatter: buildTooltipFormatter(""),
-            },
-            legend: layout.legend,
-            dataZoom: [
-              { type: "inside", xAxisIndex: 0, filterMode: "none" },
-              { type: "slider", xAxisIndex: 0, height: 18, bottom: 6, borderColor: "transparent", fillerColor: "rgba(201, 106, 25, 0.16)" },
-            ],
-            xAxis: {
-              type: "value",
-              name: reportData.meta?.axis_label || "步长",
-              min: stepBounds.min,
-              max: stepBounds.max,
-              nameLocation: "middle",
-              nameGap: 40,
-              nameTextStyle: {
-                color: "rgba(16, 35, 50, 0.78)",
-                fontSize: 13,
-                fontWeight: 600,
-                padding: [8, 0, 0, 0],
-              },
-              axisLine: { show: true, lineStyle: { color: chartTheme.grid, width: 1.2 } },
-              axisTick: { show: true, inside: true, lineStyle: { color: chartTheme.grid } },
-              axisLabel: { show: true, color: chartTheme.text, fontSize: 11, margin: 12, hideOverlap: false },
-              splitLine: { show: false },
-            },
-            yAxis: {
-              type: "value",
-              name: localizedTermLabel("output_power"),
-              min: bounds.min,
-              max: bounds.max,
-              nameLocation: "middle",
-              nameGap: 52,
-              nameRotate: 90,
-              nameTextStyle: {
-                color: "rgba(16, 35, 50, 0.78)",
-                fontSize: 13,
-                fontWeight: 600,
-              },
-              axisLine: { show: true, lineStyle: { color: chartTheme.grid, width: 1.2 } },
-              axisTick: { show: true, inside: true, lineStyle: { color: chartTheme.grid } },
-              axisLabel: { show: true, color: chartTheme.text, hideOverlap: false },
-              splitLine: { lineStyle: { color: chartTheme.grid } },
-            },
-            series: turbineChartSeries,
-          }, true);
-        }
-
         interactionState.api.updateLevelChart = updateLevelChart;
         interactionState.api.updateFlowChart = updateFlowChart;
         interactionState.api.updateGateChart = updateGateChart;
-        interactionState.api.updateTurbineChart = updateTurbineChart;
 
         updateLevelChart(interactionState.currentStep);
         updateFlowChart(interactionState.currentStep);
         updateGateChart(interactionState.currentStep);
-        updateTurbineChart(interactionState.currentStep);
+        if ((couplingComparisonData.sections || []).length) {
+          renderCouplingComparisonChart(couplingComparisonChart, couplingComparisonData);
+        }
+        if ((stationPowerComparisonData.stations || []).length) {
+          renderStationPowerChart(stationPowerChart, stationPowerComparisonData);
+        }
+        if ((stationOutputCompositionData.stations || []).length) {
+          renderStationCompositionChart(stationCompositionChart, stationOutputCompositionData);
+        }
+        if ((turbineDispatchHeatmapData.series || []).length) {
+          renderTurbineHeatmapChart(turbineHeatmapChart, turbineDispatchHeatmapData);
+        }
       }
 
       function renderTimelineControls() {
@@ -3323,6 +3775,7 @@
       initAsideTabs();
       renderAnomalyTable();
       renderLongitudinalProfile();
+      renderComparisonPanels();
       renderCharts();
       renderTimelineControls();
       })().catch((error) => {

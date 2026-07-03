@@ -21,6 +21,7 @@ import sys
 import os
 import argparse
 from collections import defaultdict, Counter
+from pathlib import Path
 
 from lib.timeseries_loader import load_timeseries_records
 
@@ -49,6 +50,8 @@ def parse_args(argv):
     parser.add_argument("--total-steps", type=int, default=None)
     parser.add_argument("--sim-step-size", type=int, default=None, help="计算步长，单位秒")
     parser.add_argument("--output-step-size", type=int, default=None, help="输出步长，单位秒")
+    parser.add_argument("--mpc-results-json", default=None, help="get_mpc_simulation_results JSON response")
+    parser.add_argument("--objects-yaml", default=None, help="objects.yaml path used to derive station inflow proxy")
     return parser.parse_args(argv)
 
 
@@ -138,6 +141,122 @@ def group_turbine_output(records):
     return groups
 
 
+def load_mpc_payload(mpc_results_json):
+    if not mpc_results_json:
+        return None
+    with open(mpc_results_json, "r", encoding="utf-8-sig") as handle:
+        payload = json.load(handle)
+    if "result" in payload and isinstance(payload["result"], dict):
+        content = payload["result"].get("content")
+        if isinstance(content, list) and content:
+            text = content[0].get("text")
+            if text:
+                return json.loads(text)
+    if "data" in payload:
+        return payload
+    return None
+
+
+def infer_station_name_from_turbine_name(turbine_name):
+    text = str(turbine_name or '')
+    mapping = {
+        '瀑布沟': '瀑布沟站(6机+3闸)',
+        '深溪沟': '深溪沟站(4机+3闸)',
+        '枕头坝': '枕头坝站(4机+5闸)',
+        '沙坪': '沙坪站(6机+5闸)',
+    }
+    for keyword, station_name in mapping.items():
+        if keyword in text:
+            return station_name
+    return None
+
+
+def load_station_catalog(objects_yaml_path):
+    if not objects_yaml_path:
+        return {}
+    try:
+        from build_timeseries_report import (
+            build_business_children,
+            is_station_business_category,
+            parse_business_objects,
+        )
+    except Exception:
+        return {}
+
+    yaml_path = Path(objects_yaml_path)
+    if not yaml_path.exists():
+        return {}
+
+    objects_yaml_text = yaml_path.read_text(encoding='utf-8')
+    business_catalog = parse_business_objects(objects_yaml_text)
+    business_children = build_business_children(business_catalog)
+    station_catalog = defaultdict(lambda: {'inflow_sections': set(), 'turbines': set()})
+    for child in business_children:
+        if not is_station_business_category(child.get('businessCategory')):
+            continue
+        station_name = str(child.get('businessObjectName') or '')
+        if not station_name:
+            continue
+        if child.get('sourceObjectType') == 'CrossSection' and child.get('childRole') == '闸前断面':
+            station_catalog[station_name]['inflow_sections'].add(str(child.get('sourceObjectName') or ''))
+        if child.get('sourceObjectType') == 'Turbine':
+            turbine_name = str(child.get('sourceObjectName') or '')
+            if turbine_name:
+                station_catalog[station_name]['turbines'].add(turbine_name)
+            turbine_id = child.get('sourceObjectId')
+            if turbine_id is not None:
+                station_catalog[station_name]['turbines'].add(str(turbine_id))
+    return dict(station_catalog)
+
+
+def build_station_power_series(records, mpc_payload=None, objects_yaml_path=None):
+    station_catalog = load_station_catalog(objects_yaml_path)
+    inflow_section_to_station = {}
+    turbine_to_station = {}
+    for station_name, info in station_catalog.items():
+        for section_name in info['inflow_sections']:
+            inflow_section_to_station[str(section_name)] = station_name
+        for turbine_name in info['turbines']:
+            turbine_to_station[str(turbine_name)] = station_name
+
+    power_by_station_step = defaultdict(lambda: defaultdict(float))
+    flow_by_station_step = defaultdict(lambda: defaultdict(float))
+    for record in records:
+        step = record.get('data_index')
+        value = record.get('value')
+        if step is None or value is None:
+            continue
+        step = int(step)
+        value = float(value)
+        object_name = str(record.get('object_name') or '')
+        if is_turbine_output_record(record):
+            station_name = (
+                turbine_to_station.get(object_name)
+                or turbine_to_station.get(str(record.get('object_id') or ''))
+                or infer_station_name_from_turbine_name(object_name)
+            )
+            if station_name:
+                power_by_station_step[station_name][step] += value
+            continue
+        if str(record.get('metrics_code') or '') != 'water_flow':
+            continue
+        station_name = inflow_section_to_station.get(object_name)
+        if station_name:
+            flow_by_station_step[station_name][step] += value
+
+    station_names = sorted(set(power_by_station_step) | set(flow_by_station_step))
+    if station_names:
+        station_series = defaultdict(lambda: {'power': [], 'flow': []})
+        for station_name in station_names:
+            for step in sorted(power_by_station_step.get(station_name, {})):
+                station_series[station_name]['power'].append((step, power_by_station_step[station_name][step]))
+            for step in sorted(flow_by_station_step.get(station_name, {})):
+                station_series[station_name]['flow'].append((step, flow_by_station_step[station_name][step]))
+        return dict(station_series)
+
+    return build_station_power_series_from_mpc(mpc_payload)
+
+
 def get_stats(records):
     """生成统计摘要"""
     metrics = Counter(r['metrics_code'] for r in records)
@@ -191,6 +310,26 @@ def auto_select_sections(groups, count=5):
     return selected[:count]
 
 
+def auto_select_coupled_sections(groups, count=4):
+    candidates = []
+    for (name, metric, otype), level_data in groups.items():
+        if metric != 'water_level' or otype != 'CrossSection':
+            continue
+        flow_key = (name, 'water_flow', 'CrossSection')
+        if flow_key not in groups:
+            continue
+        flow_values = [value for _, value in groups[flow_key]]
+        level_values = [value for _, value in level_data]
+        if not flow_values or not level_values:
+            continue
+        flow_range = max(flow_values) - min(flow_values)
+        level_range = max(level_values) - min(level_values)
+        score = abs(flow_range) + abs(level_range) * 10
+        candidates.append((score, name))
+    candidates.sort(key=lambda item: (-item[0], item[1]))
+    return [name for _, name in candidates[:count]]
+
+
 def auto_detect_neg_flow_objects(groups):
     """自动识别出现负流量的断面"""
     neg_objects = []
@@ -224,9 +363,11 @@ def chart6_turbine_output(turbine_groups, output_dir, axis_label):
         print("图6 跳过: 未检测到水轮机出力数据")
         return
     fig, ax = plt.subplots(figsize=(14, 6))
-    for name in sorted(turbine_groups):
+    turbine_names = sorted(turbine_groups)
+    color_map = plt.get_cmap('tab20', max(len(turbine_names), 1))
+    for index, name in enumerate(turbine_names):
         steps, vals = zip(*turbine_groups[name])
-        ax.plot(steps, vals, label=name, linewidth=1.8)
+        ax.plot(steps, vals, label=name, linewidth=1.8, color=color_map(index))
     ax.axhline(y=0, color='#B91C1C', linestyle='--', alpha=0.4, label='零出力线')
     ax.set_xlabel(axis_label, fontsize=12)
     ax.set_ylabel('出力', fontsize=12)
@@ -238,6 +379,207 @@ def chart6_turbine_output(turbine_groups, output_dir, axis_label):
     plt.savefig(path, dpi=150)
     plt.close()
     print(f"图6 已生成: {path}")
+
+
+def build_station_power_series_from_mpc(mpc_payload):
+    if not mpc_payload:
+        return {}
+
+    station_labels = {
+        20100: '瀑布沟站',
+        20300: '深溪沟站',
+        20500: '枕头坝站',
+        20700: '沙坪坝站',
+    }
+    turbine_ids_by_station = defaultdict(set)
+    for item in mpc_payload.get('data') or []:
+        for detail in item.get('hydro_mpc_details') or []:
+            if (
+                str(detail.get('command_type') or '') == 'output_power'
+                and detail.get('node_id') is not None
+                and detail.get('object_id') is not None
+            ):
+                turbine_ids_by_station[int(detail['node_id'])].add(int(detail['object_id']))
+
+    station_series = defaultdict(lambda: {'power': [], 'flow': []})
+    for item in mpc_payload.get('data') or []:
+        step = item.get('step')
+        if step is None:
+            continue
+        power_by_station = defaultdict(float)
+        flow_by_station = defaultdict(float)
+        for detail in item.get('hydro_mpc_details') or []:
+            node_id = detail.get('node_id')
+            object_id = detail.get('object_id')
+            value = detail.get('value')
+            command_type = str(detail.get('command_type') or '')
+            if node_id is None or object_id is None or value is None:
+                continue
+            node_id = int(node_id)
+            object_id = int(object_id)
+            value = float(value)
+            if command_type == 'output_power':
+                power_by_station[node_id] += value
+            elif command_type == 'water_flow' and object_id in turbine_ids_by_station.get(node_id, set()):
+                flow_by_station[node_id] += value
+
+        for node_id in sorted(set(power_by_station) | set(flow_by_station)):
+            label = station_labels.get(node_id, f'Node {node_id}')
+            station_series[label]['power'].append((int(step), power_by_station.get(node_id, 0.0)))
+            station_series[label]['flow'].append((int(step), flow_by_station.get(node_id, 0.0)))
+
+    return dict(station_series)
+
+
+def chart8_level_flow_coupling(groups, output_dir, axis_label):
+    sections = auto_select_coupled_sections(groups)
+    if not sections:
+        print("图8 跳过: 未检测到可用的水位-流量联动断面")
+        return
+
+    cols = 2
+    rows = (len(sections) + cols - 1) // cols
+    fig, axes = plt.subplots(rows, cols, figsize=(15, 4.8 * rows))
+    axes = np.atleast_1d(axes).flatten()
+    for index, name in enumerate(sections):
+        ax = axes[index]
+        ax2 = ax.twinx()
+        level_steps, level_vals = zip(*groups[(name, 'water_level', 'CrossSection')])
+        flow_steps, flow_vals = zip(*groups[(name, 'water_flow', 'CrossSection')])
+        ax.plot(level_steps, level_vals, color='#185b75', linewidth=2.0, label='水位')
+        ax2.plot(flow_steps, flow_vals, color='#c66a1d', linewidth=1.8, linestyle='--', label='流量')
+        ax2.axhline(y=0, color='#B91C1C', linestyle=':', alpha=0.4)
+        ax.set_title(name, fontsize=11, fontweight='bold')
+        ax.set_xlabel(axis_label, fontsize=10)
+        ax.set_ylabel('水位 (m)', fontsize=10, color='#185b75')
+        ax2.set_ylabel('流量 (m³/s)', fontsize=10, color='#c66a1d')
+        ax.grid(True, alpha=0.25)
+        lines = ax.get_lines() + ax2.get_lines()
+        ax.legend(lines, [line.get_label() for line in lines], loc='best', fontsize=8)
+    for index in range(len(sections), len(axes)):
+        axes[index].set_visible(False)
+    plt.suptitle('关键断面水位-流量联动对比', fontsize=14, fontweight='bold')
+    plt.tight_layout()
+    path = os.path.join(output_dir, 'chart8_level_flow_coupling.png')
+    plt.savefig(path, dpi=150)
+    plt.close()
+    print(f"图8 已生成: {path}")
+
+
+def chart9_station_inflow_power_comparison(records, mpc_payload, output_dir, axis_label, objects_yaml_path=None):
+    station_series = build_station_power_series(records, mpc_payload, objects_yaml_path)
+    if not station_series:
+        print("图9 跳过: 未检测到可用的梯级电站来流-出力数据")
+        return
+
+    station_names = sorted(station_series)
+    cols = 2
+    rows = (len(station_names) + cols - 1) // cols
+    fig, axes = plt.subplots(rows, cols, figsize=(15, 4.8 * rows))
+    axes = np.atleast_1d(axes).flatten()
+    for index, station_name in enumerate(station_names):
+        ax = axes[index]
+        ax2 = ax.twinx()
+        flow_series = station_series[station_name]['flow']
+        power_series = station_series[station_name]['power']
+        if flow_series:
+            flow_steps, flow_vals = zip(*flow_series)
+            ax.plot(flow_steps, flow_vals, color='#0f8b8d', linewidth=2.0, label='来流代理')
+        if power_series:
+            power_steps, power_vals = zip(*power_series)
+            ax2.plot(power_steps, power_vals, color='#b48b45', linewidth=1.8, linestyle='--', label='总出力')
+        ax.set_title(station_name, fontsize=11, fontweight='bold')
+        ax.set_xlabel(axis_label, fontsize=10)
+        ax.set_ylabel('来流代理 (m³/s)', fontsize=10, color='#0f8b8d')
+        ax2.set_ylabel('总出力', fontsize=10, color='#b48b45')
+        ax.grid(True, alpha=0.25)
+        lines = ax.get_lines() + ax2.get_lines()
+        if lines:
+            ax.legend(lines, [line.get_label() for line in lines], loc='best', fontsize=8)
+    for index in range(len(station_names), len(axes)):
+        axes[index].set_visible(False)
+    plt.suptitle('梯级电站来流-出力对比', fontsize=14, fontweight='bold')
+    plt.tight_layout()
+    path = os.path.join(output_dir, 'chart9_station_inflow_power_comparison.png')
+    plt.savefig(path, dpi=150)
+    plt.close()
+    print(f"图9 已生成: {path}")
+
+
+def chart10_station_output_composition(records, mpc_payload, output_dir, axis_label, objects_yaml_path=None):
+    station_series = build_station_power_series(records, mpc_payload, objects_yaml_path)
+    station_names = sorted(name for name, series in station_series.items() if series.get('power'))
+    if not station_names:
+        print("图10 跳过: 未检测到可用于梯级总出力构成分析的站级出力数据")
+        return
+
+    step_values = sorted({step for name in station_names for step, _ in station_series[name]['power']})
+    if not step_values:
+        print("图10 跳过: 梯级总出力构成缺少有效时间步")
+        return
+
+    power_matrix = []
+    total_output = np.zeros(len(step_values))
+    color_map = plt.get_cmap('tab10')
+    for station_name in station_names:
+        series_map = {int(step): float(value) for step, value in station_series[station_name]['power']}
+        values = np.array([series_map.get(step, 0.0) for step in step_values], dtype=float)
+        power_matrix.append(values)
+        total_output += values
+
+    fig, ax = plt.subplots(figsize=(15, 6.5))
+    colors = [color_map(index % 10) for index, _ in enumerate(station_names)]
+    ax.stackplot(step_values, power_matrix, labels=station_names, colors=colors, alpha=0.88)
+    ax.plot(step_values, total_output, color='#1f2937', linewidth=2.2, label='梯级总出力')
+    ax.set_xlabel(axis_label, fontsize=12)
+    ax.set_ylabel('总出力', fontsize=12)
+    ax.set_title('梯级总出力构成与协同分配', fontsize=14, fontweight='bold')
+    ax.grid(True, alpha=0.25)
+    ax.legend(loc='upper left', fontsize=9, ncol=2)
+    plt.tight_layout()
+    path = os.path.join(output_dir, 'chart10_station_output_composition.png')
+    plt.savefig(path, dpi=150)
+    plt.close()
+    print(f"图10 已生成: {path}")
+
+
+def chart11_turbine_dispatch_heatmap(turbine_groups, output_dir, axis_label):
+    if not turbine_groups:
+        print("图11 跳过: 未检测到可用于机组分组堆叠面积图的水轮机出力数据")
+        return
+
+    turbine_names = sorted(turbine_groups)
+    step_values = sorted({int(step) for name in turbine_names for step, _ in turbine_groups[name]})
+    if not step_values:
+        print("图11 跳过: 机组分组堆叠面积图缺少有效时间步")
+        return
+
+    total_by_turbine = {
+        name: float(sum(float(value) for _, value in turbine_groups[name]))
+        for name in turbine_names
+    }
+    ranked_names = sorted(turbine_names, key=lambda name: (-total_by_turbine[name], name))
+    series_values = []
+    for name in ranked_names:
+        value_map = {int(step): float(value) for step, value in turbine_groups[name]}
+        series_values.append(np.array([value_map.get(step, 0.0) for step in step_values], dtype=float))
+
+    total_output = np.sum(series_values, axis=0) if series_values else np.zeros(len(step_values))
+    fig, ax = plt.subplots(figsize=(15, 6.8))
+    color_map = plt.get_cmap('tab20', max(len(ranked_names), 1))
+    colors = [color_map(index) for index, _ in enumerate(ranked_names)]
+    ax.stackplot(step_values, series_values, labels=ranked_names, colors=colors, alpha=0.9)
+    ax.plot(step_values, total_output, color='#1f2937', linewidth=2.2, label='机组总出力')
+    ax.set_title('机组分组堆叠面积图', fontsize=14, fontweight='bold')
+    ax.set_xlabel(axis_label, fontsize=12)
+    ax.set_ylabel('出力', fontsize=12)
+    ax.grid(True, alpha=0.25)
+    ax.legend(loc='upper left', fontsize=8, ncol=2)
+    plt.tight_layout()
+    path = os.path.join(output_dir, 'chart11_turbine_dispatch_heatmap.png')
+    plt.savefig(path, dpi=150)
+    plt.close()
+    print(f"图11 已生成: {path}")
 
 
 def chart1_water_level(groups, output_dir, axis_label, sections=None):
@@ -380,6 +722,7 @@ def main():
     records = load_data(data_path)
     groups = group_data(records)
     turbine_groups = group_turbine_output(records)
+    mpc_payload = load_mpc_payload(args.mpc_results_json)
     stats = get_stats(records)
     axis_info = resolve_axis_info(
         records,
@@ -420,6 +763,10 @@ def main():
     chart4_gate_opening(groups, output_dir, axis_info['label'])
     chart5_disturbance_flow(groups, output_dir, axis_info['label'])
     chart6_turbine_output(turbine_groups, output_dir, axis_info['label'])
+    chart8_level_flow_coupling(groups, output_dir, axis_info['label'])
+    chart9_station_inflow_power_comparison(records, mpc_payload, output_dir, axis_info['label'], args.objects_yaml)
+    chart10_station_output_composition(records, mpc_payload, output_dir, axis_info['label'], args.objects_yaml)
+    chart11_turbine_dispatch_heatmap(turbine_groups, output_dir, axis_info['label'])
 
     print(f"\n所有图表已生成到: {output_dir}")
 

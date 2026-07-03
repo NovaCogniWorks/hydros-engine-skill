@@ -86,12 +86,26 @@ description: |
 - 当目标是“下载结果文件到本地”而不是立刻做报告时，也必须走同一条标准链路：`get_timeseries_data -> get_export_status 轮询 -> resource_uri/下载地址 -> resources/read 或标准 HTTP GET -> 本地一次性校验`。不要把结果内容通过终端标准输入、交互式 `cat`、消息复制粘贴等方式中转。
 - 如果本地已经存在同名结果文件，覆盖前先核对文件大小或数据行数；如发现明显偏小、数据行数异常少，优先视为“落盘被截断”，重新按标准链路完整下载，不要在坏文件基础上追加写入。
 - 如果结果文件下载、读取、写盘或完整性校验任一步失败，立即报告“结果下载失败”，并停止后续分析、图表和报告生成。不要回退到任何默认数据、历史缓存、旧结果文件或明显残缺的数据文件继续产出结果。
+- 即使 `resources/read`、MCP tool 或会话日志表面上返回了“成功”，只要当前运行环境里拿到的仍然只是被截断的文本片段、Markdown 表格片段、日志回显片段，且无法证明已经完整落盘为当前任务的原始结果文件，也必须视为“结果读取失败/结果落盘失败”。
+- 只有当“当前 `biz_scene_instance_id` 的结果文件”已经完整下载、完整写盘并通过完整性校验后，才允许继续生成正式 `charts/`、`data/`、HTML 报告和 Markdown 报告。
+- 如果用户要求“完整报告（charts、data、report）”，而当前任务结果尚未完整落盘，只允许交付阻塞说明、失败说明或进度说明；不允许先交付临时正式报告，也不允许拿历史任务产物补齐当前任务目录。
+- 历史任务目录中的图表、数据文件、HTML/Markdown 报告只可用于内部排障、人工比对或调试参考，不可复制到新的 `biz_scene_instance_id` 目录中充当本次任务的正式交付物。
 - 如果用户要做 HTML 报告或其他 HTML 页面，先读 [references/hydros-html-prompt.md](references/hydros-html-prompt.md)。
 - 如果需要理解数据结构、聚合口径或指标映射，先读 [references/hydros-data-contract.md](references/hydros-data-contract.md)。
-- 如果场景是 `200060`（梯级电站），在阶段五默认追加“水轮机出力”校核；识别条件固定为 `device_type = Turbine` 且 `command_type = output_power`，并把它视为正式结果解读的必检项。
+- 如果场景是 `200060`（梯级电站），在阶段五默认追加“机组分组堆叠面积图”校核；识别条件固定为 `device_type = Turbine` 且 `command_type = output_power`，并把它视为正式结果解读的必检项。
+- 如果场景是 `200060`（梯级电站），`梯级电站来流-出力对比` 必须优先使用 `GateStation` 的`闸前断面` `water_flow` 作为站级来流代理，并与同站全部 `Turbine/output_power` 聚合后的总出力同图对比；不要依赖 MPC 明细里一定存在 `water_flow` 命令。
+- 如果场景是 `200060`（梯级电站），正式报告默认还应追加两张更直观的协同调度图：`梯级总出力构成` 和 `机组分组堆叠面积图`。前者用于看站间分工、接力和退让，后者用于看站内机组主力承担、轮换接力以及负荷是否过度集中。
+- 如果场景是 `200060`（梯级电站），`GateStation` 相关口径必须同时兼容 `电站` 和 `闸站` 两种业务分类；判定 `闸前断面` / `闸后断面` 时，优先信 `objects.yaml` 中断面或引用上的 `alias_name`（如“闸前”“闸后”），只有别名缺失时才退回 `INLET` / `OUTLET` 或断面顺序推断，避免建模口径与角色字段不一致时把站级来流代理映射反。
+- 如果场景是 `200060`（梯级电站），机组分组堆叠面积图必须提供按站点分组的水轮机下拉选择；默认一次只展示一个站点的机组堆叠，不再额外渲染独立的“水轮机出力结果曲线”主卡片。
+- 如果场景是 `200060`（梯级电站），机组分组堆叠面积图里的各台机组序列必须使用可区分的离散配色，图例颜色与面积/线条颜色一一对应，且序列名称必须展示可读的 `站点名/机组名`。
+- 如果场景是 `200060`（梯级电站），上述新增两张图不能只生成图片本身；主页面必须同步渲染对应卡片，并给出解读内容。`梯级总出力构成` 至少要解释哪一站承担主力、总出力平台切换主要由谁驱动；`机组分组堆叠面积图` 至少要解释是否存在机组轮换、是否长期由少数机组承担主力，以及负荷集中度是否偏高。
+- `水位-流量联动对比` 不能只输出“已选取若干断面做复核”这类占位式描述；正式报告里必须给出可读解读，至少包含“本次选取了哪些关键断面”“哪一个断面的联动变化最值得优先关注”“如何判断是流量主导还是水位主导”“出现异常时应优先复核什么原因”这四类信息。
+- 只要进入“正式报告重生成 / 报告修复 / HTML 报告回写”路径，就必须显式保留当前场景自己的 `scenario_yaml_url`、`objects.yaml` 来源和任务参数；如果当前任务原始元数据缺失，只允许先说明阻塞或从当前任务链路重新获取，不能省略 `scenario_yaml_url` 直接重生报告，否则会把标题、场景名、时长口径和纵剖面元数据退回默认值。
+- 历史任务目录下的 `report.data.js`、图表、HTML 报告只允许用于人工对比、排障和口径核对；它们可以帮助确认“哪里不一致”，但不能被直接复制、改名、拼接或作为新 `biz_scene_instance_id` 的正式 `charts/`、`data/`、`report/` 产物来源。
 - 如果需要快速交付一个可直接打开的页面，优先复用模板资产，而不是从零开始。
 - 需要完整版 HTML 报告、结果曲线展示或可直接打开的单文件页面时，优先复用 [assets/hydros-report-template/index.html](assets/hydros-report-template/index.html) 模板，并按当前脚本实现把真实 payload 内联到 `simulation_report.html`。
 - 当用户明确要“报告”“完整报告”“HTML 报告”“汇报页”时，不要先交付临时分析报告、手写摘要页或简版 HTML 作为最终产物；如果本地结果文件尚未就位，先完成 `get_timeseries_data -> get_export_status 轮询 -> resource_uri/下载地址 -> 落盘结果文件 -> build_timeseries_report.py`，再输出遵循模板的正式报告。
+- “使用了正确 HTML 模板”不等于“形成了正式报告”。正式报告必须同时满足“模板来自 `assets/hydros-report-template/index.html`”和“底层数据来自当前 `biz_scene_instance_id` 的完整结果文件”这两个条件；任一条件不满足，都只能算未完成正式交付。
 - HTML 正式报告应尽量包含结果曲线图产物和渠道纵剖面图；若 `chart1_water_level.png`、`chart2_water_flow.png`、`chart4_gate_opening.png`、`chart5_disturbance_flow.png`、`chart7_longitudinal_profile.png` 中有缺失，仍可交付 HTML，但必须在报告正文里显式写明缺失项、缺失原因和影响范围，不能把缺图问题只留在聊天回复里解释。
 - 正式 HTML 报告生成完成后，默认先交付本地 `simulation_report.html`。如当前环境提供并验证了报告上传工具或 API，再上传并把接口返回结果作为交付结果的一部分；不要继续使用旧 `hydroos.cn` 匿名上传地址作为默认动作。
 - 如果远端上传失败，明确报告“本地报告生成成功，远端上传失败”和接口错误，不要伪装成本地报告失败。
@@ -100,10 +114,21 @@ description: |
     ```bash
     # 示例：仅在已确认当前环境存在可用上传接口时使用。
     curl --location --request POST \
-      "https://api.hydroos.pub/engine/api/v1/file/anonymous/upload/<biz_scene_instance_id>" \
+      "https://api.hydroos.pub/openapi/engine/api/v1/file/anonymous/upload/<biz_scene_instance_id>" \
       --header "Accept: */*" \
       --form "file=@\"output/<biz_scene_instance_id>/report/simulation_report.html\""
     ```
+
+## 200060 全流程兜底清单
+
+如果当前场景是 `200060`（梯级电站），在正式交付前至少完成下面 6 项自检：
+
+1. **结果完整性**：确认当前 `biz_scene_instance_id` 的结果文件已完整落盘，且包含 `device_type = Turbine`、`command_type = output_power` 记录；不能借历史任务产物补齐。
+2. **场景元数据**：确认报告重生时显式传入当前场景自己的 `scenario_yaml_url`、`objects.yaml` 来源和任务参数，避免标题、场景名和纵剖面口径退回默认值。
+3. **站级口径**：确认 `GateStation` 同时兼容 `电站/闸站` 分类，且 `闸前/闸后` 优先按 `alias_name` 判定；`梯级电站来流-出力对比` 使用 `闸前断面 water_flow` 作为站级来流代理。
+4. **图表生成**：确认 `chart9/10/11` 均已生成，其中 `chart10` 用于站间协同，`chart11` 用于机组分组堆叠面积展示与集中度复核；`Turbine/output_power` 数据需用于支撑 `chart11`，不再要求主页面单独展示 `chart6`。
+5. **主页面渲染**：确认主页面已渲染 `梯级电站来流-出力对比`、`梯级总出力构成`、`机组分组堆叠面积图` 3 个卡片，且每个卡片都有解读文案，不是只有图片或占位说明。
+6. **最终交付**：确认 HTML、Markdown、`report.data.js`、`analysis_summary.json` 与当前任务目录一致；若任一图表、解读或口径缺失，必须在报告正文和聊天结论里显式说明影响范围。
 
 ## 资源导航
 
@@ -352,6 +377,8 @@ INIT -> WAITING_AGENTS -> READY -> STEPPING -> COMPLETED
     - 写完后立刻校验文件大小、数据行数，必要时补充总记录数核对
     - 如果用户后续要生成 HTML 报告、Markdown 报告、拓扑页或纵剖面页，则在这一步一并基于场景 YAML 下载并缓存 `objects.yaml`；下载方式同样是"读取 `hydros_objects_modeling_url` -> 规范化 URL -> 标准 HTTP GET 下载 -> 以 UTF-8 一次性写入本地缓存文件"；若本轮前面已经缓存过，则优先复用，不要重复拉取
     - 如果结果文件下载失败、写盘失败，或校验后判断为坏文件/残缺文件，则直接报告阶段五失败并停止，不允许继续生成图表、异常分析或任何正式报告
+    - 即使 `resources/read`、`get_mpc_simulation_results` 或其他结果读取调用返回成功，只要代理当前真正拿到的仍是片段化文本、被截断的 Markdown 表格、日志回显或无法验证完整性的中间内容，也一律按“坏文件/残缺文件/未完整落盘”处理，直接停止阶段五。
+    - 阶段五产出的 `charts/`、`data/`、`report/` 必须与当前 `biz_scene_instance_id` 一一对应；如果当前任务结果拿不全，就直接报告失败或阻塞，不允许借用、复制或改名历史任务目录下的产物来凑齐当前任务交付。
     - 传递用户显式提供的仿真参数给脚本，避免写死默认值
     - 如果场景是 `200060`，导出结果后必须检查是否存在 `device_type = Turbine` 且 `command_type = output_power` 的记录；若缺失，明确报告“结果导出未包含水轮机出力数据 / 结果导出不完整”，不要静默跳过
 
@@ -363,16 +390,21 @@ INIT -> WAITING_AGENTS -> READY -> STEPPING -> COMPLETED
 
 3. **统计摘要**：生成总记录数、采样步数、对象数、指标数、异常点数量；若场景是 `200060`，额外统计水轮机出力序列数、缺失情况和最大出力变化机组。
 
-4. **图表生成**：用 `scripts/generate_charts.py` 生成水位、流量、闸门开度和分水口流量等图表。注意 y 轴自适应收紧。若场景是 `200060`，额外生成水轮机出力曲线图，并把它视为正式报告图表的一部分。
+4. **图表生成**：用 `scripts/generate_charts.py` 生成水位、流量、闸门开度和分水口流量等图表。注意 y 轴自适应收紧。若场景是 `200060`，额外生成以下正式报告图表，并把它们视为场景交付的一部分：
+    - `chart9_station_inflow_power_comparison.png`：梯级电站来流-出力对比；要求使用 `GateStation/闸前断面/water_flow` 作为站级来流代理。
+    - `chart10_station_output_composition.png`：梯级总出力构成；用于看站间分工、接力和退让。
+    - `chart11_turbine_dispatch_heatmap.png`：机组分组堆叠面积图；用于看站内机组主力承担、轮换接力和负荷集中度，主页面需提供按站点分组的水轮机下拉切换。
 
 5. **异常分析**：用 `scripts/analyze_anomalies.py` 检测负压、流速异常、水头损失等。
 
 6. **报告生成**：
    - **默认产出**：HTML 报告 + Markdown 报告（除非用户明确只要其中一种）
-  - **HTML 报告**：对齐 `assets/hydros-report-template/index.html` 完整版结构，包含纵剖面与时序曲线联动；对 `200060` 必须额外展示水轮机出力曲线
-   - **Markdown 报告**：图文并茂，每张图表配套文字分析
-   - **目录结构**：统一落盘到 `output/<biz_scene_instance_id>/`；其中 `report/` 存放报告，`charts/` 存放图表，`data/` 存放结果文件、`objects.yaml` 和分析中间文件
-  - **数据验证**：比较期望与实际的时长/点数，不一致时在报告中说明；对 `200060` 还要验证是否包含 `Turbine/output_power` 数据，缺失时必须在 HTML/Markdown 正文和聊天结论里同时说明
+  - **HTML 报告**：对齐 `assets/hydros-report-template/index.html` 完整版结构，包含纵剖面与时序曲线联动；对 `200060` 必须额外展示梯级电站来流-出力对比、梯级总出力构成和机组分组堆叠面积图，其中机组图按站点分组下拉切换。
+  - **主页面渲染**：对 `200060`，新增图表不能只生成图片文件；主页面必须同步渲染对应卡片、标题、说明文字和解读内容，不能只在 Markdown 里补充说明。
+  - **图表实现口径**：`chart8/9/10/11` 在 HTML 主页面必须优先走 `reportData.charts.* + ECharts` 渲染，不能再用静态 `<img>` 作为主展示实现；`charts/*.png` 仅作为 Markdown 报告、离线归档和缺省交付产物保留。
+  - **Markdown 报告**：图文并茂，每张图表配套文字分析
+  - **目录结构**：统一落盘到 `output/<biz_scene_instance_id>/`；其中 `report/` 存放报告，`charts/` 存放图表，`data/` 存放结果文件、`objects.yaml` 和分析中间文件
+  - **数据验证**：比较期望与实际的时长/点数，不一致时在报告中说明；对 `200060` 还要验证是否包含 `Turbine/output_power` 数据、`chart9/10/11` 是否全部生成、对应解读是否已写入 payload 并在主页面渲染，且 `chart11` 是否支持按站点分组的下拉切换。任一项缺失，都必须在 HTML/Markdown 正文和聊天结论里同时说明。
    - **上传交付**：当 HTML 正式报告生成完成后，默认先交付本地 `simulation_report.html`。如当前环境提供并验证了报告上传工具或 API，再上传并把接口返回结果作为交付结果的一部分。
    - **上传命令示例**：
 
@@ -440,3 +472,4 @@ total_steps
 received_hydro_events
 default_render_objects
 ```
+

@@ -212,6 +212,41 @@ def collect_section_errors(sections: list[dict]) -> list[dict]:
     return errors
 
 
+def is_effective_profile_location(location_km: float | None) -> bool:
+    return location_km is not None and abs(float(location_km)) >= 1e-6
+
+
+def resolve_gate_station_marker_location(
+    inlet_location: float | None,
+    outlet_location: float | None,
+) -> tuple[float | None, str | None, list[str], list[str]]:
+    invalid_reasons: list[str] = []
+    fallback_notes: list[str] = []
+
+    if inlet_location is None:
+        invalid_reasons.append("INLET断面缺失")
+    elif not is_effective_profile_location(inlet_location):
+        invalid_reasons.append("INLET断面里程为0")
+
+    if outlet_location is None:
+        invalid_reasons.append("OUTLET断面缺失")
+    elif not is_effective_profile_location(outlet_location):
+        invalid_reasons.append("OUTLET断面里程为0")
+
+    inlet_valid = is_effective_profile_location(inlet_location)
+    outlet_valid = is_effective_profile_location(outlet_location)
+
+    if inlet_valid and outlet_valid:
+        return round((float(inlet_location) + float(outlet_location)) / 2, 3), "inlet_outlet_midpoint", invalid_reasons, fallback_notes
+    if inlet_valid:
+        fallback_notes.append("OUTLET 无有效里程，已回退使用 INLET 断面定位")
+        return round(float(inlet_location), 3), "inlet_fallback", invalid_reasons, fallback_notes
+    if outlet_valid:
+        fallback_notes.append("INLET 无有效里程，已回退使用 OUTLET 断面定位")
+        return round(float(outlet_location), 3), "outlet_fallback", invalid_reasons, fallback_notes
+    return None, None, invalid_reasons, fallback_notes
+
+
 def select_profile_sections_from_objects(
     text: str,
     sections: list[dict],
@@ -602,16 +637,11 @@ def build_dataset(
         ) or all_sections_by_name.get(gs.get("outlet_section", ""))
         inlet_location = round(inlet_section["location"] / 1000, 3) if inlet_section else None
         outlet_location = round(outlet_section["location"] / 1000, 3) if outlet_section else None
-        invalid_reasons = []
-        if inlet_section is None:
-            invalid_reasons.append("INLET断面缺失")
-        if outlet_section is None:
-            invalid_reasons.append("OUTLET断面缺失")
-        if inlet_location is not None and abs(inlet_location) < 1e-6:
-            invalid_reasons.append("INLET断面里程为0")
-        if outlet_location is not None and abs(outlet_location) < 1e-6:
-            invalid_reasons.append("OUTLET断面里程为0")
-        if invalid_reasons:
+        st_location, location_source, invalid_reasons, fallback_notes = resolve_gate_station_marker_location(
+            inlet_location,
+            outlet_location,
+        )
+        if st_location is None:
             gate_errors.append(
                 {
                     "type": "invalid_gate_station_location",
@@ -628,8 +658,22 @@ def build_dataset(
                 }
             )
             continue
-        st_location = round((inlet_location + outlet_location) / 2, 3)
-        location_source = "inlet_outlet_midpoint"
+        if fallback_notes:
+            gate_errors.append(
+                {
+                    "type": "fallback_gate_station_location",
+                    "severity": "warning",
+                    "object_name": gs["name"],
+                    "object_type": "GateStation",
+                    "inlet_section_id": gs["inlet_section_id"],
+                    "outlet_section_id": gs["outlet_section_id"],
+                    "inlet_section_name": gs["inlet_section"],
+                    "outlet_section_name": gs["outlet_section"],
+                    "inlet_location": inlet_location,
+                    "outlet_location": outlet_location,
+                    "message": "；".join(fallback_notes),
+                }
+            )
         
         valid_gates = [g for g in gs["gates"] if g in csv_gate_names]
         if not valid_gates:
@@ -1139,17 +1183,25 @@ def build_html(dataset: dict) -> str:
         .replaceAll('>', '&gt;')
         .replaceAll('"', '&quot;')
         .replaceAll("'", '&#39;');
+      const formatKmValue = (value) => {
+        const num = Number(value);
+        return Number.isFinite(num) ? `${num.toFixed(3)} km` : '无';
+      };
+      const formatMeterValue = (value) => {
+        const num = Number(value);
+        return Number.isFinite(num) ? `${num} m` : '无';
+      };
       const formatProfileErrorDetail = (item) => {{
         if (item.section_name) {{
-          return `里程 ${{Number(item.location).toFixed(3)}} km，顶高程 ${{item.top_elevation}} m，底高程 ${{item.bottom_elevation}} m`;
+          return `里程 ${{formatKmValue(item.location)}}，顶高程 ${{formatMeterValue(item.top_elevation)}}，底高程 ${{formatMeterValue(item.bottom_elevation)}}`;
         }}
         if (item.inlet_section_name || item.outlet_section_name) {{
-          const inletLocation = item.inlet_location == null ? '无' : `${{Number(item.inlet_location).toFixed(3)}} km`;
-          const outletLocation = item.outlet_location == null ? '无' : `${{Number(item.outlet_location).toFixed(3)}} km`;
+          const inletLocation = formatKmValue(item.inlet_location);
+          const outletLocation = formatKmValue(item.outlet_location);
           return `闸前 ${{escapeHtml(item.inlet_section_name || '-')}}，里程 ${{inletLocation}}；闸后 ${{escapeHtml(item.outlet_section_name || '-')}}，里程 ${{outletLocation}}`;
         }}
-        const startLocation = item.start_location == null ? '无' : `${{Number(item.start_location).toFixed(3)}} km`;
-        const endLocation = item.end_location == null ? '无' : `${{Number(item.end_location).toFixed(3)}} km`;
+        const startLocation = formatKmValue(item.start_location);
+        const endLocation = formatKmValue(item.end_location);
         return `范围 ${{escapeHtml(item.start_section_name || '-')}} → ${{escapeHtml(item.end_section_name || '-')}}，起点里程 ${{startLocation}}，终点里程 ${{endLocation}}`;
       }};
       const renderSectionErrors = () => {{

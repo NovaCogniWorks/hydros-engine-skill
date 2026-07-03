@@ -433,17 +433,22 @@ def build_turbine_output_series(
         turbine_df = turbine_df[~turbine_df["data_index"].astype(int).isin(excluded_steps)].copy()
 
     group_columns = ["object_name"]
-    if "device_name" in turbine_df.columns:
+    has_device_name = "device_name" in turbine_df.columns
+    has_object_id = "object_id" in turbine_df.columns
+    if has_device_name:
         group_columns.append("device_name")
-    if "object_id" in turbine_df.columns:
+    if has_object_id:
         group_columns.append("object_id")
 
     for group_key, group in turbine_df.groupby(group_columns, sort=False, dropna=False):
-        if len(group_columns) == 3:
+        if has_device_name and has_object_id:
             object_name, device_name, object_id = group_key
-        elif len(group_columns) == 2:
+        elif has_device_name:
             object_name, device_name = group_key
             object_id = None
+        elif has_object_id:
+            object_name, object_id = group_key
+            device_name = None
         else:
             object_name = group_key
             device_name = None
@@ -486,6 +491,84 @@ def build_turbine_output_series(
     return series
 
 
+def build_business_turbine_series(
+    df: pd.DataFrame,
+    business_children: list[dict[str, Any]] | None = None,
+    excluded_steps: set[int] | None = None,
+    sort_key_func=None,
+) -> list[dict[str, Any]]:
+    base_series = build_turbine_output_series(df, excluded_steps, sort_key_func)
+    if not business_children:
+        return base_series
+
+    by_name = {item["name"]: item for item in base_series}
+    by_id = {item.get("objectId"): item for item in base_series if item.get("objectId") is not None}
+    series: list[dict[str, Any]] = []
+    mapped_keys: set[tuple[str, str]] = set()
+    mapped_ids: set[int] = set()
+
+    for child in business_children:
+        if child.get("sourceObjectType") != "Turbine":
+            continue
+        source_id = child.get("sourceObjectId")
+        base_item = by_id.get(source_id) if source_id is not None else None
+        if not base_item:
+            base_item = by_name.get(child["sourceObjectName"])
+        if not base_item:
+            continue
+        item = dict(base_item)
+        item.update(
+            {
+                "seriesId": (
+                    f"output_power|{child['businessCategory']}|{child['businessObjectId']}|"
+                    f"Turbine|{child.get('sourceObjectId') or child['sourceObjectName']}"
+                ),
+                "sourceName": child["sourceObjectName"],
+                "sourceObjectType": "Turbine",
+                "sourceObjectId": child.get("sourceObjectId"),
+                "businessCategory": child["businessCategory"],
+                "businessObjectName": child["businessObjectName"],
+                "businessObjectId": child["businessObjectId"],
+                "businessObjectLabel": child["businessObjectLabel"],
+                "businessObjectOrder": child["businessObjectOrder"],
+                "childRole": child["childRole"],
+                "childOrder": child["childOrder"],
+                "displayName": child["sourceObjectName"],
+                "legendName": child["sourceObjectName"],
+                "defaultSelected": bool(child.get("defaultSelected")),
+            }
+        )
+        series.append(item)
+        mapped_keys.add(("Turbine", child["sourceObjectName"]))
+        if source_id is not None:
+            mapped_ids.add(int(source_id))
+
+    for base_item in base_series:
+        object_id = base_item.get("objectId")
+        if object_id is not None and int(object_id) in mapped_ids:
+            continue
+        if ("Turbine", base_item["name"]) in mapped_keys:
+            continue
+        series.append(
+            {
+                **base_item,
+                "seriesId": f"output_power|fallback|Turbine|{base_item['name']}",
+                "businessCategory": "电站",
+                "businessObjectName": infer_station_name_from_turbine(base_item["name"]) or "未归属电站",
+                "businessObjectId": object_id if object_id is not None else base_item["name"],
+                "businessObjectLabel": infer_station_name_from_turbine(base_item["name"]) or "未归属电站",
+                "businessObjectOrder": 999999,
+                "childRole": "水轮机设备",
+                "childOrder": 999999,
+                "displayName": base_item["name"],
+                "legendName": base_item["name"],
+                "defaultSelected": False,
+            }
+        )
+
+    return sort_business_series(series)
+
+
 def select_turbine_output_rows(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame(columns=df.columns)
@@ -511,6 +594,19 @@ def select_turbine_output_rows(df: pd.DataFrame) -> pd.DataFrame:
     return df[mask].copy()
 
 
+def infer_station_name_from_turbine(turbine_name: str) -> str | None:
+    mapping = {
+        "瀑布沟": "瀑布沟站(6机+3闸)",
+        "深溪沟": "深溪沟站(4机+3闸)",
+        "枕头坝": "枕头坝站(4机+5闸)",
+        "沙坪": "沙坪站(6机+5闸)",
+    }
+    for keyword, station_name in mapping.items():
+        if keyword in str(turbine_name or ""):
+            return station_name
+    return None
+
+
 def load_mpc_payload(mpc_results_json: str | None) -> dict[str, Any] | None:
     if not mpc_results_json:
         return None
@@ -525,6 +621,827 @@ def load_mpc_payload(mpc_results_json: str | None) -> dict[str, Any] | None:
     if "data" in payload:
         return payload
     return None
+
+
+def select_coupled_section_names(df: pd.DataFrame, count: int = 4) -> list[str]:
+    level_df = df[(df["object_type"] == "CrossSection") & (df["metrics_code"] == "water_level")].copy()
+    flow_df = df[(df["object_type"] == "CrossSection") & (df["metrics_code"] == "water_flow")].copy()
+    if level_df.empty or flow_df.empty:
+        return []
+    level_stats = level_df.groupby("object_name")["value"].agg(["min", "max"])
+    flow_stats = flow_df.groupby("object_name")["value"].agg(["min", "max"])
+    common_names = sorted(set(level_stats.index) & set(flow_stats.index))
+    ranked: list[tuple[float, str]] = []
+    for name in common_names:
+        level_range = float(level_stats.loc[name, "max"] - level_stats.loc[name, "min"])
+        flow_range = float(flow_stats.loc[name, "max"] - flow_stats.loc[name, "min"])
+        ranked.append((abs(flow_range) + abs(level_range) * 10, str(name)))
+    ranked.sort(key=lambda item: (-item[0], item[1]))
+    return [name for _, name in ranked[:count]]
+
+
+def summarize_level_flow_coupling(df: pd.DataFrame) -> dict[str, Any]:
+    section_names = select_coupled_section_names(df)
+    if not section_names:
+        return {
+            "available": False,
+            "sections": [],
+            "analysis": "当前结果缺少可用于水位-流量联动对比的断面序列。",
+        }
+    level_df = df[(df["object_type"] == "CrossSection") & (df["metrics_code"] == "water_level")].copy()
+    flow_df = df[(df["object_type"] == "CrossSection") & (df["metrics_code"] == "water_flow")].copy()
+    level_df = level_df[level_df["object_name"].isin(section_names)].copy()
+    flow_df = flow_df[flow_df["object_name"].isin(section_names)].copy()
+
+    level_ranges: dict[str, float] = {}
+    flow_ranges: dict[str, float] = {}
+    if not level_df.empty:
+        grouped_level = level_df.groupby("object_name")["value"].agg(["min", "max"])
+        level_ranges = {
+            str(name): float(row["max"] - row["min"])
+            for name, row in grouped_level.iterrows()
+        }
+    if not flow_df.empty:
+        grouped_flow = flow_df.groupby("object_name")["value"].agg(["min", "max"])
+        flow_ranges = {
+            str(name): float(row["max"] - row["min"])
+            for name, row in grouped_flow.iterrows()
+        }
+
+    def coupling_score(name: str) -> float:
+        return abs(flow_ranges.get(name, 0.0)) + abs(level_ranges.get(name, 0.0)) * 10.0
+
+    highlight_section = max(section_names, key=coupling_score)
+    highlight_level_range = level_ranges.get(highlight_section, 0.0)
+    highlight_flow_range = flow_ranges.get(highlight_section, 0.0)
+    return {
+        "available": True,
+        "sections": section_names,
+        "analysis": (
+            f"已选取 {'、'.join(section_names)} 等 {len(section_names)} 个关键断面做水位-流量联动复核，"
+            f"其中 {highlight_section} 的联动变化最值得优先关注，水位变幅约 {round_number(highlight_level_range, 2)} m、"
+            f"流量变幅约 {round_number(highlight_flow_range, 2)} m³/s。"
+            "解读时应重点看同一断面上流量抬升或回落后，水位是否同步响应、是否存在明显滞后，以及水位变化幅度相对流量变化是否异常偏大或偏小；"
+            "若流量先发生台阶式切换而水位随后平滑跟随，通常说明调节动作主导；若流量变化不大但水位持续抬升或回落，则需继续复核局部顶托、边界控制或断面过流能力变化。"
+        ),
+    }
+
+
+def summarize_station_power_comparison_from_mpc_legacy(mpc_results_json: str | None) -> dict[str, Any]:
+    payload = load_mpc_payload(mpc_results_json)
+    if not payload:
+        return {
+            "available": False,
+            "stations": [],
+            "analysis": "当前未提供可用的 MPC 结果负荷数据，无法生成梯级电站来流-出力对比。",
+        }
+
+    station_labels = {
+        20100: "瀑布沟站",
+        20300: "深溪沟站",
+        20500: "枕头坝站",
+        20700: "沙坪坝站",
+    }
+    turbine_ids_by_station: dict[int, set[int]] = {}
+    power_points: dict[int, list[float]] = {}
+    flow_points: dict[int, list[float]] = {}
+
+    for item in payload.get("data") or []:
+        for detail in item.get("hydro_mpc_details") or []:
+            if str(detail.get("command_type") or "") == "output_power" and detail.get("node_id") is not None and detail.get("object_id") is not None:
+                node_id = int(detail["node_id"])
+                object_id = int(detail["object_id"])
+                turbine_ids_by_station.setdefault(node_id, set()).add(object_id)
+
+    for item in payload.get("data") or []:
+        station_power: dict[int, float] = {}
+        station_flow: dict[int, float] = {}
+        for detail in item.get("hydro_mpc_details") or []:
+            node_id = detail.get("node_id")
+            object_id = detail.get("object_id")
+            value = detail.get("value")
+            command_type = str(detail.get("command_type") or "")
+            if node_id is None or object_id is None or value is None:
+                continue
+            node_id = int(node_id)
+            object_id = int(object_id)
+            value = float(value)
+            if command_type == "output_power":
+                station_power[node_id] = station_power.get(node_id, 0.0) + value
+            elif command_type == "water_flow" and object_id in turbine_ids_by_station.get(node_id, set()):
+                station_flow[node_id] = station_flow.get(node_id, 0.0) + value
+        for node_id, node_value in station_power.items():
+            power_points.setdefault(node_id, []).append(node_value)
+        for node_id, node_value in station_flow.items():
+            flow_points.setdefault(node_id, []).append(node_value)
+
+    station_names = sorted({station_labels.get(node_id, f"Node {node_id}") for node_id in set(power_points) | set(flow_points)})
+    if not station_names:
+        return {
+            "available": False,
+            "stations": [],
+            "analysis": "MPC 结果中未识别到可用于梯级电站对比的来流或出力序列。",
+        }
+
+    def station_score(name: str) -> float:
+        reverse_map = {station_labels.get(node_id, f"Node {node_id}"): node_id for node_id in set(power_points) | set(flow_points)}
+        node_id = reverse_map[name]
+        power_values = power_points.get(node_id, [])
+        flow_values = flow_points.get(node_id, [])
+        power_range = max(power_values) - min(power_values) if power_values else 0.0
+        flow_range = max(flow_values) - min(flow_values) if flow_values else 0.0
+        return float(power_range + flow_range)
+
+    highlight_station = max(station_names, key=station_score)
+    return {
+        "available": True,
+        "stations": station_names,
+        "analysis": (
+            f"已聚合 {len(station_names)} 个梯级电站的来流代理与总出力过程，"
+            f"其中 {highlight_station} 的联动变化幅度最大，建议优先复核调度合理性。"
+        ),
+    }
+
+
+def summarize_station_power_comparison(
+    df: pd.DataFrame,
+    business_children: list[dict[str, Any]] | None = None,
+    mpc_results_json: str | None = None,
+) -> dict[str, Any]:
+    def format_station_names(names: list[str]) -> str:
+        return "、".join(names[:4]) if names else "相关电站"
+
+    section_to_station: dict[str, str] = {}
+    turbine_name_to_station: dict[str, str] = {}
+    turbine_id_to_station: dict[int, str] = {}
+    station_names_from_catalog: set[str] = set()
+
+    for child in business_children or []:
+        station_name = str(child.get("businessObjectName") or "").strip()
+        if not station_name or not is_station_business_category(child.get("businessCategory")):
+            continue
+        station_names_from_catalog.add(station_name)
+        if child.get("sourceObjectType") == "CrossSection" and child.get("childRole") == "闸前断面":
+            section_name = str(child.get("sourceObjectName") or "").strip()
+            if section_name:
+                section_to_station[section_name] = station_name
+        elif child.get("sourceObjectType") == "Turbine":
+            turbine_name = str(child.get("sourceObjectName") or "").strip()
+            if turbine_name:
+                turbine_name_to_station[turbine_name] = station_name
+            turbine_id = child.get("sourceObjectId")
+            if turbine_id is not None:
+                try:
+                    turbine_id_to_station[int(turbine_id)] = station_name
+                except (TypeError, ValueError):
+                    pass
+
+    flow_points: dict[str, list[float]] = {}
+    power_points: dict[str, list[float]] = {}
+
+    flow_df = df[(df["object_type"] == "CrossSection") & (df["metrics_code"] == "water_flow")].copy()
+    if not flow_df.empty and section_to_station:
+        flow_df["station_name"] = flow_df["object_name"].map(lambda name: section_to_station.get(str(name).strip()))
+        flow_df = flow_df[flow_df["station_name"].notna()].copy()
+        if not flow_df.empty:
+            grouped_flow = flow_df.groupby(["data_index", "station_name"])["value"].sum().reset_index()
+            for station_name, group in grouped_flow.groupby("station_name"):
+                flow_points[str(station_name)] = [float(value) for value in group["value"].tolist()]
+
+    turbine_df = select_turbine_output_rows(df).copy()
+    if not turbine_df.empty:
+        if "object_id" not in turbine_df.columns:
+            turbine_df["object_id"] = pd.NA
+
+        def map_turbine_station(row: pd.Series) -> str | None:
+            object_id = row.get("object_id")
+            if pd.notna(object_id):
+                try:
+                    station_name = turbine_id_to_station.get(int(float(object_id)))
+                    if station_name:
+                        return station_name
+                except (TypeError, ValueError):
+                    pass
+            object_name = str(row.get("object_name") or "").strip()
+            return turbine_name_to_station.get(object_name) or infer_station_name_from_turbine(object_name)
+
+        turbine_df["station_name"] = turbine_df.apply(map_turbine_station, axis=1)
+        turbine_df = turbine_df[turbine_df["station_name"].notna()].copy()
+        if not turbine_df.empty:
+            grouped_power = turbine_df.groupby(["data_index", "station_name"])["value"].sum().reset_index()
+            for station_name, group in grouped_power.groupby("station_name"):
+                power_points[str(station_name)] = [float(value) for value in group["value"].tolist()]
+
+    if not power_points and mpc_results_json:
+        payload = load_mpc_payload(mpc_results_json)
+        if payload:
+            node_labels: dict[int, str] = {}
+            for child in business_children or []:
+                if not is_station_business_category(child.get("businessCategory")):
+                    continue
+                business_object_id = child.get("businessObjectId")
+                if business_object_id is None:
+                    continue
+                try:
+                    node_labels[int(business_object_id)] = str(child.get("businessObjectName") or business_object_id)
+                except (TypeError, ValueError):
+                    continue
+
+            for item in payload.get("data") or []:
+                station_power: dict[str, float] = {}
+                for detail in item.get("hydro_mpc_details") or []:
+                    if str(detail.get("command_type") or "") != "output_power":
+                        continue
+                    node_id = detail.get("node_id")
+                    value = detail.get("value")
+                    if node_id is None or value is None:
+                        continue
+                    try:
+                        station_name = node_labels.get(int(node_id), f"Node {int(node_id)}")
+                        station_power[station_name] = station_power.get(station_name, 0.0) + float(value)
+                    except (TypeError, ValueError):
+                        continue
+                for station_name, station_value in station_power.items():
+                    power_points.setdefault(station_name, []).append(float(station_value))
+
+    stations = sorted((set(flow_points) | set(power_points) | station_names_from_catalog))
+    comparable_stations = [name for name in stations if flow_points.get(name) and power_points.get(name)]
+    if comparable_stations:
+        def station_score(name: str) -> float:
+            power_values = power_points.get(name, [])
+            flow_values = flow_points.get(name, [])
+            power_range = max(power_values) - min(power_values) if power_values else 0.0
+            flow_range = max(flow_values) - min(flow_values) if flow_values else 0.0
+            return float(power_range + flow_range)
+
+        highlight_station = max(comparable_stations, key=station_score)
+        return {
+            "available": True,
+            "stations": comparable_stations,
+            "analysis": (
+                f"已聚合 {len(comparable_stations)} 个梯级电站的闸前断面来流代理与机组总出力过程，"
+                f"覆盖 {format_station_names(comparable_stations)} 等站点，其中 {highlight_station} 的联动变化幅度最大。"
+                "解读时应重点关注来流抬升后出力是否同步抬升、出力峰谷相对来流是否存在明显滞后或过度放大，"
+                "以及相邻电站之间是否出现异常反相或平台切换；若来流基本平稳而出力频繁跳变，通常说明调度动作主导，"
+                "若来流变化明显而出力响应偏弱，则需继续复核过机流量分配、机组负荷约束或下游顶托影响。"
+            ),
+        }
+
+    power_only_stations = sorted(name for name in stations if power_points.get(name))
+    if power_only_stations:
+        return {
+            "available": False,
+            "stations": power_only_stations,
+            "analysis": (
+                f"已识别 {len(power_only_stations)} 个电站的机组总出力，但缺少对应闸前断面来流代理，"
+                f"当前仅覆盖 {format_station_names(power_only_stations)} 等站点，暂时无法生成完整的梯级电站来流-出力对比。"
+                "现阶段仍可用它比较各站出力水平、平台切换顺序和机组负荷分布，但不能据此判断来水-出力耦合关系、"
+                "站间传递是否顺畅或削峰填谷是否合理；后续补齐闸前断面来流代理后，应优先复核出力变化是否跟随来流变化、"
+                "是否存在异常滞后、放大或反向响应。"
+            ),
+        }
+
+    return {
+        "available": False,
+        "stations": [],
+        "analysis": (
+            "当前结果中未识别到可用于梯级电站来流-出力对比的站级来流代理或机组总出力序列。"
+            "在补齐站级来流代理或机组总出力前，不建议对梯级电站调度协调性、来水利用效率或站间能量传递关系给出正式结论。"
+        ),
+    }
+
+
+def summarize_station_output_composition(
+    df: pd.DataFrame,
+    business_children: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    turbine_name_to_station: dict[str, str] = {}
+    turbine_id_to_station: dict[int, str] = {}
+    turbine_df = select_turbine_output_rows(df).copy()
+    if turbine_df.empty:
+        return {
+            "available": False,
+            "stations": [],
+            "analysis": "当前结果未识别到可用于梯级总出力构成分析的机组出力序列。",
+        }
+
+    for child in business_children or []:
+        if child.get("sourceObjectType") != "Turbine" or not is_station_business_category(child.get("businessCategory")):
+            continue
+        station_name = str(child.get("businessObjectName") or "").strip()
+        turbine_name = str(child.get("sourceObjectName") or "").strip()
+        if station_name and turbine_name:
+            turbine_name_to_station[turbine_name] = station_name
+        turbine_id = child.get("sourceObjectId")
+        if station_name and turbine_id is not None:
+            try:
+                turbine_id_to_station[int(turbine_id)] = station_name
+            except (TypeError, ValueError):
+                pass
+
+    if "object_id" not in turbine_df.columns:
+        turbine_df["object_id"] = pd.NA
+
+    def map_station(row: pd.Series) -> str | None:
+        object_id = row.get("object_id")
+        if pd.notna(object_id):
+            try:
+                station_name = turbine_id_to_station.get(int(float(object_id)))
+                if station_name:
+                    return station_name
+            except (TypeError, ValueError):
+                pass
+        object_name = str(row.get("object_name") or "").strip()
+        return turbine_name_to_station.get(object_name) or infer_station_name_from_turbine(object_name)
+
+    turbine_df["station_name"] = turbine_df.apply(map_station, axis=1)
+    turbine_df = turbine_df[turbine_df["station_name"].notna()].copy()
+    if turbine_df.empty:
+        return {
+            "available": False,
+            "stations": [],
+            "analysis": "当前结果未建立起机组到电站的有效映射，无法生成梯级总出力构成图。",
+        }
+
+    grouped = turbine_df.groupby(["data_index", "station_name"])["value"].sum().reset_index()
+    station_totals = grouped.groupby("station_name")["value"].sum().sort_values(ascending=False)
+    station_names = [str(name) for name in station_totals.index.tolist()]
+    if not station_names:
+        return {
+            "available": False,
+            "stations": [],
+            "analysis": "当前结果缺少可用于梯级总出力构成分析的站级总出力数据。",
+        }
+    highlight_station = station_names[0]
+    total_output = float(station_totals.sum())
+    highlight_share = float(station_totals.iloc[0] / total_output) if total_output else 0.0
+    return {
+        "available": True,
+        "stations": station_names,
+        "analysis": (
+            f"已按电站汇总 {len(station_names)} 个梯级站点的总出力构成，"
+            f"其中 {highlight_station} 的累计出力占比最高，约为 {round_number(highlight_share * 100, 1)}%。"
+            "这张图适合直接观察不同电站在总发电任务中的分工、接力与退让关系；"
+            "若总出力平台切换主要由单一电站承担，应继续复核该站是否过度承担调节任务，"
+            "若多站占比在相邻时段连续切换，则更能体现梯级协同调度特征。"
+        ),
+    }
+
+
+def summarize_turbine_dispatch_heatmap(df: pd.DataFrame) -> dict[str, Any]:
+    turbine_df = select_turbine_output_rows(df).copy()
+    if turbine_df.empty:
+        return {
+            "available": False,
+            "turbines": [],
+            "analysis": "当前结果未识别到可用于机组负荷分配热力图的水轮机出力序列。",
+        }
+
+    grouped = turbine_df.groupby("object_name")["value"].agg(["min", "max", "mean"])
+    if grouped.empty:
+        return {
+            "available": False,
+            "turbines": [],
+            "analysis": "当前结果未形成可用于机组负荷分配热力图的有效机组出力统计。",
+        }
+
+    grouped["range"] = grouped["max"] - grouped["min"]
+    grouped = grouped.sort_values(["mean", "range"], ascending=[False, False])
+    turbine_names = [str(name) for name in grouped.index.tolist()]
+    highlight_turbine = turbine_names[0]
+    highlight_mean = float(grouped.iloc[0]["mean"])
+    highlight_range = float(grouped.iloc[0]["range"])
+    return {
+        "available": True,
+        "turbines": turbine_names,
+        "analysis": (
+            f"热力图覆盖 {len(turbine_names)} 台机组的全过程负荷分配，其中 {highlight_turbine} 的平均出力最高，"
+            f"约为 {round_number(highlight_mean, 2)}，变幅约 {round_number(highlight_range, 2)}。"
+            "这张图更适合看站内协同而不是单机趋势：颜色长期偏亮说明该机组长期承担主力，"
+            "颜色分段轮换说明存在负荷转移或轮机接力；若少数机组长期高负荷而其他机组接近冷备，"
+            "则应继续复核机组分配是否均衡、是否存在约束卡死或调度策略过度集中。"
+        ),
+    }
+
+
+def build_station_mappings(
+    business_children: list[dict[str, Any]] | None = None,
+) -> dict[str, dict[Any, str]]:
+    section_to_station: dict[str, str] = {}
+    turbine_name_to_station: dict[str, str] = {}
+    turbine_id_to_station: dict[int, str] = {}
+    station_names_from_catalog: set[str] = set()
+
+    for child in business_children or []:
+        station_name = str(child.get("businessObjectName") or "").strip()
+        if not station_name or not is_station_business_category(child.get("businessCategory")):
+            continue
+        station_names_from_catalog.add(station_name)
+        if child.get("sourceObjectType") == "CrossSection" and child.get("childRole") == "闸前断面":
+            section_name = str(child.get("sourceObjectName") or "").strip()
+            if section_name:
+                section_to_station[section_name] = station_name
+        elif child.get("sourceObjectType") == "Turbine":
+            turbine_name = str(child.get("sourceObjectName") or "").strip()
+            if turbine_name:
+                turbine_name_to_station[turbine_name] = station_name
+            turbine_id = child.get("sourceObjectId")
+            if turbine_id is not None:
+                try:
+                    turbine_id_to_station[int(turbine_id)] = station_name
+                except (TypeError, ValueError):
+                    pass
+
+    return {
+        "section_to_station": section_to_station,
+        "turbine_name_to_station": turbine_name_to_station,
+        "turbine_id_to_station": turbine_id_to_station,
+        "station_names_from_catalog": station_names_from_catalog,
+    }
+
+
+def build_coupling_chart_payload(
+    df: pd.DataFrame,
+    excluded_steps: set[int] | None = None,
+) -> dict[str, Any]:
+    working_df = df.copy()
+    if excluded_steps:
+        working_df = working_df[~working_df["data_index"].astype(int).isin(excluded_steps)].copy()
+
+    section_names = select_coupled_section_names(working_df)
+    if not section_names:
+        return {"available": False, "sections": []}
+
+    sections: list[dict[str, Any]] = []
+    for section_name in section_names:
+        level_group = working_df[
+            (working_df["object_type"] == "CrossSection")
+            & (working_df["metrics_code"] == "water_level")
+            & (working_df["object_name"] == section_name)
+        ].sort_values("data_index")
+        flow_group = working_df[
+            (working_df["object_type"] == "CrossSection")
+            & (working_df["metrics_code"] == "water_flow")
+            & (working_df["object_name"] == section_name)
+        ].sort_values("data_index")
+        if level_group.empty or flow_group.empty:
+            continue
+        sections.append(
+            {
+                "name": str(section_name),
+                "levelData": [
+                    [int(step), round_number(value, 3)]
+                    for step, value in zip(level_group["data_index"], level_group["value"])
+                ],
+                "flowData": [
+                    [int(step), round_number(value, 3)]
+                    for step, value in zip(flow_group["data_index"], flow_group["value"])
+                ],
+            }
+        )
+    return {"available": bool(sections), "sections": sections}
+
+
+def build_station_power_chart_payload(
+    df: pd.DataFrame,
+    business_children: list[dict[str, Any]] | None = None,
+    excluded_steps: set[int] | None = None,
+    mpc_results_json: str | None = None,
+) -> dict[str, Any]:
+    mappings = build_station_mappings(business_children)
+    section_to_station = mappings["section_to_station"]
+    turbine_name_to_station = mappings["turbine_name_to_station"]
+    turbine_id_to_station = mappings["turbine_id_to_station"]
+
+    working_df = df.copy()
+    if excluded_steps:
+        working_df = working_df[~working_df["data_index"].astype(int).isin(excluded_steps)].copy()
+
+    flow_points: dict[str, list[list[Any]]] = {}
+    power_points: dict[str, list[list[Any]]] = {}
+
+    flow_df = working_df[
+        (working_df["object_type"] == "CrossSection") & (working_df["metrics_code"] == "water_flow")
+    ].copy()
+    if not flow_df.empty and section_to_station:
+        flow_df["station_name"] = flow_df["object_name"].map(lambda name: section_to_station.get(str(name).strip()))
+        flow_df = flow_df[flow_df["station_name"].notna()].copy()
+        if not flow_df.empty:
+            grouped_flow = flow_df.groupby(["data_index", "station_name"])["value"].sum().reset_index()
+            for station_name, group in grouped_flow.groupby("station_name"):
+                flow_points[str(station_name)] = [
+                    [int(step), round_number(value, 3)]
+                    for step, value in zip(group["data_index"], group["value"])
+                ]
+
+    turbine_df = select_turbine_output_rows(working_df).copy()
+    if not turbine_df.empty:
+        if "object_id" not in turbine_df.columns:
+            turbine_df["object_id"] = pd.NA
+
+        def map_station(row: pd.Series) -> str | None:
+            object_id = row.get("object_id")
+            if pd.notna(object_id):
+                try:
+                    station_name = turbine_id_to_station.get(int(float(object_id)))
+                    if station_name:
+                        return station_name
+                except (TypeError, ValueError):
+                    pass
+            object_name = str(row.get("object_name") or "").strip()
+            return turbine_name_to_station.get(object_name) or infer_station_name_from_turbine(object_name)
+
+        turbine_df["station_name"] = turbine_df.apply(map_station, axis=1)
+        turbine_df = turbine_df[turbine_df["station_name"].notna()].copy()
+        if not turbine_df.empty:
+            grouped_power = turbine_df.groupby(["data_index", "station_name"])["value"].sum().reset_index()
+            for station_name, group in grouped_power.groupby("station_name"):
+                power_points[str(station_name)] = [
+                    [int(step), round_number(value, 3)]
+                    for step, value in zip(group["data_index"], group["value"])
+                ]
+
+    if not power_points and mpc_results_json:
+        payload = load_mpc_payload(mpc_results_json)
+        if payload:
+            node_labels: dict[int, str] = {}
+            for child in business_children or []:
+                if not is_station_business_category(child.get("businessCategory")):
+                    continue
+                business_object_id = child.get("businessObjectId")
+                if business_object_id is None:
+                    continue
+                try:
+                    node_labels[int(business_object_id)] = str(child.get("businessObjectName") or business_object_id)
+                except (TypeError, ValueError):
+                    continue
+
+            station_power_steps: dict[str, list[list[Any]]] = {}
+            for item in payload.get("data") or []:
+                step = item.get("step")
+                if step is None:
+                    continue
+                station_power: dict[str, float] = {}
+                for detail in item.get("hydro_mpc_details") or []:
+                    if str(detail.get("command_type") or "") != "output_power":
+                        continue
+                    node_id = detail.get("node_id")
+                    value = detail.get("value")
+                    if node_id is None or value is None:
+                        continue
+                    try:
+                        station_name = node_labels.get(int(node_id), f"Node {int(node_id)}")
+                        station_power[station_name] = station_power.get(station_name, 0.0) + float(value)
+                    except (TypeError, ValueError):
+                        continue
+                for station_name, station_value in station_power.items():
+                    station_power_steps.setdefault(station_name, []).append([int(step), round_number(station_value, 3)])
+            power_points.update(station_power_steps)
+
+    station_names = sorted(set(flow_points) | set(power_points))
+    stations = [
+        {
+            "name": station_name,
+            "flowData": flow_points.get(station_name, []),
+            "powerData": power_points.get(station_name, []),
+        }
+        for station_name in station_names
+        if flow_points.get(station_name) or power_points.get(station_name)
+    ]
+    return {"available": bool(stations), "stations": stations}
+
+
+def build_station_output_composition_chart_payload(
+    df: pd.DataFrame,
+    business_children: list[dict[str, Any]] | None = None,
+    excluded_steps: set[int] | None = None,
+) -> dict[str, Any]:
+    station_payload = build_station_power_chart_payload(
+        df,
+        business_children=business_children,
+        excluded_steps=excluded_steps,
+        mpc_results_json=None,
+    )
+    stations = [item for item in station_payload.get("stations", []) if item.get("powerData")]
+    if not stations:
+        return {"available": False, "steps": [], "stations": [], "totalData": []}
+
+    step_values = sorted(
+        {
+            int(point[0])
+            for station in stations
+            for point in station.get("powerData", [])
+            if point and point[0] is not None
+        }
+    )
+    if not step_values:
+        return {"available": False, "steps": [], "stations": [], "totalData": []}
+
+    station_series: list[dict[str, Any]] = []
+    total_by_step = {step: 0.0 for step in step_values}
+    station_totals: list[tuple[str, float]] = []
+
+    for station in stations:
+        point_map = {int(step): float(value) for step, value in station.get("powerData", [])}
+        data = []
+        total_value = 0.0
+        for step in step_values:
+            value = point_map.get(step, 0.0)
+            total_by_step[step] += value
+            total_value += value
+            data.append(round_number(value, 3))
+        station_totals.append((station["name"], total_value))
+        station_series.append({"name": station["name"], "data": data})
+
+    aggregate_total = sum(value for _, value in station_totals)
+    share_map = {
+        name: round_number((value / aggregate_total) * 100, 2) if aggregate_total else 0.0
+        for name, value in station_totals
+    }
+    for station in station_series:
+        station["share"] = share_map.get(station["name"], 0.0)
+
+    station_series.sort(
+        key=lambda item: (
+            -(float(item.get("share") or 0.0)),
+            str(item.get("name") or ""),
+        )
+    )
+    return {
+        "available": True,
+        "steps": step_values,
+        "stations": station_series,
+        "totalData": [round_number(total_by_step[step], 3) for step in step_values],
+    }
+
+
+def build_turbine_dispatch_heatmap_payload(
+    df: pd.DataFrame,
+    business_children: list[dict[str, Any]] | None = None,
+    excluded_steps: set[int] | None = None,
+) -> dict[str, Any]:
+    turbine_series = build_business_turbine_series(df, business_children, excluded_steps)
+    if not turbine_series:
+        return {"available": False, "steps": [], "turbines": [], "matrix": []}
+
+    step_values = sorted(
+        {
+            int(point[0])
+            for series in turbine_series
+            for point in series.get("data", [])
+            if point and point[0] is not None
+        }
+    )
+    if not step_values:
+        return {"available": False, "steps": [], "turbines": [], "matrix": []}
+
+    ranked_series = sorted(
+        turbine_series,
+        key=lambda item: (
+            -float(
+                sum(float(point[1]) for point in item.get("data", []) if len(point) >= 2)
+                / max(len(item.get("data", [])), 1)
+            ),
+            str(item.get("displayName") or item.get("name") or ""),
+        ),
+    )
+    step_index_map = {step: index for index, step in enumerate(step_values)}
+    matrix: list[list[Any]] = []
+    turbine_names: list[str] = []
+
+    for row_index, series in enumerate(ranked_series):
+        turbine_name = str(series.get("displayName") or series.get("name") or f"机组{row_index + 1}")
+        turbine_names.append(turbine_name)
+        for point in series.get("data", []):
+            if len(point) < 2:
+                continue
+            step = int(point[0])
+            if step not in step_index_map:
+                continue
+            matrix.append([step_index_map[step], row_index, round_number(point[1], 3)])
+
+    return {
+        "available": bool(matrix),
+        "steps": step_values,
+        "turbines": turbine_names,
+        "matrix": matrix,
+    }
+
+
+def summarize_turbine_dispatch_heatmap(df: pd.DataFrame) -> dict[str, Any]:
+    turbine_df = select_turbine_output_rows(df).copy()
+    if turbine_df.empty:
+        return {
+            "available": False,
+            "turbines": [],
+            "analysis": "当前结果未识别到可用于机组分组堆叠面积图的水轮机出力序列。",
+        }
+
+    grouped = turbine_df.groupby("object_name")["value"].agg(["min", "max", "mean"])
+    if grouped.empty:
+        return {
+            "available": False,
+            "turbines": [],
+            "analysis": "当前结果未形成可用于机组分组堆叠面积图的有效机组出力统计。",
+        }
+
+    grouped["range"] = grouped["max"] - grouped["min"]
+    grouped = grouped.sort_values(["mean", "range"], ascending=[False, False])
+    turbine_names = [str(name) for name in grouped.index.tolist()]
+    highlight_turbine = turbine_names[0]
+    highlight_mean = float(grouped.iloc[0]["mean"])
+    highlight_range = float(grouped.iloc[0]["range"])
+    total_mean = float(grouped["mean"].sum()) if not grouped.empty else 0.0
+    top3_share = float(grouped["mean"].head(3).sum() / total_mean) if total_mean > 0 else 0.0
+    mean_shares = (grouped["mean"] / total_mean).fillna(0.0) if total_mean > 0 else grouped["mean"] * 0.0
+    concentration_index = float((mean_shares.pow(2)).sum())
+    concentration_level = "偏高" if concentration_index >= 0.25 else ("中等" if concentration_index >= 0.16 else "偏低")
+    return {
+        "available": True,
+        "turbines": turbine_names,
+        "analysis": (
+            f"机组分组堆叠面积图覆盖 {len(turbine_names)} 台机组的全过程负荷分配，其中 {highlight_turbine} 的平均出力最高，"
+            f"约为 {round_number(highlight_mean, 2)}，变幅约 {round_number(highlight_range, 2)}；平均负荷前 3 台机组合计占比约 "
+            f"{round_number(top3_share * 100, 1)}%，集中度指数约 {round_number(concentration_index, 3)}，整体集中度 {concentration_level}。"
+            "这张图更适合直接看主力机组、接力机组和平台切换：若面积长期由少数机组主导，说明负荷承担偏集中；"
+            "若不同机组面积在相邻时段有明显此消彼长，则说明存在轮换接力；若总出力变化时总是由固定少数机组率先抬升或回落，"
+            "则应继续复核机组分配是否均衡、是否存在约束卡死或调度策略过度集中。"
+        ),
+    }
+
+
+def build_turbine_dispatch_heatmap_payload(
+    df: pd.DataFrame,
+    business_children: list[dict[str, Any]] | None = None,
+    excluded_steps: set[int] | None = None,
+) -> dict[str, Any]:
+    turbine_series = build_business_turbine_series(df, business_children, excluded_steps)
+    if not turbine_series:
+        return {"available": False, "steps": [], "turbines": [], "series": [], "totalData": [], "stationGroups": []}
+
+    step_values = sorted(
+        {
+            int(point[0])
+            for series in turbine_series
+            for point in series.get("data", [])
+            if point and point[0] is not None
+        }
+    )
+    if not step_values:
+        return {"available": False, "steps": [], "turbines": [], "series": [], "totalData": [], "stationGroups": []}
+
+    ranked_series = sorted(
+        turbine_series,
+        key=lambda item: (
+            str(item.get("businessObjectName") or ""),
+            -float(
+                sum(float(point[1]) for point in item.get("data", []) if len(point) >= 2)
+                / max(len(item.get("data", [])), 1)
+            ),
+            str(item.get("displayName") or item.get("name") or ""),
+        ),
+    )
+    step_index_map = {step: index for index, step in enumerate(step_values)}
+    chart_series: list[dict[str, Any]] = []
+    turbine_names: list[str] = []
+    total_data = [0.0 for _ in step_values]
+    grouped_names: dict[str, list[str]] = {}
+
+    for row_index, series in enumerate(ranked_series):
+        turbine_name = str(series.get("displayName") or series.get("name") or f"机组{row_index + 1}")
+        station_name = str(series.get("businessObjectName") or "未归属电站")
+        turbine_names.append(turbine_name)
+        grouped_names.setdefault(station_name, []).append(turbine_name)
+        values = [0.0 for _ in step_values]
+        for point in series.get("data", []):
+            if len(point) < 2:
+                continue
+            step = int(point[0])
+            if step not in step_index_map:
+                continue
+            index = step_index_map[step]
+            values[index] = float(point[1])
+            total_data[index] += float(point[1])
+        chart_series.append(
+            {
+                "name": turbine_name,
+                "stationName": station_name,
+                "data": [round_number(value, 3) for value in values],
+            }
+        )
+
+    station_groups = [
+        {"stationName": station_name, "turbines": names}
+        for station_name, names in grouped_names.items()
+    ]
+    return {
+        "available": bool(chart_series),
+        "steps": step_values,
+        "turbines": turbine_names,
+        "series": chart_series,
+        "totalData": [round_number(value, 3) for value in total_data],
+        "stationGroups": station_groups,
+    }
 
 
 def augment_dataframe_with_mpc_turbine_output(
@@ -618,8 +1535,30 @@ def augment_dataframe_with_mpc_turbine_output(
     working_df = pd.concat([working_df, append_df], ignore_index=True)
     return working_df, len(append_df)
 
+BUSINESS_CATEGORY_ORDER = {"渠道": 0, "闸站": 1, "电站": 1, "倒虹吸": 2, "分水口": 3, "其他": 9}
+STATION_BUSINESS_CATEGORIES = {"电站", "闸站"}
 
-BUSINESS_CATEGORY_ORDER = {"渠道": 0, "闸站": 1, "倒虹吸": 2, "分水口": 3, "其他": 9}
+
+def is_station_business_category(category: Any) -> bool:
+    return str(category or "").strip() in STATION_BUSINESS_CATEGORIES
+
+
+def classify_gate_section_role(section: dict[str, Any], ref: dict[str, Any], section_index: int) -> str:
+    role_hints = " ".join(
+        str(value or "").strip()
+        for value in (
+            ref.get("aliasName"),
+            ref.get("name"),
+            section.get("aliasName"),
+            section.get("alias_name"),
+            section.get("name"),
+        )
+    )
+    if "闸前" in role_hints:
+        return "闸前断面"
+    if "闸后" in role_hints:
+        return "闸后断面"
+    return "闸前断面" if ref.get("role") == "INLET" or section_index == 0 else "闸后断面"
 
 
 def parse_child_refs(block: str) -> list[dict[str, Any]]:
@@ -788,7 +1727,7 @@ def build_business_children(catalog: dict[str, Any] | None) -> list[dict[str, An
                 section = resolve_section_ref(ref, catalog)
                 if not section:
                     continue
-                role = "闸前断面" if ref.get("role") == "INLET" or section_index == 0 else "闸后断面"
+                role = classify_gate_section_role(section, ref, section_index)
                 children.append(
                     {
                         "sourceObjectType": "CrossSection",
@@ -805,11 +1744,28 @@ def build_business_children(catalog: dict[str, Any] | None) -> list[dict[str, An
                     }
                 )
             for gate_index, gate in enumerate(item.get("deviceRefs", [])):
-                if gate.get("type") != "Gate" or not gate.get("name"):
+                if gate.get("type") == "Gate" and gate.get("name"):
+                    children.append(
+                        {
+                            "sourceObjectType": "Gate",
+                            "sourceObjectName": gate["name"],
+                            "sourceObjectId": gate.get("id"),
+                            "businessCategory": category,
+                            "businessObjectName": item["name"],
+                            "businessObjectId": item["id"],
+                            "businessObjectLabel": object_label,
+                            "businessObjectOrder": object_order,
+                            "childRole": "闸门设备",
+                            "childOrder": 1000 + gate_index,
+                            "defaultSelected": True,
+                        }
+                    )
+                    continue
+                if gate.get("type") != "Turbine" or not gate.get("name"):
                     continue
                 children.append(
                     {
-                        "sourceObjectType": "Gate",
+                        "sourceObjectType": "Turbine",
                         "sourceObjectName": gate["name"],
                         "sourceObjectId": gate.get("id"),
                         "businessCategory": category,
@@ -817,8 +1773,8 @@ def build_business_children(catalog: dict[str, Any] | None) -> list[dict[str, An
                         "businessObjectId": item["id"],
                         "businessObjectLabel": object_label,
                         "businessObjectOrder": object_order,
-                        "childRole": "闸门设备",
-                        "childOrder": 1000 + gate_index,
+                        "childRole": "水轮机设备",
+                        "childOrder": 2000 + gate_index,
                         "defaultSelected": True,
                     }
                 )
@@ -1187,6 +2143,7 @@ def build_report_data(
     profile_error: str | None = None,
     location_map: dict[str, float] | None = None,
     objects_yaml_text: str | None = None,
+    mpc_results_json: str | None = None,
 ) -> dict[str, Any]:
     location_map = location_map or {}
     sort_key_func = create_object_sort_key(location_map)
@@ -1199,6 +2156,10 @@ def build_report_data(
     metric_counts = {key: int(value) for key, value in df["metrics_code"].value_counts().to_dict().items()}
     object_type_counts = {key: int(value) for key, value in df["object_type"].value_counts().to_dict().items()}
     scenario_requires_turbine_output = scenario_id in TURBINE_OUTPUT_REQUIRED_SCENARIOS
+    coupling_summary = summarize_level_flow_coupling(df)
+    station_power_summary = summarize_station_power_comparison(df, business_children, mpc_results_json)
+    station_output_summary = summarize_station_output_composition(df, business_children)
+    turbine_heatmap_summary = summarize_turbine_dispatch_heatmap(df)
 
     flow_df = df[df["metrics_code"] == "water_flow"].copy()
     level_df = df[df["metrics_code"] == "water_level"].copy()
@@ -1234,6 +2195,23 @@ def build_report_data(
         "gate_opening": set(int(step) for step in gate_display_df["data_index"].unique().tolist()),
         "output_power": set(int(step) for step in turbine_power_display_df["data_index"].unique().tolist()),
     }
+    coupling_chart = build_coupling_chart_payload(df, set(display_excluded_steps))
+    station_power_chart = build_station_power_chart_payload(
+        df,
+        business_children=business_children,
+        excluded_steps=set(display_excluded_steps),
+        mpc_results_json=mpc_results_json,
+    )
+    station_output_chart = build_station_output_composition_chart_payload(
+        df,
+        business_children=business_children,
+        excluded_steps=set(display_excluded_steps),
+    )
+    turbine_heatmap_chart = build_turbine_dispatch_heatmap_payload(
+        df,
+        business_children=business_children,
+        excluded_steps=set(display_excluded_steps),
+    )
 
     negative_flow = flow_display_df[flow_display_df["value"] < 0].copy()
     asset_status = asset_status or {"required": [], "missing": [], "complete": True}
@@ -1909,7 +2887,13 @@ def build_report_data(
                 df, "water_flow", business_children, set(placeholder_flow_steps), sort_key_func
             ),
             "gateSeries": build_business_gate_series(df, business_children, set(display_excluded_steps), sort_key_func),
-            "turbinePowerSeries": build_turbine_output_series(df, set(display_excluded_steps), sort_key_func),
+            "turbinePowerSeries": build_business_turbine_series(
+                df, business_children, set(display_excluded_steps), sort_key_func
+            ),
+            "couplingComparison": coupling_chart,
+            "stationPowerComparison": station_power_chart,
+            "stationOutputComposition": station_output_chart,
+            "turbineDispatchHeatmap": turbine_heatmap_chart,
         },
         "chartInterpretations": {
             "level": {
@@ -1941,6 +2925,26 @@ def build_report_data(
                 ),
                 "placeholder_steps": display_excluded_steps,
                 "dynamic_gate_count": dynamic_gate_count,
+            },
+            "coupling": {
+                "analysis": coupling_summary["analysis"],
+                "sections": coupling_summary["sections"],
+                "available": coupling_summary["available"],
+            },
+            "stationPower": {
+                "analysis": station_power_summary["analysis"],
+                "stations": station_power_summary["stations"],
+                "available": station_power_summary["available"],
+            },
+            "stationComposition": {
+                "analysis": station_output_summary["analysis"],
+                "stations": station_output_summary["stations"],
+                "available": station_output_summary["available"],
+            },
+            "turbineHeatmap": {
+                "analysis": turbine_heatmap_summary["analysis"],
+                "turbines": turbine_heatmap_summary["turbines"],
+                "available": turbine_heatmap_summary["available"],
             },
             "turbine": {
                 "analysis": (
@@ -2028,10 +3032,6 @@ def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
     profile = payload["longitudinalProfile"]
     asset_status = payload["analysisSummary"].get("report_assets", {})
     missing_assets = asset_status.get("missing", [])
-    turbine_required = bool(analysis.get("turbine_output_required"))
-    turbine_missing = bool(analysis.get("turbine_output_missing"))
-    turbine_series_count = int(analysis.get("turbine_output_series_count") or 0)
-    has_turbine_chart = "chart6_turbine_output_power.png" not in missing_assets
     anomaly_rows = "\n".join(
         f"| {item['priority']} | {item['object']} | {item['metric']} | {item['finding']} | {item['advice']} |"
         for item in payload["anomalies"]
@@ -2057,17 +3057,26 @@ def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
             f"- 报告图表产物存在缺失：`{'`、`'.join(missing_assets)}`。\n"
             "- HTML 页面已显式标注该问题；相关图表维度应按缺失范围降级解读，不应视为“完整图表已全部产出”。"
         )
-    turbine_section_markdown = ""
-    if turbine_required or turbine_series_count > 0:
-        turbine_section_markdown = f"""
-### 5. 水轮机出力
+    station_composition_markdown = ""
+    station_composition_info = payload["chartInterpretations"].get("stationComposition", {})
+    if station_composition_info.get("available"):
+        station_composition_markdown = f"""
+### 6. 梯级总出力构成
 
-{"![水轮机出力时序](../charts/chart6_turbine_output_power.png)" if has_turbine_chart else "本次未生成可用的水轮机出力图表。"}
+![梯级总出力构成](../charts/chart10_station_output_composition.png)
 
-{payload['chartInterpretations']['turbine']['analysis']} 当前共识别 `{turbine_series_count}` 条机组出力序列。
+{station_composition_info['analysis']} 这张图更适合从站间分工角度看“谁在承担主力、谁在接力调节、谁在平台切换时退让”。
 """
-        if turbine_missing:
-            turbine_section_markdown += "\n本次导出结果未包含梯级电站场景要求的水轮机出力记录，应视为导出不完整。\n"
+    turbine_heatmap_markdown = ""
+    turbine_heatmap_info = payload["chartInterpretations"].get("turbineHeatmap", {})
+    if turbine_heatmap_info.get("available"):
+        turbine_heatmap_markdown = f"""
+### 7. 机组分组堆叠面积图
+
+![机组分组堆叠面积图](../charts/chart11_turbine_dispatch_heatmap.png)
+
+{turbine_heatmap_info['analysis']} 这张图更适合直观看出哪些机组长期承担主力、哪些机组在相邻时段接力，以及负荷是否长期集中在少数机组。
+"""
     if "不可靠" in str(payload["meta"].get("time_axis_note", "")):
         conclusion_axis_line = (
             "- 本次结果文件在数值层面可用于结果分析，但时间信息不完整；"
@@ -2114,8 +3123,6 @@ def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
 - 指标数：`{payload['meta']['metric_count']}`
 - 结果覆盖步段：{payload['meta'].get('sample_step_note') or f"第 `{analysis['step_values'][0]}` 次至第 `{analysis['step_values'][-1]}` 次输出"}，共输出 `{payload['meta']['sampled_point_count']}` 次结果
 - 配置总输出步数：`{payload['meta']['total_steps']}`
-{"- 水轮机出力校核：" + ("缺失，需补充导出" if turbine_missing else f"已识别 {turbine_series_count} 条序列") if (turbine_required or turbine_series_count > 0) else ""}
-
 ## 执行摘要
 
 {payload['summaryParagraph']}
@@ -2170,7 +3177,21 @@ def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
 
 分流/退水节点侧呈现“少数动态、多数恒定”的特征。部分节点全程为零或维持恒定流量，更像稳态配水结果而非持续调节过程。
 
-{turbine_section_markdown}
+### 5. 水位-流量联动对比
+
+![关键断面水位-流量联动对比](../charts/chart8_level_flow_coupling.png)
+
+{payload['chartInterpretations']['coupling']['analysis']} 这张图更适合快速确认局部调节是“流量先变”还是“水位跟随”。
+
+### 6. 梯级电站来流-出力对比
+
+![梯级电站来流-出力对比](../charts/chart9_station_inflow_power_comparison.png)
+
+{payload['chartInterpretations']['stationPower']['analysis']} 可用于把站级调度结果和过程侧来流代理放在同一视图下复核。
+
+{station_composition_markdown}
+
+{turbine_heatmap_markdown}
 
 {profile_markdown}
 
@@ -2217,9 +3238,13 @@ def validate_required_report_assets(
         "chart4_gate_opening.png",
         "chart5_disturbance_flow.png",
         "chart7_longitudinal_profile.png",
+        "chart8_level_flow_coupling.png",
     ]
     if require_turbine_output:
         required_chart_names.append("chart6_turbine_output_power.png")
+        required_chart_names.append("chart9_station_inflow_power_comparison.png")
+        required_chart_names.append("chart10_station_output_composition.png")
+        required_chart_names.append("chart11_turbine_dispatch_heatmap.png")
     missing = [name for name in required_chart_names if not (charts_dir / name).exists()]
     if profile_dataset is None and "chart7_longitudinal_profile.png" not in missing:
         missing.append("chart7_longitudinal_profile.png")
@@ -2252,6 +3277,7 @@ def main() -> None:
         scenario_meta,
         args,
     )
+    coupling_summary = summarize_level_flow_coupling(df)
     scenario_id = str(df["biz_scenario_id"].iloc[0])
     if scenario_id in TURBINE_OUTPUT_REQUIRED_SCENARIOS and select_turbine_output_rows(df).empty and args.mpc_results_json:
         df, appended_turbine_rows = augment_dataframe_with_mpc_turbine_output(
@@ -2262,15 +3288,6 @@ def main() -> None:
         if appended_turbine_rows:
             df.to_csv(working_csv_path, index=False, encoding="utf-8")
             print(f"已通过 MPC 结果补齐水轮机出力记录: {appended_turbine_rows} 条")
-
-    chart_command = [sys.executable, str(CHART_SCRIPT), str(working_csv_path), str(paths["charts"])]
-    if runtime_config.total_steps is not None:
-        chart_command.extend(["--total-steps", str(runtime_config.total_steps)])
-    if runtime_config.sim_step_size is not None:
-        chart_command.extend(["--sim-step-size", str(runtime_config.sim_step_size)])
-    if runtime_config.output_step_size is not None:
-        chart_command.extend(["--output-step-size", str(runtime_config.output_step_size)])
-    run_command(chart_command)
 
     resolved_objects_yaml_url = args.objects_yaml_url or (scenario_meta or {}).get("objects_yaml_url")
     objects_yaml_path = None
@@ -2284,6 +3301,19 @@ def main() -> None:
             location_map = parse_object_locations(objects_yaml_text)
     except Exception as exc:
         print(f"objects.yaml 预取失败或解析 location 失败: {exc}")
+
+    chart_command = [sys.executable, str(CHART_SCRIPT), str(working_csv_path), str(paths["charts"])]
+    if runtime_config.total_steps is not None:
+        chart_command.extend(["--total-steps", str(runtime_config.total_steps)])
+    if runtime_config.sim_step_size is not None:
+        chart_command.extend(["--sim-step-size", str(runtime_config.sim_step_size)])
+    if runtime_config.output_step_size is not None:
+        chart_command.extend(["--output-step-size", str(runtime_config.output_step_size)])
+    if args.mpc_results_json:
+        chart_command.extend(["--mpc-results-json", str(args.mpc_results_json)])
+    if objects_yaml_path and objects_yaml_path.exists():
+        chart_command.extend(["--objects-yaml", str(objects_yaml_path)])
+    run_command(chart_command)
 
     profile_dataset = None
     profile_error = None
@@ -2324,6 +3354,7 @@ def main() -> None:
         profile_error,
         location_map,
         objects_yaml_text,
+        args.mpc_results_json,
     )
     write_html_assets(paths["report"], paths["data"], payload)
     write_markdown_report(paths["report"], payload)
@@ -2332,6 +3363,79 @@ def main() -> None:
     print(f"Markdown 报告: {paths['report'] / 'simulation_report.md'}")
     print(f"图表目录: {paths['charts']}")
     print(f"数据目录: {paths['data']}")
+
+
+def build_turbine_dispatch_heatmap_payload(
+    df: pd.DataFrame,
+    business_children: list[dict[str, Any]] | None = None,
+    excluded_steps: set[int] | None = None,
+) -> dict[str, Any]:
+    turbine_series = build_business_turbine_series(df, business_children, excluded_steps)
+    if not turbine_series:
+        return {"available": False, "steps": [], "turbines": [], "series": [], "totalData": [], "stationGroups": []}
+
+    step_values = sorted(
+        {
+            int(point[0])
+            for item in turbine_series
+            for point in item.get("data", [])
+            if len(point) >= 2 and point[0] is not None
+        }
+    )
+    ranked_series = sorted(
+        turbine_series,
+        key=lambda item: (
+            str(item.get("businessObjectName") or ""),
+            -float(
+                sum(float(point[1]) for point in item.get("data", []) if len(point) >= 2)
+                / max(len(item.get("data", [])), 1)
+            ),
+            str(item.get("displayName") or item.get("name") or ""),
+        ),
+    )
+    step_index_map = {step: index for index, step in enumerate(step_values)}
+    chart_series: list[dict[str, Any]] = []
+    turbine_names: list[str] = []
+    total_data = [0.0 for _ in step_values]
+    grouped_names: dict[str, list[str]] = {}
+
+    for row_index, series in enumerate(ranked_series):
+        turbine_name = str(series.get("displayName") or series.get("name") or f"机组{row_index + 1}").strip()
+        raw_station_name = str(series.get("businessObjectName") or "").strip()
+        inferred_station_name = infer_station_name_from_turbine(turbine_name)
+        station_name = raw_station_name if raw_station_name and raw_station_name != turbine_name else (inferred_station_name or "未归属电站")
+        turbine_names.append(turbine_name)
+        grouped_names.setdefault(station_name, []).append(turbine_name)
+        values = [0.0 for _ in step_values]
+        for point in series.get("data", []):
+            if len(point) < 2:
+                continue
+            step = int(point[0])
+            if step not in step_index_map:
+                continue
+            index = step_index_map[step]
+            values[index] = float(point[1])
+            total_data[index] += float(point[1])
+        chart_series.append(
+            {
+                "name": turbine_name,
+                "stationName": station_name,
+                "data": [round_number(value, 3) for value in values],
+            }
+        )
+
+    station_groups = [
+        {"stationName": station_name, "turbines": names}
+        for station_name, names in grouped_names.items()
+    ]
+    return {
+        "available": bool(chart_series),
+        "steps": step_values,
+        "turbines": turbine_names,
+        "series": chart_series,
+        "totalData": [round_number(value, 3) for value in total_data],
+        "stationGroups": station_groups,
+    }
 
 
 if __name__ == "__main__":
