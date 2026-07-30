@@ -109,7 +109,7 @@ def group_data(records):
     """按 (object_name, metrics_code, object_type) 分组"""
     groups = defaultdict(list)
     for r in records:
-        key = (r['object_name'], r['metrics_code'], r['object_type'])
+        key = (r.get('series_name') or r['object_name'], r['metrics_code'], r['object_type'])
         groups[key].append((r['data_index'], r['value']))
     for k in groups:
         groups[k].sort(key=lambda x: x[0])

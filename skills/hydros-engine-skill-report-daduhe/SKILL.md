@@ -114,6 +114,7 @@ description: |
 - “使用了正确 HTML 模板”不等于“形成了正式报告”。正式报告必须同时满足“模板来自 `assets/hydros-report-template/index.html`”和“底层数据来自当前 `biz_scene_instance_id` 的完整结果文件”这两个条件；任一条件不满足，都只能算未完成正式交付。
 - HTML 正式报告应尽量包含结果曲线图产物和渠道纵剖面图；若 `chart1_water_level.png`、`chart2_water_flow.png`、`chart4_gate_opening.png`、`chart5_disturbance_flow.png`、`chart7_longitudinal_profile.png` 中有缺失，仍可交付 HTML，但必须在报告正文里显式写明缺失项、缺失原因和影响范围，不能把缺图问题只留在聊天回复里解释。
 - 正式 HTML 报告生成完成后，默认先交付本地 `simulation_report.html`。如当前环境提供并验证了报告上传工具或 API，再上传并把接口返回结果作为交付结果的一部分；不要继续使用旧 `hydroos.cn` 匿名上传地址作为默认动作。
+- 当前报告链路中，`https://api.hydroos.pub/openapi/engine/api/v1/file/anonymous/upload/<biz_scene_instance_id>` 是 multipart 上传入口；上传成功后必须使用接口 `data` 字段返回的 `https://s3.hydroos.pub/report/...` 作为最终报告访问地址。不要把 API 接收路径机械替换到 `s3.hydroos.pub`，S3 域名只用于访问已落盘的报告对象。
 - 如果远端上传失败，明确报告“本地报告生成成功，远端上传失败”和接口错误，不要伪装成本地报告失败。
 - 直传命令模板如下。`Content-Type: multipart/form-data; boundary=...` 由 `curl --form` 自动生成，通常不要手写固定 boundary，避免请求头与 multipart 请求体不一致：
 
@@ -407,6 +408,8 @@ INIT -> WAITING_AGENTS -> READY -> STEPPING -> COMPLETED
    - **默认产出**：HTML 报告 + Markdown 报告（除非用户明确只要其中一种）
   - **HTML 报告**：对齐 `assets/hydros-report-template/index.html` 完整版结构，包含纵剖面与时序曲线联动；对 `200060` 必须额外展示梯级电站来流-出力对比、梯级总出力构成和机组分组堆叠面积图，其中机组图按站点分组下拉切换。
   - **主页面渲染**：对 `200060`，新增图表不能只生成图片文件；主页面必须同步渲染对应卡片、标题、说明文字和解读内容，不能只在 Markdown 里补充说明。
+  - **对照区要求**：对 `200060` 的正式报告，主页面应把 `chart8/9/10/11` 组织成统一的“水动力响应 vs MPC 调度对照”区块，至少包含主调节站、来流峰值变化、出力峰值变化、响应滞后/控制模式 4 个摘要指标，并补充“事件前后关键断面/站点响应解读”。
+  - **事件对齐要求**：若当前任务存在工况事件，`梯级电站来流-出力对比` 与 `水位-流量联动对比` 两个 ECharts 主图应尽量叠加工况事件步号/时点标记，避免事件说明与图表时间轴脱节。
   - **图表实现口径**：`chart8/9/10/11` 在 HTML 主页面必须优先走 `reportData.charts.* + ECharts` 渲染，不能再用静态 `<img>` 作为主展示实现；`charts/*.png` 仅作为 Markdown 报告、离线归档和缺省交付产物保留。
   - **Markdown 报告**：图文并茂，每张图表配套文字分析
   - **目录结构**：统一落盘到 `output/<biz_scene_instance_id>/`；其中 `report/` 存放报告，`charts/` 存放图表，`data/` 存放结果文件、`objects.yaml` 和分析中间文件
@@ -417,12 +420,12 @@ INIT -> WAITING_AGENTS -> READY -> STEPPING -> COMPLETED
      ```bash
      # 仅在当前环境确认该上传接口可用时执行。
      curl --location --request POST \
-       "https://api.hydroos.pub/engine/api/v1/file/anonymous/upload/<biz_scene_instance_id>" \
+       "https://api.hydroos.pub/openapi/engine/api/v1/file/anonymous/upload/<biz_scene_instance_id>" \
        --header "Accept: */*" \
        --form "file=@\"output/<biz_scene_instance_id>/report/simulation_report.html\""
      ```
 
-   - **上传约束**：如果 OpenAPI 返回 `ACCESS_UNAUTHORIZED`、网络错误或其他失败响应，应明确报告“本地报告生成成功，远端上传失败”，并给出接口返回错误
+   - **上传约束**：如果 OpenAPI 返回 `ACCESS_UNAUTHORIZED`、网络错误或其他失败响应，应明确报告“本地报告生成成功，远端上传失败”，并给出接口返回错误。默认上传成功时，还要验证 `data` 字段是 `https://s3.hydroos.pub/report/...`；最终只交付这个 S3 访问地址，不把 `api.hydroos.pub` 上传入口当作报告链接。
    - **失败处理**：如果 HTML 已生成但上传失败，要明确区分“本地报告生成成功”和“远端上传失败”，并把失败原因单独报告；不要伪装成整份报告都失败
 
 6. **模板选择**：

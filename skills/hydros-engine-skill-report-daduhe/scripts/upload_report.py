@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-上传 Hydros HTML 报告并输出可访问链接。
+上传 Hydros HTML 报告并输出 S3 可访问链接。
+
+文件通过 api.hydroos.pub 的 OpenAPI 入口上传，成功后由服务端返回
+https://s3.hydroos.pub/report/... 形式的最终报告地址。
 
 用法:
     python3 scripts/upload_report.py <biz_scene_instance_id> <html_report_path>
@@ -24,6 +27,7 @@ if hasattr(sys.stdout, "reconfigure"):
 DEFAULT_UPLOAD_URL_TEMPLATE = (
     "https://api.hydroos.pub/openapi/engine/api/v1/file/anonymous/upload/{biz_scene_instance_id}"
 )
+DEFAULT_REPORT_URL_PREFIX = "https://s3.hydroos.pub/report/"
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -107,6 +111,14 @@ def main() -> None:
     report_url = result.get("data")
     if not isinstance(report_url, str) or not report_url.strip():
         raise RuntimeError(f"上传成功但未返回有效链接: {json.dumps(result, ensure_ascii=False)}")
+    if (
+        args.upload_url_template == DEFAULT_UPLOAD_URL_TEMPLATE
+        and not report_url.startswith(DEFAULT_REPORT_URL_PREFIX)
+    ):
+        raise RuntimeError(
+            "上传成功但返回地址不属于预期的 S3 报告目录: "
+            f"{json.dumps(result, ensure_ascii=False)}"
+        )
 
     print(json.dumps(result, ensure_ascii=False, indent=2))
     print(report_url)

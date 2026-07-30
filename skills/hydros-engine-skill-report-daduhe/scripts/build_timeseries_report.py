@@ -190,9 +190,13 @@ def parse_datetime_text(value: str | None) -> datetime | None:
 
 
 def fetch_scenario_metadata(scenario_yaml_url: str) -> dict[str, Any] | None:
+    local_path = Path(scenario_yaml_url).expanduser()
     try:
-        with urllib.request.urlopen(normalize_remote_url(scenario_yaml_url), timeout=20) as response:
-            text = response.read().decode("utf-8")
+        if local_path.exists():
+            text = local_path.read_text(encoding="utf-8")
+        else:
+            with urllib.request.urlopen(normalize_remote_url(scenario_yaml_url), timeout=20) as response:
+                text = response.read().decode("utf-8")
     except Exception:
         return None
 
@@ -353,7 +357,8 @@ def build_metric_series(df: pd.DataFrame, metric: str, excluded_steps: set[int] 
     metric_df = df[df["metrics_code"] == metric].copy()
     if excluded_steps:
         metric_df = metric_df[~metric_df["data_index"].astype(int).isin(excluded_steps)].copy()
-    group_columns = ["object_name", "object_type"]
+    name_column = "series_name" if "series_name" in metric_df.columns else "object_name"
+    group_columns = [name_column, "object_type"]
     if "object_id" in metric_df.columns:
         group_columns.append("object_id")
     for group_key, group in metric_df.groupby(group_columns, sort=False, dropna=False):
@@ -693,6 +698,7 @@ def build_scenario_events_payload(
                 "eventId": str(event.get("hydro_event_id") or "-"),
                 "priority": str(event.get("priority") or "未提供"),
                 "injectMode": str(event.get("inject_mode") or "未提供"),
+                "step": int(auto_step) if auto_step is not None else None,
                 "stepText": step_text,
                 "scheduledTime": scheduled_time_text,
                 "seriesSummary": series_summary,
@@ -1292,6 +1298,195 @@ def summarize_turbine_dispatch_heatmap(df: pd.DataFrame) -> dict[str, Any]:
             "颜色分段轮换说明存在负荷转移或轮机接力；若少数机组长期高负荷而其他机组接近冷备，"
             "则应继续复核机组分配是否均衡、是否存在约束卡死或调度策略过度集中。"
         ),
+    }
+
+
+def _series_change_summary(points: list[list[Any]] | None) -> dict[str, Any]:
+    normalized: list[tuple[int, float]] = []
+    for point in points or []:
+        if not isinstance(point, (list, tuple)) or len(point) < 2:
+            continue
+        try:
+            normalized.append((int(point[0]), float(point[1])))
+        except (TypeError, ValueError):
+            continue
+    normalized.sort(key=lambda item: item[0])
+    if not normalized:
+        return {"range": 0.0, "peak_step": None, "peak_delta": 0.0}
+
+    peak_step = None
+    peak_delta = 0.0
+    peak_abs_delta = -1.0
+    for previous, current in zip(normalized, normalized[1:]):
+        delta = current[1] - previous[1]
+        if abs(delta) > peak_abs_delta:
+            peak_abs_delta = abs(delta)
+            peak_delta = float(delta)
+            peak_step = int(current[0])
+
+    values = [value for _, value in normalized]
+    return {
+        "range": float(max(values) - min(values)),
+        "peak_step": peak_step,
+        "peak_delta": peak_delta,
+    }
+
+
+def build_comparison_decision_summary(
+    station_power_chart: dict[str, Any],
+    station_output_chart: dict[str, Any],
+    scenario_events_payload: dict[str, Any],
+    scenario_event_responses: dict[str, Any],
+) -> dict[str, Any]:
+    object_type_label_map = {
+        "CrossSection": "断面",
+        "GateStation": "站点",
+        "Gate": "闸门",
+        "Turbine": "机组",
+    }
+    station_summaries: list[dict[str, Any]] = []
+    for station in station_power_chart.get("stations", []) or []:
+        flow_summary = _series_change_summary(station.get("flowData"))
+        power_summary = _series_change_summary(station.get("powerData"))
+        if not station.get("flowData") and not station.get("powerData"):
+            continue
+        station_summaries.append(
+            {
+                "name": str(station.get("name") or "-"),
+                "flow": flow_summary,
+                "power": power_summary,
+                "score": float(abs(flow_summary["peak_delta"]) + abs(power_summary["peak_delta"])),
+            }
+        )
+
+    if not station_summaries:
+        return {
+            "available": False,
+            "title": "水动力响应与 MPC 调度对照",
+            "summary": "当前缺少可用于形成站级来流-出力联动结论的数据。",
+            "narrative": "本轮尚未识别到同时具备来流代理与总出力序列的站点，暂时无法形成正式的水动力响应与 MPC 调度对照摘要。",
+            "cards": [],
+            "responseHighlights": [],
+        }
+
+    dominant_station = max(
+        station_summaries,
+        key=lambda item: (item["score"], item["flow"]["range"] + item["power"]["range"], item["name"]),
+    )
+    flow_peak_delta = float(dominant_station["flow"]["peak_delta"])
+    power_peak_delta = float(dominant_station["power"]["peak_delta"])
+    flow_peak_step = dominant_station["flow"]["peak_step"]
+    power_peak_step = dominant_station["power"]["peak_step"]
+    response_lag_steps = (
+        abs(int(power_peak_step) - int(flow_peak_step))
+        if flow_peak_step is not None and power_peak_step is not None
+        else None
+    )
+
+    top_station = None
+    top_share = None
+    composition_stations = station_output_chart.get("stations", []) or []
+    if composition_stations:
+        top_station = str(composition_stations[0].get("name") or dominant_station["name"])
+        try:
+            top_share = float(composition_stations[0].get("share"))
+        except (TypeError, ValueError):
+            top_share = None
+
+    if response_lag_steps is None:
+        control_mode = "待补数"
+    elif response_lag_steps <= 1 and (top_share or 0.0) >= 45:
+        control_mode = "首响主调"
+    elif response_lag_steps <= 2:
+        control_mode = "首响+接力"
+    else:
+        control_mode = "滞后调节"
+
+    response_highlights: list[dict[str, Any]] = []
+    for item in scenario_event_responses.get("items", []) or []:
+        responses = item.get("responses") or []
+        if not responses:
+            continue
+        top_response = responses[0]
+        metric_code = str(top_response.get("metricCode") or "")
+        delta_raw = top_response.get("delta")
+        try:
+            delta_value = float(delta_raw)
+        except (TypeError, ValueError):
+            delta_value = 0.0
+        object_type_label = object_type_label_map.get(str(top_response.get("objectType") or ""), "对象")
+        response_highlights.append(
+            {
+                "eventName": str(item.get("eventName") or "未命名事件"),
+                "eventStep": item.get("eventStep"),
+                "summary": str(item.get("summary") or ""),
+                "responseText": f"{object_type_label} {top_response.get('objectName') or '-'}{_format_event_response_delta(metric_code, delta_value)}",
+            }
+        )
+    response_highlights = response_highlights[:3]
+
+    event_focus = ""
+    event_items = scenario_events_payload.get("items", []) or []
+    if event_items:
+        first_event = event_items[0]
+        scheduled_time_text = first_event.get("scheduledTime")
+        event_focus = (
+            f"当前工况事件以 {first_event.get('name') or '首个事件'} 为主要观察锚点，"
+            f"注入步号 {first_event.get('stepText') or '-'}"
+            f"{f'，对应 {scheduled_time_text}' if scheduled_time_text else ''}。"
+        )
+
+    lag_text = f"{response_lag_steps} 个输出步" if response_lag_steps is not None else "暂无法推导"
+    top_share_text = f"{round_number(top_share, 1)}%" if top_share is not None else "暂无法推导"
+    flow_peak_text = f"{'增加' if flow_peak_delta >= 0 else '减小'} {round_number(abs(flow_peak_delta), 2)} m³/s"
+    power_peak_text = f"{'增加' if power_peak_delta >= 0 else '减小'} {round_number(abs(power_peak_delta), 2)} MW"
+    narrative = (
+        f"以 {dominant_station['name']} 作为主调节站复核时，可见其站级来流代理峰值变化约 {flow_peak_text}，"
+        f"对应总出力峰值变化约 {power_peak_text}，两者峰值响应间隔 {lag_text}。"
+        f"{f'当前总出力构成中，{top_station} 占比最高，约 {top_share_text}；' if top_station else ''}"
+        f"综合判断，本轮更接近“{control_mode}”的控制模式，适合结合事件前后断面/站点响应继续核对调度是否顺滑。"
+    )
+    if event_focus:
+        narrative = f"{narrative}{event_focus}"
+
+    concise_event_focus = ""
+    if event_items:
+        first_event = event_items[0]
+        scheduled_time_text = first_event.get("scheduledTime")
+        concise_event_focus = (
+            f"主要工况锚点为 {first_event.get('name') or '首个事件'}，"
+            f"注入步号 {first_event.get('stepText') or '-'}"
+            f"{f'，对应 {scheduled_time_text}' if scheduled_time_text else ''}。"
+        )
+
+    narrative_parts = [
+        f"本轮以 {dominant_station['name']} 作为主调节点复核。",
+        f"站级来流峰值变化约 {flow_peak_text}，对应总出力峰值变化约 {power_peak_text}，两者峰值响应间隔 {lag_text}。",
+    ]
+    if top_station:
+        narrative_parts.append(f"在总出力构成中，{top_station} 承担占比最高，约 {top_share_text}。")
+    narrative_parts.append(f"综合判断，本轮更接近“{control_mode}”的调节模式。")
+    if concise_event_focus:
+        narrative_parts.append(concise_event_focus)
+    narrative = "".join(narrative_parts)
+
+    return {
+        "available": True,
+        "title": "水动力响应与 MPC 调度对照",
+        "summary": narrative,
+        "narrative": narrative,
+        "cards": [
+            {"label": "主调节站", "value": dominant_station["name"], "hint": "站级来流代理与总出力峰值综合最显著"},
+            {"label": "来流峰值变化", "value": flow_peak_text, "hint": f"峰值步号 {flow_peak_step if flow_peak_step is not None else '-'}"},
+            {"label": "出力峰值变化", "value": power_peak_text, "hint": f"峰值步号 {power_peak_step if power_peak_step is not None else '-'}"},
+            {"label": "响应滞后 / 模式", "value": lag_text, "hint": control_mode},
+        ],
+        "dominantStation": dominant_station["name"],
+        "peakInflowDelta": round_number(flow_peak_delta, 3),
+        "peakPowerDelta": round_number(power_peak_delta, 3),
+        "responseLagSteps": response_lag_steps,
+        "controlMode": control_mode,
+        "responseHighlights": response_highlights,
     }
 
 
@@ -2484,7 +2679,6 @@ def build_report_data(
         business_children=business_children,
         excluded_steps=set(display_excluded_steps),
     )
-
     negative_flow = flow_display_df[flow_display_df["value"] < 0].copy()
     asset_status = asset_status or {"required": [], "missing": [], "complete": True}
     zero_flow_groups = []
@@ -2506,7 +2700,9 @@ def build_report_data(
                 }
             )
 
-    for (object_name, object_type), group in flow_display_df.groupby(["object_name", "object_type"], sort=False):
+    flow_name_column = "series_name" if "series_name" in flow_display_df.columns else "object_name"
+    level_name_column = "series_name" if "series_name" in level_display_df.columns else "object_name"
+    for (object_name, object_type), group in flow_display_df.groupby([flow_name_column, "object_type"], sort=False):
         values = group["value"]
         if (values == 0).all():
             zero_flow_groups.append((object_name, object_type, group))
@@ -2524,13 +2720,13 @@ def build_report_data(
             dynamic_gate_groups.append((object_name, ordered, change_steps))
 
     flow_range = (
-        flow_display_df.groupby(["object_name", "object_type"])["value"]
+        flow_display_df.groupby([flow_name_column, "object_type"])["value"]
         .agg(["min", "max", "mean", "std"])
         .assign(range=lambda frame: frame["max"] - frame["min"])
         .sort_values("range", ascending=False)
     )
     level_range = (
-        level_display_df.groupby(["object_name", "object_type"])["value"]
+        level_display_df.groupby([level_name_column, "object_type"])["value"]
         .agg(["min", "max", "mean", "std"])
         .assign(range=lambda frame: frame["max"] - frame["min"])
         .sort_values("range", ascending=False)
@@ -2552,7 +2748,7 @@ def build_report_data(
         highlight_flow_name, highlight_flow_type = flow_range.index[0]
         highlight_flow_stats = flow_range.iloc[0]
         highlight_flow_group = flow_display_df[
-            (flow_display_df["object_name"] == highlight_flow_name) & (flow_display_df["object_type"] == highlight_flow_type)
+            (flow_display_df[flow_name_column] == highlight_flow_name) & (flow_display_df["object_type"] == highlight_flow_type)
         ]
     highlight_flow_window_text = describe_variation_window(highlight_flow_group)
     highlight_flow_display_name = highlight_flow_name or "流量结果序列"
@@ -2597,6 +2793,30 @@ def build_report_data(
         level_drop = round_number((start_level or 0) - (end_level or 0))
 
     anomaly_items: list[dict[str, str]] = []
+    negative_points = int(len(negative_flow))
+    negative_object_count = int(negative_flow.groupby([flow_name_column, "object_type"]).ngroups)
+    negative_min_value = float(negative_flow["value"].min()) if not negative_flow.empty else None
+    if not negative_flow.empty:
+        negative_stats = (
+            negative_flow.groupby([flow_name_column, "object_type"])["value"]
+            .agg(["count", "min"])
+            .sort_values("min", ascending=True)
+        )
+        worst_negative_name, _ = negative_stats.index[0]
+        worst_negative_stats = negative_stats.iloc[0]
+        anomaly_items.append(
+            {
+                "priority": "高",
+                "object": str(worst_negative_name),
+                "metric": "water_flow",
+                "finding": (
+                    f"检测到 {negative_points} 个负流量点、涉及 {negative_object_count} 条序列；"
+                    f"其中该序列最小值为 {round_number(worst_negative_stats['min'])} m³/s，"
+                    f"负值点数为 {int(worst_negative_stats['count'])}。"
+                ),
+                "advice": "按倒流异常处理，优先复核上下游水位差、稳态缓存、初始条件与控制命令生效时序。",
+            }
+        )
     if zero_flow_groups:
         object_name, _, group = zero_flow_groups[0]
         anomaly_items.append(
@@ -2675,7 +2895,6 @@ def build_report_data(
             }
         )
 
-    negative_points = int(len(negative_flow))
     zero_flow_count = len(zero_flow_groups)
     constant_flow_count = len(constant_flow_groups)
     dynamic_gate_count = len(dynamic_gate_groups)
@@ -2716,6 +2935,25 @@ def build_report_data(
         scenario_events_raw,
         simulation_start_dt,
         step_resolution_seconds,
+    )
+    comparison_event_markers = [
+        {
+            "name": str(item.get("name") or "未命名事件"),
+            "step": int(item["step"]),
+            "scheduledTime": item.get("scheduledTime"),
+            "priority": item.get("priority"),
+        }
+        for item in scenario_events_payload.get("items", [])
+        if item.get("step") is not None
+    ]
+    if comparison_event_markers:
+        coupling_chart["eventMarkers"] = comparison_event_markers
+        station_power_chart["eventMarkers"] = comparison_event_markers
+    comparison_decision_summary = build_comparison_decision_summary(
+        station_power_chart,
+        station_output_chart,
+        scenario_events_payload,
+        scenario_event_responses,
     )
     output_interval_seconds = runtime_config.output_step_size
     # Hydros total duration is counted in output intervals; sim_step_size is only
@@ -2807,6 +3045,14 @@ def build_report_data(
         else None
     )
     leading_zero_flow_name = zero_flow_groups[0][0] if zero_flow_groups else None
+    flow_condition_text = (
+        (
+            f"检测到 {negative_points} 个负流量点，涉及 {negative_object_count} 条序列，"
+            f"最小值为 {round_number(negative_min_value)} m³/s，存在显著倒流风险"
+        )
+        if negative_points
+        else "未发现负流量"
+    )
 
     summary_paragraphs = [
         (
@@ -2817,12 +3063,15 @@ def build_report_data(
             f"覆盖仿真第 {unique_steps[0]} 步至第 {unique_steps[-1]} 步。"
         ),
         (
-            f"结果表明，研究区整体保持稳定输水，未发现明显倒流和突发水位失稳；"
+            f"结果表明，{flow_condition_text}；"
             f"主干断面在最后时刻的沿程水头损失约 {level_drop} m，整体仍符合上游高、下游低的基本水力梯度。"
             f"当前需要重点关注的是个别退水闸零流量，以及 {highlight_flow_name} 的局部流量最大变化幅度较大。"
         ),
         (
+            f"综合分析认为，当前结果存在显著倒流异常，" if negative_points else
             f"综合分析认为，当前结果反映出方案总体运行平稳，"
+        )
+        + (
             f"但 {recommendation_target_text} 等敏感区段仍需进一步做重点核查。"
             f"建议下一阶段补充 {'、'.join(recommendation_actions)}，"
             f"以降低局部变化误判风险，并为后续设计复核和调度判断提供支撑。"
@@ -2858,7 +3107,7 @@ def build_report_data(
         {
             "title": "运行表现",
             "body": (
-                f"研究区整体保持稳定输水，未发现明显倒流；"
+                f"流向核查结果显示：{flow_condition_text}；"
                 f"主干断面最后时刻沿程水头损失约 {level_drop} m，整体仍保持上游高、下游低的基本趋势。"
             ),
         },
@@ -2995,7 +3244,7 @@ def build_report_data(
     overall_operation_text = (
         "主干渠整体保持稳定输水，未见明显倒流和突发失稳"
         if negative_flow.empty
-        else "主干渠整体可运行，但存在局部倒流风险"
+        else f"检测到 {negative_points} 个负流量点，存在显著倒流风险"
     )
     overall_control_text = (
         "闸门调节过程总体平稳"
@@ -3091,10 +3340,11 @@ def build_report_data(
             "object_count": int(df["object_name"].nunique()),
             "metric_count": int(df["metrics_code"].nunique()),
             "negative_flow_points": negative_points,
-            "negative_flow_objects": int(negative_flow["object_name"].nunique()),
+            "negative_flow_objects": negative_object_count,
+            "negative_flow_min_value": round_number(negative_min_value),
             "zero_flow_objects": zero_flow_count,
-            "water_level_series_count": int(level_df.groupby(["object_name", "object_type"]).ngroups),
-            "water_flow_series_count": int(flow_df.groupby(["object_name", "object_type"]).ngroups),
+            "water_level_series_count": int(level_df.groupby(["series_name", "object_type"]).ngroups),
+            "water_flow_series_count": int(flow_df.groupby(["series_name", "object_type"]).ngroups),
             "gate_series_count": int(gate_df.groupby("object_name").ngroups),
             "turbine_output_series_count": int(turbine_power_df.groupby("object_name").ngroups) if not turbine_power_df.empty else 0,
             "turbine_output_required": scenario_requires_turbine_output,
@@ -3144,6 +3394,7 @@ def build_report_data(
         "summaryBullets": summary_bullets,
         "scenarioEvents": scenario_events_payload,
         "scenarioEventResponses": scenario_event_responses,
+        "comparisonDecisionSummary": comparison_decision_summary,
         "anomalies": anomaly_items,
         "recommendations": recommendations,
         "riskBars": [
@@ -3195,7 +3446,12 @@ def build_report_data(
             "flow": {
                 "analysis": (
                     (
-                        f"流量结果曲线以稳定输水为主，{highlight_flow_name} 的最大变化幅度为 "
+                        (
+                            "流量结果存在显著负值，不能按稳定顺向输水解读；"
+                            if negative_points
+                            else "流量结果曲线以稳定输水为主，"
+                        )
+                        + f"{highlight_flow_name} 的最大变化幅度为 "
                         f"{round_number(highlight_flow_range_value)} m³/s。"
                     )
                     if highlight_flow_stats is not None
@@ -3319,8 +3575,18 @@ def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
     profile = payload["longitudinalProfile"]
     scenario_events = payload.get("scenarioEvents", {})
     scenario_event_responses = payload.get("scenarioEventResponses", {})
+    comparison_summary = payload.get("comparisonDecisionSummary", {})
     asset_status = payload["analysisSummary"].get("report_assets", {})
     missing_assets = asset_status.get("missing", [])
+    negative_points = int(payload.get("meta", {}).get("negative_flow_points") or 0)
+    negative_objects = int(payload.get("meta", {}).get("negative_flow_objects") or 0)
+    negative_min_value = payload.get("meta", {}).get("negative_flow_min_value")
+    flow_direction_statement = (
+        f"检测到 {negative_points} 个负流量点，涉及 {negative_objects} 条序列，"
+        f"最小值 {negative_min_value} m³/s，不能判定为稳定顺向输水。"
+        if negative_points
+        else "未检测到负流量，当前结果未见明显倒流。"
+    )
     anomaly_rows = "\n".join(
         f"| {item['priority']} | {item['object']} | {item['metric']} | {item['finding']} | {item['advice']} |"
         for item in payload["anomalies"]
@@ -3339,6 +3605,21 @@ def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
 ### 6. 渠道纵剖面
 
 本次未生成渠道纵剖面图。原因：{profile.get('reason') or payload['analysisSummary'].get('profile_error') or '缺少对象高程/里程数据或生成链路失败'}。
+"""
+    comparison_summary_markdown = ""
+    if comparison_summary.get("available"):
+        response_rows = "\n".join(
+            f"- {item['eventName']}：{item['responseText']}。{item['summary']}"
+            for item in comparison_summary.get("responseHighlights", [])
+        )
+        if not response_rows:
+            response_rows = "- 当前尚未提炼出可稳定复用的事件前后关键响应摘要。"
+        comparison_summary_markdown = f"""
+### 7. 水动力响应与 MPC 调度对照摘要
+
+{comparison_summary.get('narrative') or comparison_summary.get('summary') or '当前已形成站级来流-出力对照摘要。'}
+
+{response_rows}
 """
     asset_issue_markdown = ""
     if missing_assets:
@@ -3397,7 +3678,8 @@ def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
     scenario_events_markdown = ""
     if scenario_events.get("available"):
         event_rows = "\n".join(
-            f"| {item['name']} | {item['stepText']} | {item.get('scheduledTime') or '-'} | {item['priority']} | {item['description']} |"
+            f"| {item['name']} | {item['stepText']} | {item.get('scheduledTime') or '-'} | "
+            f"{item['priority']} | {item.get('seriesSummary') or '-'} | {item['description']} |"
             for item in scenario_events.get("items", [])
         )
         response_lookup = {
@@ -3430,8 +3712,8 @@ def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
 
 {scenario_events.get('summary')}
 
-| 事件 | 注入步号 | 推导时间 | 优先级 | 说明 |
-| --- | --- | --- | --- | --- |
+| 事件 | 注入步号 | 推导时间 | 优先级 | 作用对象/时序 | 说明 |
+| --- | --- | --- | --- | --- | --- |
 {event_rows}
 
 ### 事件前后关键断面/站点响应
@@ -3500,7 +3782,7 @@ def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
 
 ![关键断面流量时序](../charts/chart2_water_flow.png)
 
-{payload['chartInterpretations']['flow']['analysis']} 主干断面流量大多维持在 `25 ~ 29 m³/s` 区间，没有出现负流量，表明主流方向稳定。
+{payload['chartInterpretations']['flow']['analysis']} {flow_direction_statement}
 
 ### 3. 闸门开度
 
@@ -3513,6 +3795,8 @@ def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
 ![分水口流量时序](../charts/chart5_disturbance_flow.png)
 
 分流/退水节点侧呈现“少数动态、多数恒定”的特征。部分节点全程为零或维持恒定流量，更像稳态配水结果而非持续调节过程。
+
+{comparison_summary_markdown}
 
 ### 5. 水位-流量联动对比
 
@@ -3537,7 +3821,7 @@ def write_markdown_report(report_dir: Path, payload: dict[str, Any]) -> None:
 {conclusion_axis_line}
 {conclusion_duration_line}
 {asset_issue_markdown}
-- 系统整体稳定，无倒流、无明显水位异常变化，适合作为一次稳定工况分析样本。
+- {flow_direction_statement}
 - 建议优先复核零流量或恒定流量节点的合理性，以及 `{analysis['top_flow_variation']['object_name']}` 的局部变化原因。
 - 若下一步要做动态评估，建议增加事件注入或更细粒度输出。
 

@@ -38,7 +38,7 @@ def load_data(filepath):
 def group_by_object_metric(records):
     groups = defaultdict(list)
     for r in records:
-        key = (r['object_name'], r['metrics_code'], r['object_type'])
+        key = (r.get('series_name') or r['object_name'], r['metrics_code'], r['object_type'])
         groups[key].append((r['data_index'], r['value']))
     for k in groups:
         groups[k].sort()
@@ -54,6 +54,21 @@ def detect_negative_flow(groups):
         neg_vals = [(step, val) for step, val in data if val < 0]
         if neg_vals:
             min_val = min(v for _, v in neg_vals)
+            longest_run = 0
+            current_run = 0
+            for _, value in data:
+                if value < 0:
+                    current_run += 1
+                    longest_run = max(longest_run, current_run)
+                else:
+                    current_run = 0
+            sign_changes = sum(
+                1
+                for (_, previous), (_, current) in zip(data, data[1:])
+                if (previous < 0 <= current) or (previous >= 0 > current)
+            )
+            negative_ratio = len(neg_vals) / len(data)
+            pattern = '持续性倒流' if negative_ratio >= 0.2 or longest_run >= 3 else '瞬时倒流'
             issues.append({
                 'severity': 'HIGH',
                 'type': '负流量（倒流）',
@@ -61,10 +76,16 @@ def detect_negative_flow(groups):
                 'object_type': otype,
                 'count': len(neg_vals),
                 'total_points': len(data),
-                'ratio': f"{len(neg_vals)/len(data)*100:.1f}%",
+                'ratio': f"{negative_ratio*100:.1f}%",
                 'min_value': round(min_val, 2),
                 'first_step': neg_vals[0][0],
-                'description': f"{name} 出现 {len(neg_vals)} 个负流量数据点（占 {len(neg_vals)/len(data)*100:.1f}%），最大反向流量 {min_val:.2f} m³/s"
+                'longest_negative_run': longest_run,
+                'sign_changes': sign_changes,
+                'pattern': pattern,
+                'description': (
+                    f"{name} 出现 {len(neg_vals)} 个负流量数据点（占 {negative_ratio*100:.1f}%），"
+                    f"最长连续 {longest_run} 步，最大反向流量 {min_val:.2f} m³/s，判定为{pattern}"
+                )
             })
     return sorted(issues, key=lambda x: x['min_value'])
 

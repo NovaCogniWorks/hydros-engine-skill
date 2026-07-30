@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Hydros 仿真分析报告模板</title>
+    <title>Hydros 仿真分析报告</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%231e5f86'/%3E%3Cpath d='M18 38c4-10 8-15 14-15s10 5 14 15' fill='none' stroke='white' stroke-width='5' stroke-linecap='round'/%3E%3Ccircle cx='32' cy='22' r='5' fill='white'/%3E%3C/svg%3E" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -703,7 +703,7 @@
         <section class="hero-section border-b border-line/80 px-6 py-8 lg:px-10 lg:py-10">
           <div>
             <div class="flex min-w-0 w-full flex-col justify-between">
-              <h1 id="reportTitle" class="mt-5 max-w-full break-words text-center text-[2.35rem] font-semibold tracking-[0.01em] text-ink lg:text-[3.6rem] lg:leading-[0.98]">水力仿真结果分析报告</h1>
+              <h1 id="reportTitle" class="mt-5 max-w-full break-words text-center text-[2.35rem] font-semibold tracking-[0.01em] text-ink lg:text-[3.6rem] lg:leading-[0.98]">Hydros 仿真分析报告</h1>
             </div>
           </div>
         </section>
@@ -733,7 +733,7 @@
               </div>
             </article>
 
-            <article id="scenarioEventSection" class="section-shell min-w-0 rounded-[30px] p-5 lg:col-span-2 lg:col-start-1 lg:row-start-4">
+            <article id="scenarioEventSection" class="section-shell min-w-0 rounded-[30px] p-5 lg:col-span-2 lg:col-start-1 lg:row-start-3">
               <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                 <div>
                   <h2 class="mt-2 text-2xl font-semibold">工况事件</h2>
@@ -816,7 +816,82 @@
               </div>
             </article>
 
-            <article class="section-shell min-w-0 rounded-[30px] p-5 lg:col-span-2 lg:col-start-1 lg:row-start-5">
+            <article id="comparisonSection" class="section-shell min-w-0 rounded-[30px] p-5 lg:col-span-2 lg:col-start-1 lg:row-start-5">
+              <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <h2 class="mt-2 text-2xl font-semibold">水动力响应与 MPC 调度对照</h2>
+                  <p class="mt-2 max-w-3xl text-sm leading-7 text-ink/58">把来流变化、关键断面响应、站级总出力和机组分工放在同一决策视图里，直接回答“谁先动、谁接力、是否调得顺”。</p>
+                </div>
+              </div>
+              <div class="mt-5 space-y-5">
+                <section id="comparisonDecisionSection" class="headline-card rounded-[26px] p-5">
+                  <div class="soft-panel rounded-[22px] px-5 py-4">
+                    <div class="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+                      <div class="flex flex-wrap items-center gap-3">
+                        <span class="hero-chip">本轮控制结论</span>
+                        <p class="text-[11px] font-semibold tracking-[0.16em] text-primary/58">先看 4 个摘要指标，再看关键工况响应</p>
+                      </div>
+                      <p class="text-[13px] leading-6 text-ink/56">把事件步号、断面变化、站级出力和机组接力放到同一条判断链里，直接判断调度是否顺滑。</p>
+                    </div>
+                  </div>
+                  <div id="comparisonDecisionSummaryCards" class="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4"></div>
+                  <div class="mt-4 grid gap-4 xl:grid-cols-[1.12fr,0.88fr]">
+                    <div class="soft-panel rounded-[20px] px-5 py-5">
+                      <div class="flex items-center justify-between gap-3">
+                        <div>
+                          <p class="text-[11px] font-semibold tracking-[0.16em] text-primary/58">综合判断</p>
+                          <p class="mt-2 text-[1.12rem] font-semibold text-ink">结论解读</p>
+                        </div>
+                      </div>
+                      <div id="comparisonDecisionNarrative" class="mt-4 text-sm leading-7 text-ink/72"></div>
+                    </div>
+                    <div class="soft-panel rounded-[20px] px-5 py-5">
+                      <div class="flex flex-col gap-1">
+                        <p class="text-[11px] font-semibold tracking-[0.16em] text-primary/58">工况事件响应</p>
+                        <p class="text-[1.12rem] font-semibold text-ink">关键响应摘录</p>
+                      </div>
+                      <div id="comparisonResponseHighlights" class="mt-4 space-y-3 text-sm leading-7 text-ink/72"></div>
+                    </div>
+                  </div>
+                </section>
+                <div class="grid gap-4 xl:grid-cols-2">
+                  <div id="stationPowerPanel" class="soft-panel rounded-[24px] p-4">
+                    <h3 class="text-base font-semibold">梯级电站来流-出力对比</h3>
+                    <p class="mt-1 text-sm text-ink/62">用于把站级来流代理与总出力过程放到同一视图中复核，并叠加工况事件时点。</p>
+                    <div id="stationPowerChart" class="chart-canvas chart-canvas--standard mt-3 rounded-[18px] border border-line bg-white/80"></div>
+                    <div id="stationPowerText" class="soft-panel mt-3 rounded-[18px] px-4 py-3 text-sm leading-7 text-ink/72"></div>
+                  </div>
+                  <div id="couplingComparisonPanel" class="soft-panel rounded-[24px] p-4">
+                    <h3 class="text-base font-semibold">水位-流量联动对比</h3>
+                    <p class="mt-1 text-sm text-ink/62">用于快速确认同一断面内水位与流量的同步或滞后关系，并与事件时点对齐。</p>
+                    <div id="couplingComparisonChart" class="chart-canvas chart-canvas--standard mt-3 rounded-[18px] border border-line bg-white/80"></div>
+                    <div id="couplingComparisonText" class="soft-panel mt-3 rounded-[18px] px-4 py-3 text-sm leading-7 text-ink/72"></div>
+                  </div>
+                  <div id="stationCompositionPanel" class="soft-panel rounded-[24px] p-4">
+                    <h3 class="text-base font-semibold">梯级总出力构成</h3>
+                    <p class="mt-1 text-sm text-ink/62">用于直观看各电站在总发电任务中的分工、接力与退让关系。</p>
+                    <div id="stationCompositionChart" class="chart-canvas chart-canvas--standard mt-3 rounded-[18px] border border-line bg-white/80"></div>
+                    <div id="stationCompositionText" class="soft-panel mt-3 rounded-[18px] px-4 py-3 text-sm leading-7 text-ink/72"></div>
+                  </div>
+                  <div id="turbineHeatmapPanel" class="soft-panel rounded-[24px] p-4">
+                    <h3 class="text-base font-semibold">机组分组堆叠面积图</h3>
+                    <p class="mt-1 text-sm text-ink/62">用于从机组层面直观看主力承担、轮换接力与负荷集中度。</p>
+                    <div class="curve-filter-panel mt-2 flex flex-col gap-2">
+                      <div class="curve-filter-row">
+                        <select id="turbineHeatmapStationSelect" class="shrink-0 rounded-lg border border-line px-3 py-1.5 text-xs text-ink/72 focus:outline-primary"></select>
+                        <div id="turbineHeatmapStationHint" class="curve-search-input flex items-center rounded-lg border border-line px-3 py-1.5 text-xs text-ink/62">
+                          按站点切换后，仅展示当前站点机组的堆叠构成与站内总出力。
+                        </div>
+                      </div>
+                    </div>
+                    <div id="turbineHeatmapChart" class="chart-canvas chart-canvas--standard mt-3 rounded-[18px] border border-line bg-white/80"></div>
+                    <div id="turbineHeatmapText" class="soft-panel mt-3 rounded-[18px] px-4 py-3 text-sm leading-7 text-ink/72"></div>
+                  </div>
+                </div>
+              </div>
+            </article>
+
+            <article class="section-shell min-w-0 rounded-[30px] p-5 lg:col-span-2 lg:col-start-1 lg:row-start-4">
               <div>
                 <h2 class="mt-2 text-2xl font-semibold">结果曲线</h2>
                 <p class="mt-2 text-sm text-ink/58">
@@ -890,38 +965,6 @@
                   </div>
                   <div id="gateChart" class="chart-canvas chart-canvas--compact mt-2"></div>
                   <div id="gateInterpretation" class="soft-panel mt-3 rounded-[18px] px-4 py-3 text-sm leading-7 text-ink/72"></div>
-                </div>
-                <div id="couplingComparisonPanel" class="soft-panel rounded-[24px] p-4">
-                  <h3 class="text-base font-semibold">水位-流量联动对比</h3>
-                  <p class="mt-1 text-sm text-ink/62">用于快速确认同一断面内水位与流量的同步或滞后关系。</p>
-                  <div id="couplingComparisonChart" class="chart-canvas chart-canvas--standard mt-3 rounded-[18px] border border-line bg-white/80"></div>
-                  <div id="couplingComparisonText" class="soft-panel mt-3 rounded-[18px] px-4 py-3 text-sm leading-7 text-ink/72"></div>
-                </div>
-                <div id="stationPowerPanel" class="soft-panel rounded-[24px] p-4">
-                  <h3 class="text-base font-semibold">梯级电站来流-出力对比</h3>
-                  <p class="mt-1 text-sm text-ink/62">用于把站级来流代理与总出力过程放到同一视图中复核。</p>
-                  <div id="stationPowerChart" class="chart-canvas chart-canvas--standard mt-3 rounded-[18px] border border-line bg-white/80"></div>
-                  <div id="stationPowerText" class="soft-panel mt-3 rounded-[18px] px-4 py-3 text-sm leading-7 text-ink/72"></div>
-                </div>
-                <div id="stationCompositionPanel" class="soft-panel rounded-[24px] p-4">
-                  <h3 class="text-base font-semibold">梯级总出力构成</h3>
-                  <p class="mt-1 text-sm text-ink/62">用于直观看各电站在总发电任务中的分工、接力与退让关系。</p>
-                  <div id="stationCompositionChart" class="chart-canvas chart-canvas--standard mt-3 rounded-[18px] border border-line bg-white/80"></div>
-                  <div id="stationCompositionText" class="soft-panel mt-3 rounded-[18px] px-4 py-3 text-sm leading-7 text-ink/72"></div>
-                </div>
-                <div id="turbineHeatmapPanel" class="soft-panel rounded-[24px] p-4">
-                  <h3 class="text-base font-semibold">机组分组堆叠面积图</h3>
-                  <p class="mt-1 text-sm text-ink/62">用于从机组层面直观看主力承担、轮换接力与负荷集中度。</p>
-                  <div class="curve-filter-panel mt-2 flex flex-col gap-2">
-                    <div class="curve-filter-row">
-                      <select id="turbineHeatmapStationSelect" class="shrink-0 rounded-lg border border-line px-3 py-1.5 text-xs text-ink/72 focus:outline-primary"></select>
-                      <div id="turbineHeatmapStationHint" class="curve-search-input flex items-center rounded-lg border border-line px-3 py-1.5 text-xs text-ink/62">
-                        按站点切换后，仅展示当前站点机组的堆叠构成与站内总出力。
-                      </div>
-                    </div>
-                  </div>
-                  <div id="turbineHeatmapChart" class="chart-canvas chart-canvas--standard mt-3 rounded-[18px] border border-line bg-white/80"></div>
-                  <div id="turbineHeatmapText" class="soft-panel mt-3 rounded-[18px] px-4 py-3 text-sm leading-7 text-ink/72"></div>
                 </div>
               </div>
             </article>
@@ -2511,6 +2554,96 @@
         return lines.join("<br>");
       }
 
+      function getComparisonEventMarkers(payload) {
+        const markers = Array.isArray(payload?.eventMarkers) && payload.eventMarkers.length
+          ? payload.eventMarkers
+          : (reportData.scenarioEvents?.items || []);
+        return markers
+          .map((item) => {
+            const step = normalizeStepValue(item?.step);
+            if (!Number.isFinite(step)) return null;
+            return {
+              name: item?.name || item?.eventName || "工况事件",
+              step,
+              scheduledTime: item?.scheduledTime || "",
+            };
+          })
+          .filter(Boolean);
+      }
+
+      function buildEventMarkLine(markers) {
+        if (!markers.length) return undefined;
+        return {
+          silent: true,
+          symbol: ["none", "none"],
+          label: {
+            show: true,
+            position: "insideEndTop",
+            distance: 6,
+            color: "rgba(180, 139, 69, 0.92)",
+            fontSize: 10,
+            formatter: ({ data }) => data?.name || "事件",
+          },
+          lineStyle: {
+            color: "rgba(180, 139, 69, 0.72)",
+            type: "dashed",
+            width: 1.4,
+          },
+          data: markers.map((item) => ({
+            name: item.name,
+            xAxis: item.step,
+            tooltip: {
+              formatter: () => {
+                const timeText = item.scheduledTime ? `<br>${escapeHtml(item.scheduledTime)}` : "";
+                return `<b>${escapeHtml(item.name)}</b><br>步号 ${escapeHtml(String(item.step))}${timeText}`;
+              },
+            },
+          })),
+        };
+      }
+
+      function renderComparisonDecisionSummary() {
+        const section = document.getElementById("comparisonDecisionSection");
+        const cardsEl = document.getElementById("comparisonDecisionSummaryCards");
+        const narrativeEl = document.getElementById("comparisonDecisionNarrative");
+        const highlightsEl = document.getElementById("comparisonResponseHighlights");
+        const summary = reportData.comparisonDecisionSummary || {};
+        if (!section || !cardsEl || !narrativeEl || !highlightsEl) return;
+        if (!summary.available) {
+          section.classList.add("hidden");
+          return;
+        }
+        cardsEl.innerHTML = (summary.cards || [])
+          .map(
+            (item) => `
+              <article class="metric-card flex min-h-[148px] flex-col justify-between rounded-[20px] px-5 py-4">
+                <p class="text-[13px] font-semibold tracking-[0.04em] text-primary/74">${escapeHtml(item.label || "-")}</p>
+                <p class="mt-3 text-[1.15rem] font-semibold leading-8 text-ink">${escapeHtml(item.value || "-")}</p>
+                <p class="mt-2 text-[13px] leading-6 text-ink/56">${escapeHtml(item.hint || "")}</p>
+              </article>
+            `
+          )
+          .join("");
+        narrativeEl.innerHTML = `<p>${localizeTermText(summary.narrative || summary.summary || "当前已形成水动力响应与 MPC 调度对照摘要。")}</p>`;
+        const responseHighlights = summary.responseHighlights || [];
+        highlightsEl.innerHTML = responseHighlights.length
+          ? responseHighlights
+              .map(
+                (item) => `
+                  <article class="rounded-[16px] border border-line/70 bg-white/76 px-3 py-3">
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                      <h5 class="font-medium text-primary">${escapeHtml(item.eventName || "工况事件")}</h5>
+                      <span class="text-xs text-ink/56">${item.eventStep != null ? `步号 ${escapeHtml(String(item.eventStep))}` : "步号待补"}</span>
+                    </div>
+                    <p class="mt-2 text-[15px] leading-7 text-ink/78">${localizeTermText(item.responseText || item.summary || "")}</p>
+                    <p class="mt-2 text-ink/60">${localizeTermText(item.summary || "")}</p>
+                  </article>
+                `
+              )
+              .join("")
+          : `<div class="rounded-[16px] border border-dashed border-line/80 bg-white/60 px-3 py-3 text-ink/60">当前尚未提炼出可稳定复用的事件前后关键响应摘要。</div>`;
+      }
+
       function renderCouplingComparisonChart(chart, payload) {
         const sections = payload?.sections || [];
         const series = [];
@@ -2525,6 +2658,10 @@
             })
           );
         });
+        const eventMarkLine = buildEventMarkLine(getComparisonEventMarkers(payload));
+        if (eventMarkLine && series.length) {
+          series[0].markLine = eventMarkLine;
+        }
         const xValues = series.flatMap((item) => item.data.map((point) => point[0]));
         const levelValues = series.filter((item) => item.yAxisIndex === 0).flatMap((item) => item.data.map((point) => point[1]));
         const flowValues = series.filter((item) => item.yAxisIndex === 1).flatMap((item) => item.data.map((point) => point[1]));
@@ -2605,6 +2742,10 @@
             })
           );
         });
+        const eventMarkLine = buildEventMarkLine(getComparisonEventMarkers(payload));
+        if (eventMarkLine && series.length) {
+          series[0].markLine = eventMarkLine;
+        }
         const xValues = series.flatMap((item) => item.data.map((point) => point[0]));
         const flowValues = series.filter((item) => item.yAxisIndex === 0).flatMap((item) => item.data.map((point) => point[1]));
         const powerValues = series.filter((item) => item.yAxisIndex === 1).flatMap((item) => item.data.map((point) => point[1]));
@@ -2942,10 +3083,12 @@
       }
 
       function renderComparisonPanels() {
+        const comparisonSection = document.getElementById("comparisonDecisionSection");
         const couplingPanel = document.getElementById("couplingComparisonPanel");
         const stationPowerPanel = document.getElementById("stationPowerPanel");
         const stationCompositionPanel = document.getElementById("stationCompositionPanel");
         const turbineHeatmapPanel = document.getElementById("turbineHeatmapPanel");
+        const comparisonSummary = reportData.comparisonDecisionSummary || {};
         const couplingInfo = reportData.chartInterpretations?.coupling || {};
         const stationPowerInfo = reportData.chartInterpretations?.stationPower || {};
         const stationCompositionInfo = reportData.chartInterpretations?.stationComposition || {};
@@ -2958,6 +3101,10 @@
         const stationPowerText = document.getElementById("stationPowerText");
         const stationCompositionText = document.getElementById("stationCompositionText");
         const turbineHeatmapText = document.getElementById("turbineHeatmapText");
+
+        if (comparisonSection && !comparisonSummary.available) {
+          comparisonSection.classList.add("hidden");
+        }
 
         if (couplingPanel) {
           if (couplingInfo.available === false || !(couplingChartData.sections || []).length) {
@@ -2990,6 +3137,7 @@
             turbineHeatmapText.innerHTML = `<p>${localizeTermText(turbineHeatmapInfo.analysis || "已生成机组分组堆叠面积图。")}</p>`;
           }
         }
+        renderComparisonDecisionSummary();
       }
 
       function renderCharts() {
