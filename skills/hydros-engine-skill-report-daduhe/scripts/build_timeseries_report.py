@@ -223,10 +223,12 @@ def fetch_scenario_metadata(scenario_yaml_url: str) -> dict[str, Any] | None:
 
 
 def cache_objects_yaml(data_dir: Path, objects_yaml_url: str | None) -> Path | None:
+    target_path = data_dir / "objects.yaml"
+    # 如果 data 目录已有 objects.yaml，直接复用
+    if target_path.exists() and target_path.stat().st_size > 1000:
+        return target_path
     if not objects_yaml_url:
         return None
-
-    target_path = data_dir / "objects.yaml"
     local_path = Path(objects_yaml_url).expanduser()
     if local_path.exists():
         if local_path.resolve() != target_path.resolve():
@@ -383,10 +385,17 @@ def build_metric_series(df: pd.DataFrame, metric: str, excluded_steps: set[int] 
             item["minValue"] = round_number(ordered["value"].min())
         series.append(item)
 
+    def _safe_str(v):
+        if v is None:
+            return ""
+        if isinstance(v, float) and math.isnan(v):
+            return ""
+        return str(v)
+
     if sort_key_func:
-        series.sort(key=lambda item: (item["objectType"], sort_key_func(item["name"])))
+        series.sort(key=lambda item: (_safe_str(item["objectType"]), sort_key_func(_safe_str(item["name"]))))
     else:
-        series.sort(key=lambda item: (item["objectType"], item["name"]))
+        series.sort(key=lambda item: (_safe_str(item["objectType"]), _safe_str(item["name"])))
     return series
 
 
@@ -580,6 +589,7 @@ def select_turbine_output_rows(df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame(columns=df.columns)
 
     masks: list[pd.Series] = []
+    object_name = df["object_name"].fillna("").astype(str) if "object_name" in df.columns else pd.Series("", index=df.index)
     if "device_type" in df.columns and "command_type" in df.columns:
         masks.append(
             (df["device_type"].fillna("").astype(str) == "Turbine")
@@ -590,6 +600,10 @@ def select_turbine_output_rows(df: pd.DataFrame) -> pd.DataFrame:
             (df["object_type"].fillna("").astype(str) == "Turbine")
             & (df["metrics_code"].fillna("").astype(str) == "output_power")
         )
+        masks.append(
+            (df["metrics_code"].fillna("").astype(str) == "output_power")
+            & object_name.str.contains("水轮机", na=False)
+        )
 
     if not masks:
         return pd.DataFrame(columns=df.columns)
@@ -597,7 +611,10 @@ def select_turbine_output_rows(df: pd.DataFrame) -> pd.DataFrame:
     mask = masks[0].copy()
     for item in masks[1:]:
         mask = mask | item
-    return df[mask].copy()
+    result = df[mask].copy()
+    if "object_type" in result.columns:
+        result.loc[result["object_type"].fillna("").astype(str) == "", "object_type"] = "Turbine"
+    return result
 
 
 def infer_station_name_from_turbine(turbine_name: str) -> str | None:
