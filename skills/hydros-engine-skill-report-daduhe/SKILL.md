@@ -114,16 +114,12 @@ description: |
 - “使用了正确 HTML 模板”不等于“形成了正式报告”。正式报告必须同时满足“模板来自 `assets/hydros-report-template/index.html`”和“底层数据来自当前 `biz_scene_instance_id` 的完整结果文件”这两个条件；任一条件不满足，都只能算未完成正式交付。
 - HTML 正式报告应尽量包含结果曲线图产物和渠道纵剖面图；若 `chart1_water_level.png`、`chart2_water_flow.png`、`chart4_gate_opening.png`、`chart5_disturbance_flow.png`、`chart7_longitudinal_profile.png` 中有缺失，仍可交付 HTML，但必须在报告正文里显式写明缺失项、缺失原因和影响范围，不能把缺图问题只留在聊天回复里解释。
 - 正式 HTML 报告生成完成后，默认先交付本地 `simulation_report.html`。如当前环境提供并验证了报告上传工具或 API，再上传并把接口返回结果作为交付结果的一部分；不要继续使用旧 `hydroos.cn` 匿名上传地址作为默认动作。
-- 当前报告链路中，`https://api.hydroos.pub/openapi/engine/api/v1/file/anonymous/upload/<biz_scene_instance_id>` 是 multipart 上传入口；上传成功后必须使用接口 `data` 字段返回的 `https://s3.hydroos.pub/report/...` 作为最终报告访问地址。不要把 API 接收路径机械替换到 `s3.hydroos.pub`，S3 域名只用于访问已落盘的报告对象。
+- 当前报告上传入口为 `/engine/api/v1/report/uploadReport`，使用 multipart 的 `file` 字段和 `biz_scene_instance_id` 查询参数。读取成功响应中的访问地址，不根据 API 入口拼接对象存储地址。
 - 如果远端上传失败，明确报告“本地报告生成成功，远端上传失败”和接口错误，不要伪装成本地报告失败。
-- 直传命令模板如下。`Content-Type: multipart/form-data; boundary=...` 由 `curl --form` 自动生成，通常不要手写固定 boundary，避免请求头与 multipart 请求体不一致：
+- 上传脚本从环境变量读取入口和令牌，并拒绝重定向：
 
     ```bash
-    # 示例：仅在已确认当前环境存在可用上传接口时使用。
-    curl --location --request POST \
-      "https://api.hydroos.pub/openapi/engine/api/v1/file/anonymous/upload/<biz_scene_instance_id>" \
-      --header "Accept: */*" \
-      --form "file=@\"output/<biz_scene_instance_id>/report/simulation_report.html\""
+    python3 scripts/upload_report.py <biz_scene_instance_id> output/<biz_scene_instance_id>/report/simulation_report.html
     ```
 
 ## 200060 全流程兜底清单
@@ -418,14 +414,10 @@ INIT -> WAITING_AGENTS -> READY -> STEPPING -> COMPLETED
    - **上传命令示例**：
 
      ```bash
-     # 仅在当前环境确认该上传接口可用时执行。
-     curl --location --request POST \
-       "https://api.hydroos.pub/openapi/engine/api/v1/file/anonymous/upload/<biz_scene_instance_id>" \
-       --header "Accept: */*" \
-       --form "file=@\"output/<biz_scene_instance_id>/report/simulation_report.html\""
+     python3 scripts/upload_report.py <biz_scene_instance_id> output/<biz_scene_instance_id>/report/simulation_report.html
      ```
 
-   - **上传约束**：如果 OpenAPI 返回 `ACCESS_UNAUTHORIZED`、网络错误或其他失败响应，应明确报告“本地报告生成成功，远端上传失败”，并给出接口返回错误。默认上传成功时，还要验证 `data` 字段是 `https://s3.hydroos.pub/report/...`；最终只交付这个 S3 访问地址，不把 `api.hydroos.pub` 上传入口当作报告链接。
+   - **上传约束**：统一业务接口返回认证、权限或网络错误时，说明“本地报告生成成功，远端上传失败”。成功后检查返回结果中的访问地址，不把上传入口当作报告链接，也不假设公网域名在客户环境可用。
    - **失败处理**：如果 HTML 已生成但上传失败，要明确区分“本地报告生成成功”和“远端上传失败”，并把失败原因单独报告；不要伪装成整份报告都失败
 
 6. **模板选择**：
@@ -481,4 +473,9 @@ total_steps
 received_hydro_events
 default_render_objects
 ```
+
+
+### 统一 API 认证
+
+上传使用环境变量 `HYDROS_ENGINE_BASE_URL` 和 `HYDROS_ACCESS_TOKEN`。入口必须为 HTTPS，可为公网域名或私有 IP+端口；需要 `report:write`、应用场景授权及任务归属权限。旧匿名上传入口已删除，不再接受 MCP Key。私有 CA 使用 Python 的系统信任配置，不关闭证书验证。
 
