@@ -92,16 +92,33 @@ description: |
 - 需要完整版 HTML 报告、结果曲线展示或可直接打开的单文件页面时，优先复用 [assets/hydros-report-template/index.html](assets/hydros-report-template/index.html) 模板，并按当前脚本实现把真实 payload 内联到 `simulation_report.html`。
 - 当用户明确要“报告”“完整报告”“HTML 报告”“汇报页”时，不要先交付临时分析报告、手写摘要页或简版 HTML 作为最终产物；如果本地结果文件尚未就位，先完成 `get_timeseries_data -> get_export_status 轮询 -> resource_uri/下载地址 -> 落盘结果文件 -> build_timeseries_report.py`，再输出遵循模板的正式报告。
 - HTML 正式报告应尽量包含结果曲线图产物和渠道纵剖面图；若 `chart1_water_level.png`、`chart2_water_flow.png`、`chart4_gate_opening.png`、`chart5_disturbance_flow.png`、`chart7_longitudinal_profile.png` 中有缺失，仍可交付 HTML，但必须在报告正文里显式写明缺失项、缺失原因和影响范围，不能把缺图问题只留在聊天回复里解释。
-- 正式 HTML 报告生成完成后，默认先交付本地 `simulation_report.html`。如当前环境提供并验证了报告上传工具或 API，再上传并把接口返回结果作为交付结果的一部分；不要继续使用旧 `hydroos.cn` 匿名上传地址作为默认动作。
-- 如果远端上传失败，明确报告“本地报告生成成功，远端上传失败”和接口错误，不要伪装成本地报告失败。
-- 直传命令模板如下。`Content-Type: multipart/form-data; boundary=...` 由 `curl --form` 自动生成，通常不要手写固定 boundary，避免请求头与 multipart 请求体不一致：
+- 正式 HTML 报告生成完成后，默认先交付本地 `simulation_report.html`。上传仅使用当前环境的 `POST /engine/api/v1/report/uploadReport?biz_scene_instance_id=...`，不使用匿名上传接口。
+- 上传前须确认任务已有报告分析记录；仅生成本地 HTML 并不满足上传前置条件。成功响应的 `data` 是受鉴权的相对下载路径，应按当前环境 API 根地址解析；下载仍需 `report:read` 和任务授权，不能作为公开 S3 链接交付。
+- 上传需要当前环境的有效 `HYDROS_ACCESS_TOKEN`（Bearer），并由服务端校验 `report:write`、案例数据权限和任务归属；MCP token 不一定可用于此 API。缺少凭据或权限时仅交付本地报告，不回退匿名接口。
+- `HYDROS_ENGINE_BASE_URL` 必须由部署配置提供当前环境的可信 HTTPS API 根地址（不含 `/engine`）；不要把生产地址作为其他环境的默认值。凭据通过受控运行环境安全注入，不写入命令历史、文档、报告或日志，不开启 shell trace。
+- 直传命令模板如下。`file` 是 multipart 文件字段，`Content-Type` 和 boundary 由 `curl --form` 自动生成。保持 TLS 校验，不跟随重定向；响应必须为 2xx 且 `success=true`才可宣布上传成功。重定向、401/403、网络或其他 HTTP/业务失败都应保留本地报告并明确说明“本地报告生成成功，远端上传失败”，不要输出凭据。
 
     ```bash
-    # 示例：仅在已确认当前环境存在可用上传接口时使用。
-    curl --location --request POST \
-      "https://api.hydroos.pub/engine/api/v1/file/anonymous/upload/<biz_scene_instance_id>" \
-      --header "Accept: */*" \
-      --form "file=@\"output/<biz_scene_instance_id>/report/simulation_report.html\""
+    (
+      set +x
+      set -eu
+      : "${HYDROS_ENGINE_BASE_URL:?需要当前环境的 HTTPS API 根地址}"
+      : "${HYDROS_ACCESS_TOKEN:?缺少上传凭据，仅交付本地报告}"
+      : "${BIZ_SCENE_INSTANCE_ID:?需要报告所属任务 ID}"
+      case "$HYDROS_ENGINE_BASE_URL" in
+        https://?*) ;;
+        *) echo "上传地址必须为 HTTPS" >&2; exit 1 ;;
+      esac
+      case "$BIZ_SCENE_INSTANCE_ID" in
+        *[!A-Za-z0-9_-]*) echo "任务 ID 格式无效" >&2; exit 1 ;;
+      esac
+      printf 'Authorization: Bearer %s\n' "$HYDROS_ACCESS_TOKEN" |
+        curl --proto '=https' --fail-with-body --silent --show-error --request POST \
+          "${HYDROS_ENGINE_BASE_URL%/}/engine/api/v1/report/uploadReport?biz_scene_instance_id=${BIZ_SCENE_INSTANCE_ID}" \
+          --header @- --header "Accept: application/json" \
+          --form "file=@\"output/${BIZ_SCENE_INSTANCE_ID}/report/simulation_report.html\"" \
+          --write-out '\nHTTP %{http_code}\n'
+    )
     ```
 
 ## 资源导航
@@ -371,19 +388,8 @@ INIT -> WAITING_AGENTS -> READY -> STEPPING -> COMPLETED
    - **Markdown 报告**：图文并茂，每张图表配套文字分析
    - **目录结构**：统一落盘到 `output/<biz_scene_instance_id>/`；其中 `report/` 存放报告，`charts/` 存放图表，`data/` 存放结果文件、`objects.yaml` 和分析中间文件
    - **数据验证**：比较期望与实际的时长/点数，不一致时在报告中说明
-   - **上传交付**：当 HTML 正式报告生成完成后，默认先交付本地 `simulation_report.html`。如当前环境提供并验证了报告上传工具或 API，再上传并把接口返回结果作为交付结果的一部分。
-   - **上传命令示例**：
-
-     ```bash
-     # 仅在当前环境确认该上传接口可用时执行。
-     curl --location --request POST \
-       "https://api.hydroos.pub/engine/api/v1/file/anonymous/upload/<biz_scene_instance_id>" \
-       --header "Accept: */*" \
-       --form "file=@\"output/<biz_scene_instance_id>/report/simulation_report.html\""
-     ```
-
-   - **上传约束**：如果 OpenAPI 返回 `ACCESS_UNAUTHORIZED`、网络错误或其他失败响应，应明确报告“本地报告生成成功，远端上传失败”，并给出接口返回错误
-   - **失败处理**：如果 HTML 已生成但上传失败，要明确区分“本地报告生成成功”和“远端上传失败”，并把失败原因单独报告；不要伪装成整份报告都失败
+   - **上传交付**：先交付本地 `simulation_report.html`；具备当前环境的有效凭据及报告写入权限时，按上文“直传命令模板”上传，沿用同一任务 ID。
+   - **上传约束**：服务端校验 `report:write`、案例数据权限和任务归属。缺少凭据不上传；401/403、重定向、网络或其他 HTTP/业务失败均保留本地报告，明确区分“本地报告生成成功”和“远端上传失败”，不回退匿名接口或关闭 TLS 校验。
 
 6. **模板选择**：
    - 用户要”报告页””汇报页””结果曲线” → 报告模板

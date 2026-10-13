@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-上传 Hydros HTML 报告并输出 S3 可访问链接。
+上传 Hydros HTML 报告并输出受权限保护的报告下载地址。
 
 通过当前环境的统一业务接口上传。HYDROS_ENGINE_BASE_URL 指定 HTTPS 入口，
 HYDROS_ACCESS_TOKEN 提供标准访问令牌；需要 report:write 和该任务的资源权限。

@@ -479,3 +479,5 @@ default_render_objects
 
 上传使用环境变量 `HYDROS_ENGINE_BASE_URL` 和 `HYDROS_ACCESS_TOKEN`。入口必须为 HTTPS，可为公网域名或私有 IP+端口；需要 `report:write`、应用场景授权及任务归属权限。旧匿名上传入口已删除，不再接受 MCP Key。私有 CA 使用 Python 的系统信任配置，不关闭证书验证。
 
+
+上传前，该任务需已有报告分析记录；仅生成本地 HTML 不代表满足上传条件。成功响应需确认 `success=true`，`data` 可能是相对下载路径；按当前环境 API 入口解析，下载仍需 `report:read` 和任务资源授权，不作为匿名 S3 公链交付。
